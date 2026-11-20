@@ -3,6 +3,10 @@ use std::{env, fs};
 
 fn main() {
     limits();
+    // tauri-build embeds icons/icon.ico in the .exe and generate_context!
+    // embeds the window icon, but neither watches the icon files: without
+    // this, an icon-only change keeps the old icon until a clean build.
+    println!("cargo:rerun-if-changed=icons");
     tauri_build::build()
 }
 

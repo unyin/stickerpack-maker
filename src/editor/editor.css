@@ -35,6 +35,8 @@
 .editor-side-input {
   width: 72px;
   padding: 6px 8px;
+  background: var(--panel);
+  color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
   font: inherit;
@@ -51,7 +53,7 @@
 }
 
 .editor-dirty {
-  color: var(--accent);
+  color: var(--accent-ink);
   font-size: 14px;
 }
 
@@ -131,6 +133,11 @@
   font-size: 11px;
   text-transform: uppercase;
   opacity: 0.7;
+}
+
+/* Full opacity on the selected row: 0.7 drops accent-text on accent below 4.5:1. */
+.editor-layers-list li.selected .editor-layer-kind {
+  opacity: 1;
 }
 
 .editor-layer-name {

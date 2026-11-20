@@ -1,6 +1,7 @@
 import "./styles.css";
 import { getAppState } from "./api";
 import { renderShell } from "./shell";
+import { initTheme } from "./theme";
 import { renderFirstRun } from "./views/first-run";
 import { el, errorMessage } from "./ui";
 
@@ -34,4 +35,5 @@ async function boot(): Promise<void> {
   }
 }
 
+initTheme();
 void boot();

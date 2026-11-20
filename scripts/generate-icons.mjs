@@ -1,6 +1,7 @@
 // Generates the Tauri app icons in src-tauri/icons (PNG set + Windows .ico +
-// macOS .icns) from a tiny procedural design: an indigo rounded square with a
-// white sticker and a folded corner. No image dependencies; run with:
+// macOS .icns) from the owner-approved procedural design (SPM-14): a
+// Telegram-blue rounded square with a white circular sticker peeling at the
+// top-right corner. No image dependencies; run with:
 //   node scripts/generate-icons.mjs   (or: bun run icons)
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -61,23 +62,33 @@ function encodePng(size, pixels) {
 
 // --- Design -----------------------------------------------------------------
 
+// Telegram blue: the icon background, also what shows through the peel gap.
+const BLUE = [42, 171, 238];
+
 // Returns [r, g, b] for a sample point, or null when outside the icon shape.
+// Owner-approved design (SPM-14): Telegram-blue rounded square, white circular
+// die-cut sticker, top-right corner peeled up. The removed corner shows the
+// background; its mirror image across the fold line x - y = k is the pale
+// underside flap lying over the sticker face.
 function sample(x, y, size) {
   // Rounded-square background covering the full canvas.
   const r = 0.2 * size;
-  const cx = Math.min(Math.max(x, r), size - r);
-  const cy = Math.min(Math.max(y, r), size - r);
-  const dx = x - cx;
-  const dy = y - cy;
+  const bx = Math.min(Math.max(x, r), size - r);
+  const by = Math.min(Math.max(y, r), size - r);
+  const dx = x - bx;
+  const dy = y - by;
   if (dx * dx + dy * dy > r * r) return null;
-  // White sticker circle with a folded bottom-right corner.
-  const sx = x - 0.5 * size;
-  const sy = y - 0.47 * size;
+  const cx = 0.5 * size;
+  const cy = 0.47 * size;
   const sr = 0.3 * size;
-  if (sx * sx + sy * sy <= sr * sr) {
-    return x + y > 1.02 * size ? [226, 226, 244] : [255, 255, 255];
+  const k = 0.33 * size;
+  const inSticker = (x - cx) ** 2 + (y - cy) ** 2 <= sr * sr;
+  if (inSticker && x - y > k) return BLUE; // peeled-away corner: the gap shows the background
+  if (x - y < k && (y + k - cx) ** 2 + (x - k - cy) ** 2 <= sr * sr) {
+    return [214, 233, 245]; // underside flap
   }
-  return [91, 91, 214];
+  if (inSticker) return [255, 255, 255];
+  return BLUE;
 }
 
 function render(size) {

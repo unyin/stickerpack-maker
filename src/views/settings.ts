@@ -8,6 +8,12 @@ import {
   type AppState,
 } from "../api";
 import { ask } from "@tauri-apps/plugin-dialog";
+import {
+  getThemePreference,
+  parseThemePreference,
+  setThemePreference,
+  THEME_CHOICES,
+} from "../theme";
 import { clear, el, withMessage } from "../ui";
 
 /**
@@ -97,6 +103,33 @@ export function renderSettings(
           "Re-pointing expects an intact Library (database included) — for example a moved or restored Library. Select the " +
             LIBRARY_DB_FILE_NAME +
             " file inside the Library folder; the app uses its folder. A fresh Library can be created in any empty folder. There is no auto-migration, and metadata is never reconstructed from orphaned image files.",
+        ),
+      ),
+      el(
+        "div",
+        { class: "card" },
+        el("label", { class: "field-label" }, "Appearance"),
+        el(
+          "select",
+          {
+            class: "theme-select",
+            onchange: (event) => {
+              const value = (event.target as HTMLSelectElement).value;
+              setThemePreference(parseThemePreference(value));
+            },
+          },
+          ...THEME_CHOICES.map(({ value, label }) =>
+            el(
+              "option",
+              { value, selected: getThemePreference() === value },
+              label,
+            ),
+          ),
+        ),
+        el(
+          "p",
+          { class: "muted" },
+          "The app follows your system dark/light setting by default. Choose Light or Dark to override it on this machine.",
         ),
       ),
     ),
