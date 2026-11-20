@@ -5,7 +5,7 @@ import type { RgbaImage } from "../src/editor/model/image";
 import {
   addRasterLayer,
   addTextLayer,
-  contentBounds,
+  contentBounds as modelContentBounds,
   deleteLayers,
   fitToBox,
   IDENTITY,
@@ -15,6 +15,7 @@ import {
   newDocument,
   nextLayerId,
   placedBounds,
+  resizeSideProblem,
   scaleLongestSide,
   setLayerImage,
   setTransform,
@@ -22,6 +23,13 @@ import {
 } from "../src/editor/model/document";
 import { History } from "../src/editor/model/history";
 import { EditorSession } from "../src/editor/model/session";
+
+/** Rasters only: these tests have no text layers to measure. */
+function contentBounds(doc: Doc) {
+  return modelContentBounds(doc, () => {
+    throw new Error("unexpected text layer");
+  });
+}
 
 function image(width: number, height: number, fill = 0): RgbaImage {
   return {
@@ -321,7 +329,7 @@ test("fit keeps rotation and works up and down", () => {
   const small = newDocument(image(300, 200), "small");
   const grown = fitToBox(small, contentBounds(small), 512);
   expect(grown.layers[0].transform.scaleX).toBeCloseTo(512 / 300);
-  expect(grown.layers[0].transform.y).toBeCloseTo((512 - 200 * (512 / 300)) / 2);
+  expect(grown.layers[0].transform.y).toBe(85); // whole pixel
   // A rotated layer: the group is measured by its rotated box and rotation stays.
   let doc = newDocument(image(100, 100), "base");
   doc = addRasterLayer(doc, image(400, 100), "bar", { ...IDENTITY, x: 300, y: 0, rotation: 90 });
@@ -373,14 +381,58 @@ test("scaling the longest side to 512 shrinks the group and the canvas becomes t
   expect(after.height).toBeCloseTo(256);
 });
 
-test("the canvas is whole pixels; a fractional side is centred within it", () => {
-  // 300x200 -> 512 x 341.33: canvas 512x341, content centred (-0.17 px).
+test("the short side rounds up so nothing is clipped, content at whole-pixel 0,0", () => {
+  // 300x200 -> 512 x 341.33: the short side rounds UP to 342 so nothing is
+  // clipped, and the content's top-left sits on a whole pixel.
   const doc = newDocument(image(300, 200), "base");
   const scaled = scaleLongestSide(doc, contentBounds(doc), 512);
-  expect([scaled.width, scaled.height]).toEqual([512, 341]);
+  expect([scaled.width, scaled.height]).toEqual([512, 342]);
   const after = contentBounds(scaled);
-  expect(after.y + after.height / 2).toBeCloseTo(341 / 2);
-  expect(after.x).toBeCloseTo(0);
+  expect(after.x).toBe(0);
+  expect(after.y).toBe(0);
+  expect(after.height).toBeCloseTo(341.33, 1);
+  expect(after.height).toBeLessThanOrEqual(scaled.height);
+  expect(after.width).toBeCloseTo(512);
+});
+
+test("fit places the content's top-left on whole pixels", () => {
+  const doc = newDocument(image(300, 200), "base");
+  const fitted = fitToBox(doc, contentBounds(doc), 512);
+  expect(fitted.layers[0].transform.y).toBe(85); // (512 - 341.33) / 2 = 85.33 -> 85
+  expect(fitted.layers[0].transform.x).toBe(0);
+});
+
+test("applying any sizing tool twice is a no-op (no undo step)", () => {
+  const tools = [
+    (d: Doc) => fitToBox(d, contentBounds(d), 512),
+    (d: Doc) => scaleLongestSide(d, contentBounds(d), 512),
+    (d: Doc) => scaleLongestSide(d, contentBounds(d), 333),
+  ];
+  for (const tool of tools) {
+    const once = tool(newDocument(image(300, 200), "base"));
+    expect(tool(once)).toBe(once);
+  }
+});
+
+test("resizeSideProblem accepts whole numbers 1 to 2000 only", () => {
+  expect(resizeSideProblem(1)).toBeNull();
+  expect(resizeSideProblem(2000)).toBeNull();
+  const text = "The longest side must be a whole number of pixels from 1 to 2000.";
+  for (const bad of [0, 2001, 1.5, NaN, -3]) expect(resizeSideProblem(bad)).toBe(text);
+  const doc = newDocument(image(10, 10), "b");
+  expect(() => scaleLongestSide(doc, contentBounds(doc), 0)).toThrow(text);
+});
+
+test("contentBounds includes text layers via the supplied measurement", () => {
+  let doc = newDocument(image(100, 100), "base");
+  doc = addTextLayer(doc, { text: "hi", fontFamily: "Arial", fontSize: 20, color: "#000" });
+  const seen: string[] = [];
+  const bounds = modelContentBounds(doc, (layer) => {
+    seen.push(layer.id);
+    return { x: 50, y: -10, width: 200, height: 30 };
+  });
+  expect(seen).toEqual(["layer-2"]);
+  expect(bounds).toEqual({ x: 0, y: -10, width: 250, height: 110 });
 });
 
 test("free resize uses the entered longest side, up or down, for tall images too", () => {
@@ -404,4 +456,16 @@ test("scaling to the size the content already has changes nothing (no undo step)
   expect([s.doc.width, s.doc.height]).toEqual([256, 150]);
   s.undo();
   expect([s.doc.width, s.doc.height]).toEqual([512, 300]);
+});
+
+test("a scaled side within 1e-3 of a whole pixel snaps like the Rust merge (342.0005 -> 342)", () => {
+  const doc = newDocument(image(1024, 684), "base");
+  const squashed = setTransform(doc, doc.layers[0].id, {
+    ...IDENTITY,
+    scaleX: 0.5,
+    scaleY: 342.0005 / 684,
+  });
+  const scaled = scaleLongestSide(squashed, contentBounds(squashed), 512);
+  expect([scaled.width, scaled.height]).toEqual([512, 342]);
+  expect(scaleLongestSide(scaled, contentBounds(scaled), 512)).toBe(scaled);
 });

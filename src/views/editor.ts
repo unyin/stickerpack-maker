@@ -11,7 +11,7 @@ import {
   deleteLayers,
   fitToBox,
   IDENTITY,
-  MAX_RESIZE_SIDE,
+  resizeSideProblem,
   layerIndex,
   mergeLayers,
   moveLayer,
@@ -22,9 +22,9 @@ import {
   type Doc,
   type Rect,
 } from "../editor/model/document";
-import type { RgbaImage } from "../editor/model/image";
+import { MAX_SIDE, type RgbaImage } from "../editor/model/image";
 import { EditorSession } from "../editor/model/session";
-import { centeredPlacement, deleteBlocker, mergeBlocker, selectModeFor } from "../editor/view/geometry";
+import { centeredPlacement, deleteBlocker, mergeBlocker, selectModeFor, sizeToolBlocker, type SizeTool } from "../editor/view/geometry";
 import { EditorStage } from "../editor/view/stage";
 import { el, errorMessage, withMessage } from "../ui";
 
@@ -61,7 +61,7 @@ function buildEditor(): HTMLElement {
     class: "editor-side-input",
     type: "number",
     min: "1",
-    max: String(MAX_RESIZE_SIDE),
+    max: String(MAX_SIDE),
     step: "1",
     placeholder: "px",
     "aria-label": "Longest side in pixels",
@@ -76,12 +76,15 @@ function buildEditor(): HTMLElement {
 
   undoButton.title = "Undo (Ctrl+Z)";
   redoButton.title = "Redo (Ctrl+Y)";
-  fitButton.title =
+  const fitTitle =
     "Scale everything on the canvas together, as one image, so its longest side is 512 px; " +
     "the canvas becomes 512×512 with transparent padding";
-  longestButton.title =
+  const longestTitle =
     "Scale everything on the canvas together so its longest side is 512 px; the canvas becomes the image (no padding)";
-  resizeButton.title = `Scale everything on the canvas together so its longest side is the entered size (1–${MAX_RESIZE_SIDE} px)`;
+  const resizeTitle = `Scale everything on the canvas together so its longest side is the entered size (1–${MAX_SIDE} px)`;
+  fitButton.title = fitTitle;
+  longestButton.title = longestTitle;
+  resizeButton.title = resizeTitle;
   resetViewButton.title = "Zoom and centre the canvas in view (changes the view only)";
   sideInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") freeResize();
@@ -242,19 +245,17 @@ function buildEditor(): HTMLElement {
     }
   }
 
-  /** The free-resize value, or null when the field is empty or not a whole number in range. */
-  function enteredSide(): number | null {
-    const value = Number(sideInput.value);
-    return sideInput.value.trim() !== "" && Number.isInteger(value) && value >= 1 && value <= MAX_RESIZE_SIDE
-      ? value
-      : null;
+  /** The free-resize field as a number; NaN when empty (so the shared rule rejects it). */
+  function enteredSide(): number {
+    return sideInput.value.trim() === "" ? NaN : Number(sideInput.value);
   }
 
   /** Sizing tool 3 (SPEC §6): free resize, the entered value is the longest side. */
   function freeResize(): void {
     const side = enteredSide();
-    if (side === null) {
-      message.textContent = `Enter the longest side as a whole number of pixels from 1 to ${MAX_RESIZE_SIDE}.`;
+    const problem = resizeSideProblem(side);
+    if (problem) {
+      message.textContent = problem;
       return;
     }
     resizeWholeImage((doc, content) => scaleLongestSide(doc, content, side));
@@ -313,14 +314,19 @@ function buildEditor(): HTMLElement {
     const blocker = mergeBlocker(doc, current.selection);
     const deleteReason = deleteBlocker(doc, current.selection);
     addButton.disabled = busy;
-    // Disabled once the content already fills the 512 box, centred.
     // Each sizing tool is disabled when it would change nothing.
     const content = stage ? stage.contentBounds() : null;
-    const unchanged = (tool: (d: Doc, c: Rect) => Doc) => busy || !content || tool(doc, content) === doc;
-    fitButton.disabled = unchanged((d, c) => fitToBox(d, c, STICKER_SIDE));
-    longestButton.disabled = unchanged((d, c) => scaleLongestSide(d, c, STICKER_SIDE));
-    const side = enteredSide();
-    resizeButton.disabled = side === null || unchanged((d, c) => scaleLongestSide(d, c, side));
+    const entered = enteredSide();
+    const sizing: [HTMLButtonElement, SizeTool, string][] = [
+      [fitButton, "fit", fitTitle],
+      [longestButton, "longest", longestTitle],
+      [resizeButton, "free", resizeTitle],
+    ];
+    for (const [button, tool, action] of sizing) {
+      const reason = sizeToolBlocker(tool, doc, content, entered);
+      button.disabled = busy || reason !== null;
+      button.title = reason ?? action;
+    }
     sideInput.disabled = busy;
     resetViewButton.disabled = busy;
     closeButton.disabled = busy;

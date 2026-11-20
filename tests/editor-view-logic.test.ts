@@ -2,7 +2,7 @@
 // fitting, zooming, placement, merge eligibility, click modifiers.
 import { expect, test } from "bun:test";
 import type { RgbaImage } from "../src/editor/model/image";
-import { addRasterLayer, addTextLayer, newDocument } from "../src/editor/model/document";
+import { addRasterLayer, addTextLayer, fitToBox, newDocument, scaleLongestSide } from "../src/editor/model/document";
 import {
   centeredPlacement,
   deleteBlocker,
@@ -11,6 +11,7 @@ import {
   mergeBlocker,
   MIN_ZOOM,
   selectModeFor,
+  sizeToolBlocker,
   zoomAround,
 } from "../src/editor/view/geometry";
 
@@ -90,4 +91,23 @@ test("delete needs a selection and must leave at least one layer, and says why n
   );
   const single = newDocument(image(4, 4), "only");
   expect(deleteBlocker(single, [single.layers[0].id])).toContain("at least one layer");
+});
+
+test("sizeToolBlocker explains each disabled sizing tool", () => {
+  const doc = newDocument(image(300, 200), "b");
+  const content = { x: 0, y: 0, width: 300, height: 200 };
+  expect(sizeToolBlocker("fit", doc, content, NaN)).toBeNull();
+  expect(sizeToolBlocker("longest", doc, content, NaN)).toBeNull();
+  expect(sizeToolBlocker("free", doc, content, 400)).toBeNull();
+  expect(sizeToolBlocker("free", doc, content, NaN)).toBe(
+    "The longest side must be a whole number of pixels from 1 to 2000.",
+  );
+  expect(sizeToolBlocker("free", doc, content, 300)).toBe("The image's longest side is already 300 px.");
+  const fitted = fitToBox(doc, content, 512);
+  const filled = { x: 0, y: 85, width: 512, height: 512 * (200 / 300) };
+  expect(sizeToolBlocker("fit", fitted, filled, NaN)).toBe("The image already fills 512×512.");
+  const scaled = scaleLongestSide(doc, content, 512);
+  const placed = { x: 0, y: 0, width: 512, height: 512 * (200 / 300) };
+  expect(sizeToolBlocker("longest", scaled, placed, NaN)).toBe("The image's longest side is already 512 px.");
+  expect(sizeToolBlocker("fit", doc, null, NaN)).toBe("There is nothing to resize.");
 });

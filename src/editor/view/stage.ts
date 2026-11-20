@@ -3,7 +3,7 @@
 // lacks, so undo/redo and save never read from Konva.
 import Konva from "konva";
 import type { RgbaImage } from "../model/image";
-import { setTransform, unionRect, type Doc, type Layer, type Rect, type Transform } from "../model/document";
+import { contentBounds, setTransform, type Doc, type Layer, type Rect, type Transform } from "../model/document";
 import type { EditorSession } from "../model/session";
 import { fitView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
 
@@ -145,15 +145,14 @@ export class EditorStage {
 
   /**
    * The whole image's bounds in document pixels: the union of every layer's
-   * on-screen box, measured the way the Transformer measures a selection
-   * (text included, rotation included). This is what "Fit to 512×512"
-   * scales as one group.
+   * on-screen box. Raster layers are measured by the model's placedBounds;
+   * only text is measured by Konva. All three sizing tools scale this.
    */
   contentBounds(): Rect {
-    return unionRect(
-      [...this.nodes.values()].map((node) =>
-        node.getClientRect({ relativeTo: this.content, skipShadow: true, skipStroke: true }),
-      ),
+    return contentBounds(this.session.doc, (layer) =>
+      this.nodes
+        .get(layer.id)!
+        .getClientRect({ relativeTo: this.content, skipShadow: true, skipStroke: true }),
     );
   }
 

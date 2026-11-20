@@ -1,6 +1,16 @@
 // Pure decisions behind the Editor view: no Konva, no DOM, unit-tested.
 import type { RgbaImage } from "../model/image";
-import { IDENTITY, KEEP_ONE_LAYER, type Doc, type Transform } from "../model/document";
+import {
+  fitToBox,
+  IDENTITY,
+  KEEP_ONE_LAYER,
+  resizeSideProblem,
+  scaleLongestSide,
+  STICKER_SIDE,
+  type Doc,
+  type Rect,
+  type Transform,
+} from "../model/document";
 import type { SelectMode } from "../model/session";
 
 export const MIN_ZOOM = 0.05;
@@ -81,6 +91,32 @@ export function deleteBlocker(doc: Doc, selection: readonly string[]): string | 
   if (selection.length === 0) return "Select the layers to delete.";
   if (selection.length >= doc.layers.length) return KEEP_ONE_LAYER;
   return null;
+}
+
+export type SizeTool = "fit" | "longest" | "free";
+
+/**
+ * Why a sizing tool is disabled, or null when it can run: the entered value
+ * is invalid (free resize only) or the tool would change nothing. `entered`
+ * is the free-resize field as a number (NaN when empty); `content` is null
+ * while nothing can be measured.
+ */
+export function sizeToolBlocker(
+  tool: SizeTool,
+  doc: Doc,
+  content: Rect | null,
+  entered: number,
+): string | null {
+  if (tool === "free") {
+    const problem = resizeSideProblem(entered);
+    if (problem) return problem;
+  }
+  if (!content) return "There is nothing to resize.";
+  if (tool === "fit") {
+    return fitToBox(doc, content, STICKER_SIDE) === doc ? `The image already fills ${STICKER_SIDE}×${STICKER_SIDE}.` : null;
+  }
+  const side = tool === "longest" ? STICKER_SIDE : entered;
+  return scaleLongestSide(doc, content, side) === doc ? `The image's longest side is already ${side} px.` : null;
 }
 
 /** Ctrl (Cmd on macOS) or Shift + click toggles a layer in or out of the selection. */

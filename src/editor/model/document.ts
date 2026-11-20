@@ -1,7 +1,7 @@
 // The Editor document (ADR-0005): an immutable value. Every operation
 // returns a new Doc and reuses every layer (and pixel buffer) it did not
 // change, so history can keep whole states cheaply. No Konva, no DOM.
-import type { RgbaImage } from "./image";
+import { MAX_SIDE, type RgbaImage } from "./image";
 
 /** Transform of a layer in document pixels; rotation in degrees (Konva's convention). */
 export interface Transform {
@@ -179,15 +179,16 @@ export function unionRect(rects: readonly Rect[]): Rect {
 }
 
 /**
- * The whole image's bounds: the union of every raster layer's on-screen
- * box, including parts beyond the canvas. Text layers have no intrinsic
- * size here — the view measures them (EditorStage.contentBounds), and that
- * measurement is what Fit uses.
+ * The whole image's bounds: the union of every layer's on-screen box,
+ * including parts beyond the canvas. Raster layers are computed here; text
+ * has no intrinsic size in the model, so `measureText` (the view's Konva
+ * measurement) supplies each text layer's box — one measure for the view
+ * and the tools.
  */
-export function contentBounds(doc: Doc): Rect {
+export function contentBounds(doc: Doc, measureText: (layer: TextLayer) => Rect): Rect {
   return unionRect(
-    doc.layers.flatMap((l) =>
-      l.kind === "raster" ? [placedBounds(l.image.width, l.image.height, l.transform)] : [],
+    doc.layers.map((l) =>
+      l.kind === "raster" ? placedBounds(l.image.width, l.image.height, l.transform) : measureText(l),
     ),
   );
 }
@@ -195,8 +196,21 @@ export function contentBounds(doc: Doc): Rect {
 /** Below this, two positions or sizes count as equal (float noise). */
 const EPSILON = 1e-6;
 
-/** Largest longest side free resize accepts: the Editor's 2000 px import cap (SPEC §6). */
-export const MAX_RESIZE_SIDE = 2000;
+/**
+ * Whole-pixel snapping: a bound within this of a whole pixel counts as that
+ * pixel. Matches `snap()` in src-tauri/src/editor/merge.rs, so a scaled side
+ * like 342.0005 gives a 342 canvas exactly as the Rust merge does (no
+ * spurious re-enabling of tools after a merge). It is deliberately coarser
+ * than EPSILON, which only absorbs float noise when detecting a no-op.
+ */
+const PIXEL_SNAP = 1e-3;
+
+/** Why `value` is not a valid free-resize longest side, or null when it is (SPEC §6). */
+export function resizeSideProblem(value: number): string | null {
+  return Number.isInteger(value) && value >= 1 && value <= MAX_SIDE
+    ? null
+    : `The longest side must be a whole number of pixels from 1 to ${MAX_SIDE}.`;
+}
 
 /**
  * Scale the whole image as ONE group — everything on the canvas, like
@@ -207,8 +221,10 @@ export const MAX_RESIZE_SIDE = 2000;
  * (no undo step).
  */
 function scaleGroup(doc: Doc, content: Rect, factor: number, width: number, height: number): Doc {
-  const padX = (width - content.width * factor) / 2;
-  const padY = (height - content.height * factor) / 2;
+  // The content's top-left lands on whole pixels (PIXEL_SNAP keeps
+  // noise like -1e-14 from flooring to -1, so re-applying is a no-op).
+  const padX = Math.floor((width - content.width * factor) / 2 + PIXEL_SNAP);
+  const padY = Math.floor((height - content.height * factor) / 2 + PIXEL_SNAP);
   const alreadyThere =
     doc.width === width &&
     doc.height === height &&
@@ -251,15 +267,16 @@ export function fitToBox(doc: Doc, content: Rect, box: number = STICKER_SIDE): D
  * Sizing tools 2 and 3 (SPEC §6): scale the whole image so its longest side
  * is `side` px — 512 for tool 2, the owner's entered value for tool 3 (free
  * resize). No padding: the canvas becomes the scaled content, in whole
- * pixels (a fractional side is centred within its rounded size).
+ * pixels. The short side rounds UP (never above `side`), so nothing is
+ * clipped; the longest side is exactly `side`.
  */
 export function scaleLongestSide(doc: Doc, content: Rect, side: number): Doc {
-  if (!Number.isInteger(side) || side < 1 || side > MAX_RESIZE_SIDE) {
-    throw new Error(`The longest side must be a whole number of pixels from 1 to ${MAX_RESIZE_SIDE}.`);
-  }
+  const problem = resizeSideProblem(side);
+  if (problem) throw new Error(problem);
   const factor = side / longestSideOf(content);
-  const width = Math.max(1, Math.round(content.width * factor));
-  const height = Math.max(1, Math.round(content.height * factor));
+  const fit = (size: number) => Math.max(1, Math.min(side, Math.ceil(size * factor - PIXEL_SNAP)));
+  const width = fit(content.width);
+  const height = fit(content.height);
   return scaleGroup(doc, content, factor, width, height);
 }
 
