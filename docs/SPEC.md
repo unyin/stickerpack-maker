@@ -187,7 +187,12 @@ stickers, Missing stickers, and the thumbnail.
     inside the box"), because a session always keeps at least one layer.
   - Crop is disabled, with the reason in its tooltip, when nothing lies outside the box.
   - Crop never moves the view: the canvas origin does not move.
-  - Text layers on Crop are decided with the text tool (SPM-9).
+  - Text layers on Crop (agent decision SPM-9, pending owner confirmation): a text layer
+    is measured by its rendered box, like an image by its pixels. Inside the box it stays
+    editable text; entirely outside it is discarded like an image; crossing the box edge it
+    is rasterised (in Rust) and clipped like an image, becoming an image layer with the same
+    name and place: text cannot both stay editable and lose its outside part. The "at least
+    one layer" rule is unchanged.
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
   image" = everything on the canvas treated as one layer, exactly like selecting every layer
   and resizing them together (owner decision 2026-11-20). Sides below are Sticker mode's;
@@ -218,14 +223,53 @@ stickers, Missing stickers, and the thumbnail.
 
 ### Layers and tools
 - Session layer model: base image, pasted cutouts, text objects. Undo/redo throughout.
-- **Cut / paste / resize** floating parts.
+- **Cut / paste / resize** floating parts. Details below are agent decisions (SPM-9),
+  pending owner confirmation:
+  - **Move / Rectangle / Lasso** tools: with Rectangle or Lasso, dragging on the canvas draws
+    a selection instead of moving layers or panning (wheel zoom still works). The selection
+    is not an undo step; it stays until it is used, replaced, or cleared with Esc (Esc
+    clears it before it clears the layer selection).
+  - **Cut** works on exactly one selected image layer that the selection touches (its
+    tooltip says why not). The selected pixels (whole pixels whose centres lie inside the
+    selection; a lasso that crosses itself leaves the overlap out) move into a new floating
+    image layer named "Cutout", **directly above** the source, at the same spot, with the
+    source's rotation and scale; the source keeps a transparent hole. One undo step. The
+    cutout is trimmed to its visible pixels; a selection holding no visible pixels cuts
+    nothing. After a cut the cutout is selected and the Move tool is back, so it can be
+    dragged and resized at once. Text layers are not cut (merge them into an image first).
+    Delete still deletes layers, never selected pixels; there is no Ctrl+X/Ctrl+C.
+  - **Paste**: Ctrl+V with an image on the clipboard (or the Paste button, where the
+    webview allows reading the clipboard) adds it as a new layer named "Pasted image",
+    native size, centred on the canvas, on top, with the same 2000×2000 import cap dialog
+    as Add image as layer. PNG, JPEG and WEBP clipboard data are accepted.
+  - Floating parts are moved and resized with the same handles as every layer (corner
+    anchors, aspect kept, rotation), at any time.
 - **Enlarge selected parts**: local warp/bulge (strength + radius), paints on the selected layer.
 - **Background removal**: one-click offline ONNX auto removal + manual refine brush.
 - **Outline** and **fuzzy glow**: target the selected layer, or the base image when nothing
   is selected.
-- **Text**: own layer, movable/resizable until save (system fonts, size, color).
+- **Text**: own layer, movable/resizable until save (system fonts, size, color). Details
+  (agent decisions SPM-9, pending owner confirmation):
+  - **Add text** opens a text box centred on the canvas; double-click a text layer (or
+    **Edit text**) edits it in place. Enter finishes, Shift+Enter starts a new line, Esc
+    cancels, clicking elsewhere finishes. A new text layer is centred on the canvas and
+    named after its first line. Blank text creates or changes nothing (delete a text layer
+    with Delete). While text is typed, every key (Delete, undo/redo, Esc) acts on the text,
+    never on the layers.
+  - The font list is the system's installed families; a session's first text uses Arial
+    when installed (else a common sans, else the first family). Size is a whole number of
+    px within the range in src/shared/limits.json (1–1000); default 64 px, black. The font,
+    size and colour controls restyle the selected text layers (one undo step), or set the
+    next new text's style when no text layer is selected.
+  - Text is laid out and rasterised in Rust (left-aligned lines, the font's own line
+    spacing, kerning; no ligature shaping and no fallback font for missing characters),
+    and the canvas shows exactly that rendering, so the view, merge, Crop, the sizing tools
+    and the save agree on its pixels and its box. Resizing a text layer scales it (it stays
+    text, and is drawn sharp at its size when merged or saved); its font size field keeps
+    its typed size.
 - **Merge selected layers**: flatten chosen layers together mid-session so effects can be
-  applied to the merged result before the final save flatten.
+  applied to the merged result before the final save flatten. Text layers merge too: they
+  are rasterised in Rust as part of the merge (SPM-9).
 - **Delete selected layers** (button or Delete key; undoable; owner decision 2026-11-20). A
   session always keeps at least one layer: deleting every layer is refused — use Close to
   start over.
