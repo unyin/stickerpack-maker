@@ -131,6 +131,38 @@ export function moveLayer(doc: Doc, id: string, toIndex: number): Doc {
   return withLayers(doc, layers);
 }
 
+/** Telegram's sticker size: one side exactly 512 px (SPEC §7). */
+export const STICKER_SIDE = 512;
+
+/**
+ * Sizing tool 1 (SPEC §6): fit the WHOLE image into a `box` x `box` square
+ * and pad the rest with transparency. The canvas becomes the square; every
+ * layer is scaled by one factor (so the longest canvas side fills the box,
+ * up or down) and shifted so the image sits centred. Non-destructive: only
+ * transforms change, so layers stay separate and text stays editable;
+ * pixels are resampled when merged or saved. A canvas that already is the
+ * box is returned unchanged (no undo step).
+ */
+export function fitToBox(doc: Doc, box: number = STICKER_SIDE): Doc {
+  if (doc.width === box && doc.height === box) return doc;
+  const factor = box / Math.max(doc.width, doc.height);
+  const padX = (box - doc.width * factor) / 2;
+  const padY = (box - doc.height * factor) / 2;
+  // Scaling uniformly about the canvas origin commutes with each layer's
+  // rotation, so position, size and rotation stay consistent.
+  const layers = doc.layers.map((layer) => ({
+    ...layer,
+    transform: {
+      ...layer.transform,
+      x: layer.transform.x * factor + padX,
+      y: layer.transform.y * factor + padY,
+      scaleX: layer.transform.scaleX * factor,
+      scaleY: layer.transform.scaleY * factor,
+    },
+  }));
+  return { ...doc, width: box, height: box, layers };
+}
+
 /** Why deleting would leave a session without layers (SPEC §6). */
 export const KEEP_ONE_LAYER = "A session needs at least one layer; use Close to start over.";
 

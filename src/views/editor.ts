@@ -9,12 +9,14 @@ import { IMPORT_MAX_SIDE, importImage, mergeImages, pickImageFile, probeImage } 
 import {
   addRasterLayer,
   deleteLayers,
+  fitToBox,
   IDENTITY,
   layerIndex,
   mergeLayers,
   moveLayer,
   newDocument,
   nextLayerId,
+  STICKER_SIDE,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
 import { EditorSession } from "../editor/model/session";
@@ -46,7 +48,7 @@ function buildEditor(): HTMLElement {
   const addButton = button("Add image as layer", () => run(addImageAsLayer), "primary");
   const undoButton = button("Undo", () => session?.undo());
   const redoButton = button("Redo", () => session?.redo());
-  const fitButton = button("Fit view", () => stage?.fit());
+  const fitButton = button("Fit to 512×512", () => session?.apply((doc) => fitToBox(doc, STICKER_SIDE)));
   const closeButton = button("Close", () => run(closeSession));
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
@@ -55,7 +57,8 @@ function buildEditor(): HTMLElement {
 
   undoButton.title = "Undo (Ctrl+Z)";
   redoButton.title = "Redo (Ctrl+Y)";
-  fitButton.title = "Zoom and centre the canvas in view (changes the view only, not the image)";
+  fitButton.title =
+    "Scale the whole image so its longest side is 512 px and pad the rest with transparency (canvas becomes 512×512)";
 
   const empty = el(
     "div",
@@ -237,6 +240,7 @@ function buildEditor(): HTMLElement {
     const blocker = mergeBlocker(doc, current.selection);
     const deleteReason = deleteBlocker(doc, current.selection);
     addButton.disabled = busy;
+    fitButton.disabled = busy || (doc.width === STICKER_SIDE && doc.height === STICKER_SIDE);
     closeButton.disabled = busy;
     undoButton.disabled = busy || !current.canUndo;
     redoButton.disabled = busy || !current.canRedo;

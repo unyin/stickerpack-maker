@@ -187,6 +187,7 @@ export class EditorStage {
   /** Bring Konva in line with the model: create, update, order, drop nodes. */
   private render(): void {
     const doc = this.session.doc;
+    const resized = doc.width !== this.backdrop.width() || doc.height !== this.backdrop.height();
     this.backdrop.size({ width: doc.width, height: doc.height });
     this.outline.size({ width: doc.width, height: doc.height });
     const live = new Set(doc.layers.map((l) => l.id));
@@ -221,6 +222,9 @@ export class EditorStage {
     this.transformer.moveToTop();
     this.content.batchDraw();
     this.guides.batchDraw();
+    // A new canvas size (sizing tools, or undo/redo of one) re-fits the view
+    // so the whole canvas is on screen.
+    if (resized) this.fit();
   }
 
   private nodeFor(layer: Layer): Konva.Shape {

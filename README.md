@@ -19,8 +19,9 @@ No Telegram network calls in v1 — uploads are manual via @Stickers.
   and desync detection (Missing) on pack open. No Pack Manager UI yet.
 - **Editor** (`src-tauri/src/editor/` + `src/editor/`): open an image (JPG, JPEG, JFIF,
   PNG, WEBP; larger than 2000×2000 asks to scale), add images as layers, move / scale /
-  rotate, zoom and pan, undo/redo, merge selected layers. Crop, background removal,
-  effects, text and saving are still to come.
+  rotate, zoom and pan, undo/redo, merge and delete layers, fit the whole image to
+  512×512 (padded with transparency). The 512 box overlay and crop, the other sizing tools,
+  background removal, effects, text and saving are still to come.
 
 ## Development (Linux / WSL)
 

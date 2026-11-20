@@ -6,6 +6,7 @@ import {
   addRasterLayer,
   addTextLayer,
   deleteLayers,
+  fitToBox,
   IDENTITY,
   layerIndex,
   mergeLayers,
@@ -265,4 +266,55 @@ test("a deletion is one undo step and drops the deleted layers from the selectio
   expect(s.selection).toEqual([]);
   s.undo();
   expect(names(s.doc)).toEqual(["base", "x", "y"]);
+});
+
+// ---- Sizing tool 1: fit to 512x512, pad with transparency (SPEC §6) ----
+
+test("fit scales the whole image so its longest side fills the box, centred", () => {
+  // 1000x500 canvas: factor 0.512, image becomes 512x256, centred -> 128 px padding.
+  let doc = newDocument(image(1000, 500), "base");
+  doc = addRasterLayer(doc, image(10, 10), "cutout", { x: 100, y: 50, scaleX: 2, scaleY: 2, rotation: 30 });
+  const fitted = fitToBox(doc, 512);
+  expect([fitted.width, fitted.height]).toEqual([512, 512]);
+  const [base, cutout] = fitted.layers;
+  expect(base.transform.x).toBeCloseTo(0);
+  expect(base.transform.y).toBeCloseTo(128);
+  expect(base.transform.scaleX).toBeCloseTo(0.512);
+  expect(base.transform.scaleY).toBeCloseTo(0.512);
+  // Every layer keeps its place relative to the image: same factor, same rotation.
+  expect(cutout.transform.x).toBeCloseTo(100 * 0.512);
+  expect(cutout.transform.y).toBeCloseTo(50 * 0.512 + 128);
+  expect(cutout.transform.scaleX).toBeCloseTo(2 * 0.512);
+  expect(cutout.transform.rotation).toBe(30);
+  // Pixels are untouched (resampling happens at merge/save) and ids/names stay.
+  expect(cutout.kind === "raster" && cutout.image).toBe(doc.layers[1].kind === "raster" && doc.layers[1].image);
+  expect(fitted.layers.map((l) => l.id)).toEqual(doc.layers.map((l) => l.id));
+});
+
+test("fit pads tall images left and right, and scales small images up", () => {
+  const tall = fitToBox(newDocument(image(200, 400), "tall"), 512);
+  expect(tall.layers[0].transform.x).toBeCloseTo(128);
+  expect(tall.layers[0].transform.y).toBeCloseTo(0);
+  expect(tall.layers[0].transform.scaleX).toBeCloseTo(1.28);
+  // A sticker needs one side exactly 512, so small images grow.
+  const small = fitToBox(newDocument(image(300, 200), "small"), 512);
+  expect(small.layers[0].transform.scaleX).toBeCloseTo(512 / 300);
+  expect(small.layers[0].transform.y).toBeCloseTo((512 - 200 * (512 / 300)) / 2);
+});
+
+test("fitting a canvas that already is the box changes nothing (no undo step)", () => {
+  const doc = newDocument(image(512, 512), "done");
+  expect(fitToBox(doc, 512)).toBe(doc);
+  const s = new EditorSession(doc);
+  s.apply((d) => fitToBox(d, 512));
+  expect(s.canUndo).toBe(false);
+});
+
+test("fit is one undo step that restores the canvas size", () => {
+  const s = new EditorSession(newDocument(image(1000, 500), "base"));
+  s.apply((d) => fitToBox(d, 512));
+  expect([s.doc.width, s.doc.height]).toEqual([512, 512]);
+  s.undo();
+  expect([s.doc.width, s.doc.height]).toEqual([1000, 500]);
+  expect(s.doc.layers[0].transform).toEqual(IDENTITY);
 });

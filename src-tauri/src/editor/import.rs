@@ -4,12 +4,10 @@
 
 use std::path::Path;
 
-use fast_image_resize::images::Image as FirImage;
-use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use image::metadata::Orientation;
 use image::{DynamicImage, ImageDecoder, ImageReader};
 
-use super::Rgba;
+use super::{resize, Rgba};
 
 /// Largest side an imported image may have without scaling (SPEC §6).
 pub const IMPORT_MAX_SIDE: u32 = 2000;
@@ -110,20 +108,6 @@ pub fn import(path: &Path, scale_to_fit: bool) -> Result<Rgba, String> {
         ));
     }
     resize(Rgba { width, height, pixels: rgba.into_raw() }, fit_within(width, height, IMPORT_MAX_SIDE))
-}
-
-/// Resample to `(width, height)` with Lanczos3; fast_image_resize
-/// premultiplies alpha around the convolution by default.
-fn resize(src: Rgba, (width, height): (u32, u32)) -> Result<Rgba, String> {
-    let failed = |e: &dyn std::fmt::Display| format!("cannot resize image: {e}");
-    let src_view = FirImage::from_vec_u8(src.width, src.height, src.pixels, PixelType::U8x4)
-        .map_err(|e| failed(&e))?;
-    let mut dst = FirImage::new(width, height, PixelType::U8x4);
-    let options = ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Lanczos3));
-    Resizer::new()
-        .resize(&src_view, &mut dst, &options)
-        .map_err(|e| failed(&e))?;
-    Ok(Rgba { width, height, pixels: dst.into_vec() })
 }
 
 #[cfg(test)]

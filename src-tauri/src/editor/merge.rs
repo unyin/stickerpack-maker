@@ -116,6 +116,33 @@ fn to_pixmap(image: &Rgba) -> Result<Pixmap, String> {
     Pixmap::from_vec(data, size).ok_or_else(|| "cannot build a pixmap for a layer".to_string())
 }
 
+/// A layer drawn smaller than 1:1 (e.g. after "Fit to 512x512" on a large
+/// image) is first resampled to its drawn size with Lanczos3, then placed
+/// with the leftover (near-1) scale. tiny-skia's bilinear filter samples only
+/// neighbouring pixels, so shrinking with it aliases; enlarging and rotating
+/// stay with tiny-skia, where bilinear is fine.
+fn shrink_to_drawn_size(layer: &MergeInput) -> Result<MergeInput, String> {
+    let t = layer.transform;
+    transform_of(&t)?; // reject non-finite transforms before sizing anything
+    let (w, h) = (layer.image.width, layer.image.height);
+    let shrunk = |side: u32, scale: f32| -> u32 {
+        if scale.abs() < 1.0 { ((side as f32 * scale.abs()).round() as u32).max(1) } else { side }
+    };
+    let (new_w, new_h) = (shrunk(w, t.scale_x), shrunk(h, t.scale_y));
+    if (new_w, new_h) == (w, h) {
+        return Ok(layer.clone());
+    }
+    let image = super::resize(layer.image.clone(), (new_w, new_h))?;
+    Ok(MergeInput {
+        image,
+        transform: LayerTransform {
+            scale_x: t.scale_x * w as f32 / new_w as f32,
+            scale_y: t.scale_y * h as f32 / new_h as f32,
+            ..t
+        },
+    })
+}
+
 /// Snap a bound to the nearest whole pixel when float noise is all that
 /// separates them (cos 90 degrees is ~-4e-8, not 0), so a rotation by a
 /// right angle does not grow the merged layer by a pixel.
@@ -138,6 +165,7 @@ pub fn merge(layers: &[MergeInput]) -> Result<PlacedImage, String> {
     let mut prepared = Vec::with_capacity(layers.len());
     let (mut min_x, mut min_y, mut max_x, mut max_y) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for layer in layers {
+        let layer = shrink_to_drawn_size(layer)?;
         let transform = transform_of(&layer.transform)?;
         let pixmap = to_pixmap(&layer.image)?;
         let (w, h) = (layer.image.width as f32, layer.image.height as f32);
@@ -264,6 +292,37 @@ mod tests {
         assert_eq!((merged.x, merged.y), (-2, 0));
         assert_eq!((merged.image.width, merged.image.height), (3, 4));
         assert!(close(pixel(&merged, -1, 2), [0, 255, 0, 255]));
+    }
+
+    #[test]
+    fn shrunk_layers_are_resampled_smoothly_not_aliased() {
+        // One white column in every three (true average ~85) shrunk to a
+        // third, as after "Fit to 512x512" on a large image. Bilinear
+        // sampling lands between two black columns and returns black;
+        // area-aware resampling returns the average grey.
+        let (w, h) = (600u32, 60u32);
+        let mut pixels = Vec::with_capacity((w * h * 4) as usize);
+        for _y in 0..h {
+            for x in 0..w {
+                let v = if x % 3 == 0 { 255 } else { 0 };
+                pixels.extend_from_slice(&[v, v, v, 255]);
+            }
+        }
+        let third = 1.0 / 3.0;
+        let stripes = MergeInput {
+            image: Rgba { width: w, height: h, pixels },
+            transform: LayerTransform { scale_x: third, scale_y: third, ..LayerTransform::IDENTITY },
+        };
+        let empty = at(solid(1, 1, [0, 0, 0, 0]), 0.0, 0.0);
+        let merged = merge(&[empty, stripes]).unwrap();
+        assert_eq!((merged.image.width, merged.image.height), (200, 20));
+        for y in 3..17 {
+            for x in 3..197 {
+                let [r, _, _, a] = pixel(&merged, x, y);
+                assert_eq!(a, 255);
+                assert!((60..=110).contains(&r), "aliased at ({x},{y}): {r}");
+            }
+        }
     }
 
     #[test]
