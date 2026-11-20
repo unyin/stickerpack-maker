@@ -1,20 +1,20 @@
-//! "Crop" (SPEC §6): discard each layer's content outside the crop box. The webview plans the crop (src/editor/model/document.ts
+//! "Crop" (SPEC §6): discard each layer's content outside the crop box. The
+//! webview plans the crop (src/editor/model/document.ts
 //! `planCrop`): for every layer crossing the box edge it sends the layer and
 //! `clip`, the whole pixels the layer covers inside the box. Here each such
-//! layer is re-rendered into exactly that rectangle, placed by its
-//! transform the same way merge places it (and the Konva view draws it).
+//! layer is drawn by merge's own placement into a clip-sized pixmap, so crop
+//! and merge sample every pixel identically.
 //! The result is an untransformed image whose top-left is `clip`'s. A text
 //! layer crossing the box edge arrives as text and is rasterised first
 //! (merge.rs `split_layers`), so it is clipped exactly like an image.
 
 use fontdb::Database;
 use serde::Deserialize;
-use tiny_skia::Pixmap;
 
 use super::merge::{
-    draw_placed, from_pixmap, is_pixel_aligned, shrink_to_drawn_size, split_layers, to_pixmap, transform_of,
-    LayerMeta, MergeInput, MAX_MERGE_SIDE,
+    from_pixmap, place_layers, render_window, split_layers, LayerMeta, LayerTransform, MergeInput, MAX_MERGE_SIDE,
 };
+use super::text::rasterise_window;
 use super::Rgba;
 
 /// A rectangle of whole document pixels; mirrors `Rect` in document.ts.
@@ -36,30 +36,58 @@ pub struct CropMeta {
 }
 
 /// Split a crop request's concatenated RGBA body into layers with their clips.
+/// Raster layers take their bytes from the body, in order. A text layer takes
+/// none: it is rasterised from its outlines into just its clip (text.rs
+/// `rasterise_window`, the clip-sized window), arriving as an aligned raster
+/// input at the clip's top-left, which `crop_layer` copies exactly.
 pub fn split_crop_layers(
     meta: &[CropMeta],
     body: &[u8],
     fonts: &Database,
 ) -> Result<Vec<(MergeInput, ClipRect)>, String> {
-    let layers: Vec<LayerMeta> = meta.iter().map(|m| m.layer.clone()).collect();
-    Ok(split_layers(&layers, body, fonts)?.into_iter().zip(meta.iter().map(|m| m.clip)).collect())
+    let rasters: Vec<LayerMeta> = meta.iter().filter(|m| m.layer.text.is_none()).map(|m| m.layer.clone()).collect();
+    let mut rasters = split_layers(&rasters, body, fonts)?.into_iter();
+    meta.iter()
+        .map(|m| {
+            let clip = m.clip;
+            let layer = match &m.layer.text {
+                Some(text) => {
+                    check_clip(clip)?;
+                    let image =
+                        rasterise_window(fonts, text, &m.layer.transform, clip.x, clip.y, clip.width, clip.height)?;
+                    let transform = LayerTransform { x: clip.x as f32, y: clip.y as f32, ..LayerTransform::IDENTITY };
+                    MergeInput { image, transform }
+                }
+                None => rasters.next().ok_or_else(|| "crop request lost a raster layer".to_string())?,
+            };
+            Ok((layer, clip))
+        })
+        .collect()
 }
 
-/// Render one layer into `clip`: the pixels the layer shows there, and
-/// nothing from outside it.
-pub fn crop_layer(layer: &MergeInput, clip: ClipRect) -> Result<Rgba, String> {
+fn check_clip(clip: ClipRect) -> Result<(), String> {
     if clip.width == 0 || clip.height == 0 {
         return Err("a crop rectangle has no pixels".to_string());
     }
     if clip.width > MAX_MERGE_SIDE || clip.height > MAX_MERGE_SIDE {
         return Err(format!("a {}x{} crop rectangle is too large", clip.width, clip.height));
     }
-    let layer = shrink_to_drawn_size(layer)?;
-    let transform = transform_of(&layer.transform)?;
-    let pixmap = to_pixmap(&layer.image)?;
-    let mut canvas =
-        Pixmap::new(clip.width, clip.height).ok_or_else(|| "cannot allocate the cropped layer".to_string())?;
-    draw_placed(&mut canvas, &pixmap, transform, is_pixel_aligned(&layer.transform), clip.x as f32, clip.y as f32);
+    Ok(())
+}
+
+/// Render one layer into `clip`: the pixels the layer shows there, and
+/// nothing from outside it.
+///
+/// Sampling uses merge's own placement (bounds floored to whole pixels), but
+/// only a clip-sized pixmap is allocated: the window is moved onto `clip` by a
+/// whole-pixel translation. Pixels visible in both match merge's exactly; the
+/// shifted float translation can flip a silhouette-edge pixel between covered
+/// and uncovered. A layer whose full render would be too large for merge still
+/// crops, and memory follows the clip.
+pub fn crop_layer(layer: &MergeInput, clip: ClipRect) -> Result<Rgba, String> {
+    check_clip(clip)?;
+    let placed = place_layers(std::slice::from_ref(layer))?;
+    let canvas = render_window(&placed, clip.x, clip.y, clip.width, clip.height)?;
     Ok(from_pixmap(&canvas))
 }
 
@@ -75,7 +103,7 @@ pub fn crop(layers: &[(MergeInput, ClipRect)]) -> Result<Vec<u8>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::merge::{merge, LayerTransform, PlacedImage};
+    use super::super::merge::{merge, PlacedImage};
     use super::*;
 
     /// Pixel (x, y) is [x, y, 7, 255]: shows exactly which pixels survived.
@@ -161,6 +189,68 @@ mod tests {
     }
 
     #[test]
+    fn a_rotated_scaled_layer_crossing_the_left_and_top_edges_matches_merge_up_to_edge_flips() {
+        // The drag-to-crop case: the layer hangs over the box's left and top
+        // edges, so merge's own origin is at negative document pixels. The
+        // reference is merge's render of the same layer, read at document
+        // coordinates inside the box; the crop must equal it byte for byte.
+        let transforms = [
+            LayerTransform { x: -6.3, y: -4.7, scale_x: 1.4, scale_y: 1.4, rotation: 30.0 },
+            LayerTransform { x: -9.0, y: 2.5, scale_x: 1.9, scale_y: 0.8, rotation: -20.0 },
+            LayerTransform { x: 3.0, y: -11.6, scale_x: 0.7, scale_y: 1.3, rotation: 75.0 },
+        ];
+        for t in transforms {
+            let layer = placed(coords(30, 22), t);
+            // merge needs two layers: a transparent pixel at the document origin,
+            // which lies inside the layer's bounds, so the union is the layer's own.
+            let empty = placed(Rgba { width: 1, height: 1, pixels: vec![0; 4] }, LayerTransform::IDENTITY);
+            let reference = merge(&[empty, layer.clone()]).unwrap();
+            assert!(reference.x < 0 && reference.y < 0, "{t:?} must cross the left and top edges");
+            assert!(reference.image.width as i32 > -reference.x && reference.image.height as i32 > -reference.y);
+            let clip = ClipRect { x: 0, y: 0, width: 24, height: 24 };
+            let out = crop_layer(&layer, clip).unwrap();
+            let mut visible = 0;
+            let mut silhouette_flips = 0;
+            for y in 0..24 {
+                for x in 0..24 {
+                    let (rx, ry) = (x as i32 - reference.x, y as i32 - reference.y);
+                    let inside = rx >= 0 && ry >= 0 && rx < reference.image.width as i32 && ry < reference.image.height as i32;
+                    let expected = if inside { merged_px(&reference, x as i32, y as i32) } else { [0, 0, 0, 0] };
+                    let got = px(&out, x, y);
+                    if got != expected {
+                        // Moving the window shifts the f32 translation, which can
+                        // flip a pixel the silhouette's edge passes through the
+                        // centre of, between covered and not. Nothing else may differ.
+                        assert!(got[3] == 0 || expected[3] == 0, "{t:?} at ({x},{y}): {got:?} vs {expected:?}");
+                        silhouette_flips += 1;
+                    }
+                    visible += (expected[3] > 0) as u32;
+                }
+            }
+            assert!(visible > 50, "{t:?}: the test must compare real pixels, saw {visible}");
+            assert!(silhouette_flips <= 2, "{t:?}: {silhouette_flips} edge pixels differ from merge");
+        }
+    }
+
+    #[test]
+    fn a_layer_too_large_for_merge_still_crops_to_a_small_clip() {
+        // 100x100 scaled 100x is 10000 px a side: merge refuses it, but the
+        // clip is small, so crop succeeds and matches the nearby sampling.
+        let layer = placed(coords(100, 100), LayerTransform { x: -4000.0, y: -4000.0, scale_x: 100.0, scale_y: 100.0, rotation: 0.0 });
+        assert!(render_layers_err(&layer));
+        let out = crop_layer(&layer, ClipRect { x: 0, y: 0, width: 8, height: 8 }).unwrap();
+        // Document 0 is layer pixel 40 (4000 / 100).
+        assert_eq!(px(&out, 0, 0), [40, 40, 7, 255]);
+        assert_eq!(px(&out, 7, 7), [40, 40, 7, 255]);
+    }
+
+    fn render_layers_err(layer: &MergeInput) -> bool {
+        super::super::merge::render_layers(std::slice::from_ref(layer))
+            .err()
+            .is_some_and(|e| e.contains("the merged layer would be"))
+    }
+
+    #[test]
     fn the_request_body_splits_by_layer_and_the_response_concatenates_clips() {
         let meta: Vec<CropMeta> = serde_json::from_str(
             r#"[{"width":2,"height":1,"transform":{"x":0,"y":0,"scaleX":1,"scaleY":1,"rotation":0},
@@ -196,6 +286,77 @@ mod tests {
         assert_eq!(px(&out, 19, 79), [0, 255, 0, 255]);
         assert_eq!(px(&out, 20, 50)[3], 0);
         assert_eq!(px(&out, 10, 9)[3], 0);
+    }
+
+    #[test]
+    fn text_and_raster_layers_split_in_order_and_text_is_drawn_only_into_its_clip() {
+        // A 2x1 raster, then "A" at 100 px placed at (-30, 0), then a 1x1
+        // raster: the body holds only the rasters' bytes, in order.
+        let fonts = super::super::test_font::database();
+        let meta: Vec<CropMeta> = serde_json::from_str(&format!(
+            r##"[{{"width":2,"height":1,"transform":{{"x":-1,"y":0,"scaleX":1,"scaleY":1,"rotation":0}},
+                  "clip":{{"x":0,"y":0,"width":1,"height":1}}}},
+                 {{"width":60,"height":100,"transform":{{"x":-30,"y":0,"scaleX":1,"scaleY":1,"rotation":0}},
+                  "text":{{"text":"A","fontFamily":"{}","fontSize":100,"color":"#00ff00"}},
+                  "clip":{{"x":0,"y":0,"width":30,"height":100}}}},
+                 {{"width":1,"height":1,"transform":{{"x":0,"y":0,"scaleX":1,"scaleY":1,"rotation":0}},
+                  "clip":{{"x":0,"y":0,"width":1,"height":1}}}}]"##,
+            super::super::test_font::FAMILY
+        ))
+        .unwrap();
+        let body = [1, 2, 3, 255, 5, 6, 7, 255, 9, 10, 11, 255];
+        let layers = split_crop_layers(&meta, &body, &fonts).unwrap();
+        // The text arrives already clip-sized, at the clip's top-left.
+        assert_eq!((layers[1].0.image.width, layers[1].0.image.height), (30, 100));
+        assert_eq!((layers[1].0.transform.x, layers[1].0.transform.y), (0.0, 0.0));
+        let out = crop(&layers).unwrap();
+        assert_eq!(&out[..4], &[5, 6, 7, 255]);
+        assert_eq!(&out[out.len() - 4..], &[9, 10, 11, 255]);
+        assert_eq!(out.len(), 4 + 30 * 100 * 4 + 4);
+        assert!(split_crop_layers(&meta, &body[..8], &fonts).is_err());
+    }
+
+    #[test]
+    fn crossing_text_matches_its_merge_rendering_and_crops_even_when_too_large_for_merge() {
+        use super::super::text::{rasterise_placed, TextSpec};
+        let fonts = super::super::test_font::database();
+        let spec = TextSpec {
+            text: "A".into(),
+            font_family: super::super::test_font::FAMILY.into(),
+            font_size: 100.0,
+            color: "#0000ff".into(),
+        };
+        // Rotated and scaled, hanging over the box's left and top edges.
+        let t = LayerTransform { x: -20.3, y: -15.6, scale_x: 1.3, scale_y: 1.1, rotation: 20.0 };
+        let reference = rasterise_placed(&fonts, &spec, &t).unwrap();
+        let clip = ClipRect { x: 0, y: 0, width: 40, height: 40 };
+        let meta = [CropMeta {
+            layer: LayerMeta { width: 60, height: 100, transform: t, text: Some(spec.clone()) },
+            clip,
+        }];
+        let layers = split_crop_layers(&meta, &[], &fonts).unwrap();
+        let out = crop_layer(&layers[0].0, clip).unwrap();
+        let (mut visible, mut flips) = (0, 0);
+        for y in 0..40 {
+            for x in 0..40 {
+                let expected = merged_px(&reference, x as i32, y as i32);
+                let got = px(&out, x, y);
+                if got != expected {
+                    assert!(got[3] == 0 || expected[3] == 0 || got[3].abs_diff(expected[3]) <= 2, "({x},{y}): {got:?} vs {expected:?}");
+                    flips += 1;
+                }
+                visible += (expected[3] > 0) as u32;
+            }
+        }
+        assert!(visible > 100, "the test must compare real pixels, saw {visible}");
+        assert!(flips <= 4, "{flips} pixels differ from merge's rendering");
+        // Scaled 100x the text is far too large for merge, yet a small clip crops.
+        let huge = LayerTransform { x: -3000.0, y: -3000.0, scale_x: 100.0, scale_y: 100.0, rotation: 0.0 };
+        assert!(rasterise_placed(&fonts, &spec, &huge).unwrap_err().contains("too large"));
+        let meta = [CropMeta { layer: LayerMeta { width: 60, height: 100, transform: huge, text: Some(spec) }, clip }];
+        let layers = split_crop_layers(&meta, &[], &fonts).unwrap();
+        // Document (0, 0) is the glyph's (30, 30) at scale 1: inside 'A' (x 10..50, y 10..80).
+        assert_eq!(px(&crop_layer(&layers[0].0, clip).unwrap(), 0, 0), [0, 0, 255, 255]);
     }
 
     #[test]

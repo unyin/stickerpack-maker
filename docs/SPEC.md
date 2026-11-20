@@ -174,21 +174,22 @@ stickers, Missing stickers, and the thumbnail.
   512×439 canvas gets a 512×439 box (owner decision 2026-11-20). It follows the canvas size,
   staying centred; when the canvas and box sides differ by an odd number, its top-left is
   rounded down to a whole pixel, so it always covers whole pixels. The Crop button names
-  the actual box size (e.g. **Crop to 512×439**).
+  the actual box size (e.g. **Crop to 512×439**) (agent decision, pending owner confirmation).
 - **Crop** is destructive: everything outside the box (512×512 for stickers, 100×100 for
   thumbnails, capped at the canvas size as above) is discarded; the canvas size stays as it
   is (owner decision 2026-11-20).
   - A layer inside the box is left exactly as it is. A layer crossing the box edge keeps
     only the whole pixels it covers inside the box: it becomes an unrotated, unscaled layer
     at that spot, with its rotation and scale baked into its pixels. It keeps its name and
-    its place in the stack.
+    its place in the stack (agent decision, pending owner confirmation).
   - Layers **entirely outside** the box are discarded in the same single undo step (owner
     decision 2026-11-20). If every layer is entirely outside, Crop is disabled ("Nothing is
     inside the box"), because a session always keeps at least one layer.
-  - Crop is disabled, with the reason in its tooltip, when nothing lies outside the box.
+  - Crop is disabled, with the reason in its tooltip, when nothing lies outside the box (agent decision, pending owner confirmation).
   - Crop never moves the view: the canvas origin does not move.
   - Text layers on Crop (agent decision SPM-9, pending owner confirmation): a text layer
-    is measured by its rendered box, like an image by its pixels. Inside the box it stays
+    is measured by its rendered box, turned and scaled with the layer, like an image by its
+    pixels, so every rule above applies to it unchanged. Inside the box it stays
     editable text; entirely outside it is discarded like an image; crossing the box edge it
     is rasterised (in Rust) and clipped like an image, becoming an image layer with the same
     name and place: text cannot both stay editable and lose its outside part. The "at least
@@ -219,7 +220,7 @@ stickers, Missing stickers, and the thumbnail.
   2026-11-20): Sticker mode means longest side 512; Thumbnail mode means exactly 100×100.
   It shows the canvas size and either that it meets the set or how many pixels each side is
   over or under (e.g. "600×400 px · needs longest side 512: 88 px over"), and updates on
-  every change, undo and redo included.
+  every change, undo and redo included (agent decision, pending owner confirmation).
 
 ### Layers and tools
 - Session layer model: base image, pasted cutouts, text objects. Undo/redo throughout.

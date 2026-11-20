@@ -255,7 +255,7 @@ pub fn render(fonts: &Database, spec: &TextSpec) -> Result<TextRender, String> {
 
 /// Draw a text layer placed by its transform, straight from the outlines
 /// (sharp at any scale), into the whole pixels its box covers in the
-/// document: merge and Crop composite this exactly like a raster layer.
+/// document: merge composites this exactly like a raster layer.
 pub fn rasterise_placed(fonts: &Database, spec: &TextSpec, t: &LayerTransform) -> Result<PlacedImage, String> {
     let color = check(spec)?;
     let transform = transform_of(t)?;
@@ -275,13 +275,49 @@ pub fn rasterise_placed(fonts: &Database, spec: &TextSpec, t: &LayerTransform) -
                 "the text would be drawn {width}x{height} px, too large (at most {MAX_MERGE_SIDE} per side)"
             ));
         }
-        let mut canvas = Pixmap::new(width.max(1), height.max(1))
-            .ok_or_else(|| "cannot allocate the text".to_string())?;
-        if let Some(path) = &laid.path {
-            fill(&mut canvas, path, color, transform.post_translate(-left, -top));
-        }
-        Ok(PlacedImage { x: left as i32, y: top as i32, image: from_pixmap(&canvas) })
+        let image = draw_window(&laid, color, transform, (left as i32, top as i32), width, height)?;
+        Ok(PlacedImage { x: left as i32, y: top as i32, image })
     })
+}
+
+/// Draw a text layer placed by its transform into just the document window
+/// with top-left (`win_x`, `win_y`) and the given size: Crop's clip-sized
+/// window (merge.rs `render_window`), so a crossing text layer costs only
+/// its clip's memory, whatever size it is drawn at. Pixels match
+/// `rasterise_placed`'s up to the whole-pixel shift of the window.
+pub fn rasterise_window(
+    fonts: &Database,
+    spec: &TextSpec,
+    t: &LayerTransform,
+    win_x: i32,
+    win_y: i32,
+    width: u32,
+    height: u32,
+) -> Result<Rgba, String> {
+    if width > MAX_MERGE_SIDE || height > MAX_MERGE_SIDE {
+        return Err(format!("a {width}x{height} text window is too large (at most {MAX_MERGE_SIDE} per side)"));
+    }
+    let color = check(spec)?;
+    let transform = transform_of(t)?;
+    with_layout(fonts, spec, |laid| draw_window(&laid, color, transform, (win_x, win_y), width, height))
+}
+
+/// Fill a layout's outlines, placed by `transform`, into a pixmap whose
+/// top-left sits at `origin` (whole document pixels).
+fn draw_window(
+    laid: &Laid,
+    color: [u8; 3],
+    transform: Transform,
+    origin: (i32, i32),
+    width: u32,
+    height: u32,
+) -> Result<Rgba, String> {
+    let mut canvas =
+        Pixmap::new(width.max(1), height.max(1)).ok_or_else(|| "cannot allocate the text".to_string())?;
+    if let Some(path) = &laid.path {
+        fill(&mut canvas, path, color, transform.post_translate(-origin.0 as f32, -origin.1 as f32));
+    }
+    Ok(from_pixmap(&canvas))
 }
 
 #[cfg(test)]

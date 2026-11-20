@@ -10,7 +10,9 @@ import {
   addTextLayer,
   contentBounds,
   cropBox,
+  cropClipInputs,
   cropLayers,
+  cropOutcome,
   CUTOUT_NAME,
   cutLayer,
   deleteLayers,
@@ -169,6 +171,34 @@ test("Crop keeps text inside the box as text, removes text outside it, and raste
   const textOnly = addTextLayer(onlyOutside, HI, render(60, 50), { ...IDENTITY, x: 0, y: 0 });
   const both = planCrop({ ...textOnly, layers: [textOnly.layers[1]] }, boxed);
   expect(cropBlocker(both, boxed)).toContain("Nothing is inside the box");
+});
+
+test("text on Crop goes through the rotated-layer test, cropOutcome and cropClipInputs", () => {
+  // A 20x2 text box turned 45 degrees from (6, -8): its bounding box overlaps
+  // the 10x10 box at the origin, the turned box itself does not (SPM-6 quad test).
+  const base = newDocument(image(4, 4, 255), "base", { width: 10, height: 10 });
+  const box = { x: 0, y: 0, width: 10, height: 10 };
+  const turned = addTextLayer(base, HI, render(20, 2), { ...IDENTITY, x: 6, y: -8, rotation: 45 });
+  expect(planCrop(turned, box)[1]).toEqual({ kind: "remove", id: "layer-2" });
+  expect(cropOutcome(planCrop(turned, box))).toBe("crop");
+  // Alone, it blocks Crop with "Nothing is inside the box".
+  const alone = { ...turned, layers: [turned.layers[1]] };
+  expect(cropOutcome(planCrop(alone, box))).toBe("nothing-inside");
+  // Moved 4 px left it truly crosses the box: Rust gets its text, not pixels.
+  const crossing = addTextLayer(base, HI, render(20, 2), { ...IDENTITY, x: 2, y: -8, rotation: 45 });
+  const plan = planCrop(crossing, box);
+  expect(plan.map((a) => a.kind)).toEqual(["keep", "clip"]);
+  const inputs = cropClipInputs(crossing, plan);
+  expect(inputs).toHaveLength(1);
+  const input = inputs[0];
+  if (!("text" in input)) throw new Error("a crossing text layer must reach Rust as text");
+  expect(input.text).toEqual(HI);
+  expect(input.render).toBe((crossing.layers[1] as { render: TextRender }).render);
+  expect(input.clip).toEqual((plan[1] as { rect: unknown }).rect);
+  // Text inside the box is kept as text, and never sent to Rust.
+  const inside = addTextLayer(base, HI, render(4, 4), { ...IDENTITY, x: 3, y: 3 });
+  expect(cropOutcome(planCrop(inside, box))).toBe("nothing-outside");
+  expect(cropClipInputs(inside, planCrop(inside, box))).toEqual([]);
 });
 
 // ---- Cut ----

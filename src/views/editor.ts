@@ -26,6 +26,7 @@ import {
   addTextLayer,
   centeredPlacement,
   cropBox,
+  cropClipInputs,
   cropLayers,
   cutLayer,
   deleteLayers,
@@ -42,13 +43,14 @@ import {
   scaleLongestSide,
   setTextStyle,
   textStyleOf,
+  type CropAction,
   type Doc,
   type Rect,
   type TextLayer,
   type TextStyle,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
-import { readoutText, STICKER, startCanvas, constraintStatus, TEXT_FONT_SIZE } from "../editor/model/constraints";
+import { readoutStatus, STICKER, startCanvas, TEXT_FONT_SIZE } from "../editor/model/constraints";
 import {
   DEFAULT_FONT_SIZE,
   DEFAULT_TEXT_COLOR,
@@ -321,10 +323,11 @@ function buildEditor(): HTMLElement {
     if (!picked) return;
     session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(constraints)));
     refresh(); // show the workspace so the stage measures its real size
-    stage = new EditorStage(canvasHost, session, constraints);
+    stage = new EditorStage(canvasHost, session);
     stage.setCropBoxVisible(showBox);
     stage.setTool(tool);
     stage.onEditText((id) => editText(id));
+    refresh(); // place the crop box overlay
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
     session.subscribe(refresh);
@@ -374,21 +377,27 @@ function buildEditor(): HTMLElement {
     const current = session;
     if (!current) return;
     const doc = current.doc;
-    const box = cropBox(doc, targetSide);
-    const plan = planCrop(doc, box);
-    if (cropBlocker(plan, box)) return;
+    const { plan, blocker } = cropState(doc);
+    if (blocker) return;
     // Text crossing the box edge is rasterised and clipped like an image (SPM-9).
-    const clips = plan.flatMap((action) => {
-      if (action.kind !== "clip") return [];
-      const layer = doc.layers.find((l) => l.id === action.id);
-      return layer ? [{ id: action.id, ...layerInput(layer), clip: action.rect }] : [];
-    });
+    const clips = cropClipInputs(doc, plan);
     const images = clips.length > 0 ? await cropImages(clips) : [];
     if (current.doc !== doc) {
       message.textContent = "The layers changed while cropping; nothing was cropped. Try again.";
       return;
     }
     current.apply((d) => cropLayers(d, plan, new Map(clips.map((c, i) => [c.id, images[i]]))));
+  }
+
+  /**
+   * The crop box, Crop's plan and its blocker for a document: the ONE place
+   * they are computed. refresh() feeds the overlay, the label and the
+   * button from it, and Crop runs from it, so all four use the same box.
+   */
+  function cropState(doc: Doc): { box: Rect; plan: CropAction[]; blocker: string | null } {
+    const box = cropBox(doc, targetSide);
+    const plan = planCrop(doc, box);
+    return { box, plan, blocker: cropBlocker(plan, box) };
   }
 
   function toggleBox(): void {
@@ -676,16 +685,18 @@ function buildEditor(): HTMLElement {
       button.title = reason ?? action;
     }
     sideInput.disabled = busy;
-    // One cropBox result drives the label, the blocker and (in the stage) the overlay.
-    const box = cropBox(doc, targetSide);
+    // One cropState result drives the overlay, the label and the blocker;
+    // cropToBox() reads the same function.
+    const { box, blocker: cropReason } = cropState(doc);
+    stage?.setCropBox(box);
     const boxSize = `${box.width}×${box.height}`;
-    const cropReason = cropBlocker(planCrop(doc, box), box);
     cropButton.textContent = `Crop to ${boxSize}`;
     cropButton.disabled = busy || cropReason !== null;
     cropButton.title = cropReason ?? cropTitle(boxSize);
     boxButton.setAttribute("aria-pressed", String(showBox));
-    readout.textContent = readoutText(doc, constraints);
-    readout.classList.toggle("off", !constraintStatus(doc, constraints).ok);
+    const status = readoutStatus(doc, constraints);
+    readout.textContent = status.text;
+    readout.classList.toggle("off", !status.ok);
     resetViewButton.disabled = busy;
     closeButton.disabled = busy;
     undoButton.disabled = busy || !current.canUndo;
