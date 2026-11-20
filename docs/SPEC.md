@@ -166,9 +166,8 @@ stickers, Missing stickers, and the thumbnail.
 - Togglable **512×512 box overlay**, fixed at canvas center; never draggable/resizable;
   drawn **above all layers** so it stays visible when layers cover the canvas.
   Drag the image to choose what survives.
-- **Crop** is destructive: everything outside the box is discarded; canvas becomes 512×512.
-  **Open SPM-6 decision:** this conflicts with "only sizing tools 1 and 2 change the canvas
-  size" below; SPM-6 must settle whether Crop sets the canvas or only discards pixels.
+- **Crop** is destructive: everything outside the 512×512 box is discarded; the canvas size
+  stays as it is (owner decision 2026-11-20).
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
   image" = everything on the canvas treated as one layer, exactly like selecting every layer
   and resizing them together (owner decision 2026-11-20):
@@ -181,7 +180,7 @@ stickers, Missing stickers, and the thumbnail.
      number of pixels from 1 to 2000. The canvas size does not change; the image keeps its
      centre where it was.
 - Only sizing tools 1 and 2 change the canvas size (owner decision 2026-11-20). Nothing else
-  does: not opening an image (always 512×512), adding a layer, merging, deleting, free
+  does: not opening an image (always 512×512), adding a layer, merging, deleting, Crop, free
   resize, or undo/redo of any of these.
 - The sizing tools change the canvas or the image, **never the view**: zoom and pan stay where
   the user left them (owner decision 2026-11-20). The canvas keeps its top-left corner where
