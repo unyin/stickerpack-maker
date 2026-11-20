@@ -1,7 +1,10 @@
 mod commands;
 mod config;
 mod db;
-mod library;
+/// Library core (SPEC §3-4): data model, file operations, crash-safe
+/// renames, desync detection. Public because the core is a UI-agnostic,
+/// unit-testable library; Tauri command wiring (SPM-3) consumes it.
+pub mod library;
 
 use std::path::PathBuf;
 use std::sync::Mutex;

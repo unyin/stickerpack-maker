@@ -30,6 +30,7 @@ ADR-0003 mandates two-phase renames and that the database and filenames never di
 
 ## Consequences
 
+- SQLite cannot defer composite (table-level) UNIQUE constraints, so `stickers` keeps immediate `UNIQUE(pack_id, position)` and `UNIQUE(pack_id, file_name)` guards, and the engine's commit transaction renumbers in two passes: first vacate every affected row's position and file name into a temp range, then assign the finals. The swap is still atomic — it just doesn't rely on deferred constraints.
 - One journal row per pack (`pack_id` primary key) also serializes operations: a second operation on the same pack recovers the pending one first. The core assumes per-pack serialized calls; SPM-3's command wiring must not run concurrent operations on one pack.
 - The `.spm-tmp-` prefix is reserved: dot-prefixed temps never sort into the `001.png…` sequence the owner drags into @Stickers, and the app never treats them as stickers.
 - Recovery is part of opening a pack, so an interrupted operation is invisible to the user except as a brief repair on next open; desync detection then reports only genuine external desync (Missing), never false Missing from our own half-finished renames.

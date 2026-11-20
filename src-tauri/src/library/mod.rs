@@ -10,8 +10,13 @@
 //! is NO auto-migration and NO reconstruction of metadata from orphaned image
 //! files. This module is free of Tauri types so it can be unit-tested.
 
+pub mod packs;
+pub mod schema;
+
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use rusqlite::{Connection, OpenFlags};
 
 use crate::db;
 
@@ -74,9 +79,46 @@ pub fn create_fresh(dir: &Path) -> Result<(), String> {
     db::create_and_migrate(&db_path(dir))
 }
 
+/// Open an existing Library for read-write use. Validates intactness first,
+/// enables foreign keys (cascade deletes), and does NOT migrate: v1 has no
+/// auto-migration (SPEC §3) — a Library is created with the current schema.
+pub fn open(library_dir: &Path) -> Result<Connection, String> {
+    validate_intact(library_dir)?;
+    let conn = Connection::open_with_flags(db_path(library_dir), OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(|e| format!("cannot open database {}: {e}", db_path(library_dir).display()))?;
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")
+        .map_err(|e| format!("cannot configure database connection: {e}"))?;
+    Ok(conn)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_returns_writable_connection_with_foreign_keys_on() {
+        let root = tempfile::tempdir().unwrap();
+        create_fresh(root.path()).unwrap();
+        let conn = open(root.path()).unwrap();
+        conn.execute_batch(
+            "INSERT INTO packs (id, title, short_name, folder) VALUES (1, 'T', 't', 'pack_1');
+             INSERT INTO stickers (pack_id, position, file_name, format)
+                 VALUES (1, 1, '001.png', 'png');",
+        )
+        .unwrap();
+        // Deleting a pack cascades to its stickers only with foreign_keys ON.
+        conn.execute("DELETE FROM packs WHERE id = 1", []).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM stickers", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn open_rejects_folder_without_library() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(open(root.path()).is_err());
+    }
 
     #[test]
     fn fresh_library_in_new_folder() {
