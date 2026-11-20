@@ -1,15 +1,31 @@
 :root {
   color-scheme: light;
-  --bg: #f6f7f9;
+  --bg: #f4f8fb;
   --panel: #ffffff;
-  --border: #d9dee5;
-  --text: #1c2430;
-  --muted: #5c6b7a;
-  --accent: #4f46e5;
-  --accent-text: #ffffff;
+  --border: #d5e2ec;
+  --text: #16232e;
+  --muted: #51667a;
+  --accent: #2aabee;
+  --accent-text: #052430;
   --danger-bg: #fdf0ef;
   --danger-border: #e5a3a0;
   --danger-text: #8a2c26;
+}
+
+/* Dark tokens (SPM-14). src/theme.ts sets data-theme on <html>: the stored
+   override wins, otherwise the OS preference via matchMedia. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1720;
+  --panel: #16212c;
+  --border: #2a3947;
+  --text: #e6edf3;
+  --muted: #9aafc2;
+  --accent: #2aabee;
+  --accent-text: #052430;
+  --danger-bg: #38201e;
+  --danger-border: #8a4a44;
+  --danger-text: #f0b9b6;
 }
 
 * {
@@ -163,6 +179,15 @@ button.secondary {
 
 button.secondary:hover {
   background: var(--bg);
+}
+
+.theme-select {
+  font: inherit;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
 }
 
 .actions {
