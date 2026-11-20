@@ -7,6 +7,8 @@
   --muted: #51667a;
   --accent: #2aabee;
   --accent-text: #052430;
+  /* Accent as TEXT on --bg/--panel: --accent itself is only 2.4:1 there. */
+  --accent-ink: #0b6ea8;
   --danger-bg: #fdf0ef;
   --danger-border: #e5a3a0;
   --danger-text: #8a2c26;
@@ -21,8 +23,7 @@
   --border: #2a3947;
   --text: #e6edf3;
   --muted: #9aafc2;
-  --accent: #2aabee;
-  --accent-text: #052430;
+  --accent-ink: #2aabee;
   --danger-bg: #38201e;
   --danger-border: #8a4a44;
   --danger-text: #f0b9b6;
@@ -171,6 +172,7 @@ button.primary:disabled {
 
 button.secondary {
   background: var(--panel);
+  color: var(--text);
   border: 1px solid var(--border);
   padding: 8px 18px;
   border-radius: 8px;

@@ -194,10 +194,13 @@ export class EditorStage {
     this.stage.destroy();
   }
 
-  /** Take the canvas colours (checkerboard, outline) from the current theme's tokens. */
+  /** Take the canvas colours (checkerboard, outline, transformer) from the current theme's tokens. */
   private applyTheme(): void {
     this.backdrop.fillPatternImage(checkerTile(token("--panel"), token("--border")) as unknown as HTMLImageElement);
     this.outline.stroke(token("--muted"));
+    this.transformer.borderStroke(token("--accent-ink"));
+    this.transformer.anchorStroke(token("--accent-ink"));
+    this.transformer.anchorFill(token("--panel"));
     this.content.batchDraw();
     this.guides.batchDraw();
   }

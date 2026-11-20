@@ -10,8 +10,9 @@ import {
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
   getThemePreference,
+  parseThemePreference,
   setThemePreference,
-  type ThemePreference,
+  THEME_CHOICES,
 } from "../theme";
 import { clear, el, withMessage } from "../ui";
 
@@ -114,23 +115,15 @@ export function renderSettings(
             class: "theme-select",
             onchange: (event) => {
               const value = (event.target as HTMLSelectElement).value;
-              setThemePreference(value as ThemePreference);
+              setThemePreference(parseThemePreference(value));
             },
           },
-          el(
-            "option",
-            { value: "system", selected: getThemePreference() === "system" },
-            "Follow system",
-          ),
-          el(
-            "option",
-            { value: "light", selected: getThemePreference() === "light" },
-            "Light",
-          ),
-          el(
-            "option",
-            { value: "dark", selected: getThemePreference() === "dark" },
-            "Dark",
+          ...THEME_CHOICES.map(({ value, label }) =>
+            el(
+              "option",
+              { value, selected: getThemePreference() === value },
+              label,
+            ),
           ),
         ),
         el(

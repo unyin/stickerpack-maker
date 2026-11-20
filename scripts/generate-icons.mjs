@@ -62,6 +62,9 @@ function encodePng(size, pixels) {
 
 // --- Design -----------------------------------------------------------------
 
+// Telegram blue: the icon background, also what shows through the peel gap.
+const BLUE = [42, 171, 238];
+
 // Returns [r, g, b] for a sample point, or null when outside the icon shape.
 // Owner-approved design (SPM-14): Telegram-blue rounded square, white circular
 // die-cut sticker, top-right corner peeled up. The removed corner shows the
@@ -80,12 +83,12 @@ function sample(x, y, size) {
   const sr = 0.3 * size;
   const k = 0.33 * size;
   const inSticker = (x - cx) ** 2 + (y - cy) ** 2 <= sr * sr;
-  if (inSticker && x - y > k) return [42, 171, 238]; // peeled-away corner: gap
+  if (inSticker && x - y > k) return BLUE; // peeled-away corner: the gap shows the background
   if (x - y < k && (y + k - cx) ** 2 + (x - k - cy) ** 2 <= sr * sr) {
     return [214, 233, 245]; // underside flap
   }
   if (inSticker) return [255, 255, 255];
-  return [42, 171, 238];
+  return BLUE;
 }
 
 function render(size) {
