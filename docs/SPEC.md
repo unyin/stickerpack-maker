@@ -269,6 +269,9 @@ stickers, Missing stickers, and the thumbnail.
 - Group-drag reorder (moving several stickers at once).
 - Trash/recovery area for deleted stickers.
 - Bulk emoji-set: rejected as unnecessary — not planned.
+- Editor: middle-mouse click-and-drag pans the view without moving the image.
+- Editor: every edge of the selection box is grabbable for resizing, not just the corners.
+- Editor: custom canvas resizing (in v1 only Fit and Longest side change the canvas).
 
 ## 10. Draft work packages (for review — not yet filed as issues)
 
