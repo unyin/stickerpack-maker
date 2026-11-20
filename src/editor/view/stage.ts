@@ -87,6 +87,8 @@ export class EditorStage {
   private readonly resizeObserver: ResizeObserver;
   private readonly unsubscribe: () => void;
   private viewChanged?: (view: ViewTransform) => void;
+  /** Whether the view has been fitted once; a 0×0 host defers the first fit to resize(). */
+  private fitted = false;
 
   constructor(
     private readonly container: HTMLDivElement,
@@ -130,7 +132,9 @@ export class EditorStage {
     this.resizeObserver.observe(container);
     this.unsubscribe = session.subscribe(() => this.render());
     this.render();
-    this.fit(); // the one automatic fit: when the session opens
+    // The one automatic fit: when the session opens. A detached or 0×0 host
+    // (e.g. another view showing) defers it to the first real resize().
+    if (container.clientWidth > 0 && container.clientHeight > 0) this.fit();
   }
 
   /** Called with the current zoom/pan whenever it changes. */
@@ -164,6 +168,7 @@ export class EditorStage {
   fit(): void {
     const doc = this.session.doc;
     this.setView(fitView({ width: this.stage.width(), height: this.stage.height() }, doc, FIT_MARGIN));
+    this.fitted = true;
   }
 
   /**
@@ -192,6 +197,7 @@ export class EditorStage {
     const { clientWidth, clientHeight } = this.container;
     if (clientWidth === 0 || clientHeight === 0) return; // detached (other tab)
     this.stage.size({ width: clientWidth, height: clientHeight });
+    if (!this.fitted) this.fit(); // later resizes keep the view
   }
 
   private onWheel(e: Konva.KonvaEventObject<WheelEvent>): void {
@@ -238,9 +244,7 @@ export class EditorStage {
     this.transformer.moveToTop();
     this.content.batchDraw();
     this.guides.batchDraw();
-    // A new canvas size (sizing tools, or undo/redo of one) leaves zoom and pan
-    // alone (SPEC §6): the canvas keeps its top-left on screen and the outline
-    // changes by exactly the amount the document did. Only Reset view re-fits.
+    // A new canvas size never moves the view (SPEC §6).
   }
 
   private nodeFor(layer: Layer): Konva.Shape {
