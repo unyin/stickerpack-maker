@@ -102,7 +102,7 @@ mod tests {
         create_fresh(root.path()).unwrap();
         let conn = open(root.path()).unwrap();
         conn.execute_batch(
-            "INSERT INTO packs (id, title, short_name, folder) VALUES (1, 'T', 't', 'pack_1');
+            "INSERT INTO packs (id, title, short_name) VALUES (1, 'T', 't');
              INSERT INTO stickers (pack_id, position, file_name, format)
                  VALUES (1, 1, '001.png', 'png');",
         )

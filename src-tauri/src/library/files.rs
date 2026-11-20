@@ -360,7 +360,7 @@ mod tests {
             let mut conn = Connection::open_in_memory().unwrap();
             db::migrate(&mut conn).unwrap();
             conn.execute(
-                "INSERT INTO packs (id, title, short_name, folder) VALUES (1, 'T', 't', 'pack_1')",
+                "INSERT INTO packs (id, title, short_name) VALUES (1, 'T', 't')",
                 [],
             )
             .unwrap();

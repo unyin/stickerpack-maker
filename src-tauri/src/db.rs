@@ -145,7 +145,7 @@ mod tests {
             assert!(table_exists(&conn, table).unwrap(), "missing table {table}");
         }
         conn.execute_batch(
-            "INSERT INTO packs (id, title, short_name, folder) VALUES (1, 'T', 't', 'pack_1');
+            "INSERT INTO packs (id, title, short_name) VALUES (1, 'T', 't');
              INSERT INTO stickers (pack_id, position, file_name, format)
                  VALUES (1, 1, '001.png', 'png'), (1, 2, '002.png', 'png');",
         )
@@ -184,10 +184,14 @@ mod tests {
             .is_err());
         assert!(conn
             .execute(
-                "INSERT INTO packs (id, title, short_name, folder, status)
-                     VALUES (2, 'T', 't', 'pack_2', 'published')",
+                "INSERT INTO packs (id, title, short_name, status)
+                     VALUES (2, 'T', 'u', 'published')",
                 [],
             )
+            .is_err());
+        // Short Names name the pack folders: unique, case-insensitively.
+        assert!(conn
+            .execute("INSERT INTO packs (id, title, short_name) VALUES (3, 'T', 'T')", [])
             .is_err());
     }
 

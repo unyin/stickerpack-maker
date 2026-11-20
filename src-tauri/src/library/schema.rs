@@ -57,9 +57,11 @@ impl Format {
     }
 }
 
-/// A Pack row. `folder` is the pack's folder name inside the Library
-/// (`pack_<id>`, stable across Title/Short Name edits). `thumbnail` is the
-/// unnumbered thumbnail file name, or None (ADR-0003).
+/// A Pack row. The pack's folder inside the Library is named after its
+/// Short Name (`packs::pack_dir`). `thumbnail` is the unnumbered thumbnail
+/// file name, or None (ADR-0003). `folder_rename_from` holds the old folder
+/// name while a Short Name edit's folder rename is still pending on disk
+/// (`packs::settle_pack_folder` completes it).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pack {
@@ -67,8 +69,8 @@ pub struct Pack {
     pub title: String,
     pub short_name: String,
     pub status: PackStatus,
-    pub folder: String,
     pub thumbnail: Option<String>,
+    pub folder_rename_from: Option<String>,
 }
 
 /// A Sticker row. `position` is 1-based and contiguous within the pack
@@ -93,8 +95,8 @@ fn pack_from_row(row: &Row<'_>) -> rusqlite::Result<Pack> {
         status: PackStatus::parse(&status).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, e.into())
         })?,
-        folder: row.get("folder")?,
         thumbnail: row.get("thumbnail")?,
+        folder_rename_from: row.get("folder_rename_from")?,
     })
 }
 
@@ -166,8 +168,8 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         db::migrate(&mut conn).unwrap();
         conn.execute_batch(
-            "INSERT INTO packs (id, title, short_name, status, folder, thumbnail)
-                 VALUES (1, 'My Pack', 'my_pack', 'live', 'pack_1', 'thumbnail.png');
+            "INSERT INTO packs (id, title, short_name, status, thumbnail)
+                 VALUES (1, 'My Pack', 'my_pack', 'live', 'thumbnail.png');
              INSERT INTO stickers (id, pack_id, position, file_name, format, emoji_string)
                  VALUES (10, 1, 2, '002.webp', 'webp', '🎉'),
                         (11, 1, 1, '001.png', 'png', '');",
@@ -184,7 +186,7 @@ mod tests {
         assert_eq!(pack.title, "My Pack");
         assert_eq!(pack.short_name, "my_pack");
         assert_eq!(pack.status, PackStatus::Live);
-        assert_eq!(pack.folder, "pack_1");
+        assert_eq!(pack.folder_rename_from, None);
         assert_eq!(pack.thumbnail.as_deref(), Some("thumbnail.png"));
     }
 

@@ -8,15 +8,18 @@
 -- roll-forward recovery (ADR-0004).
 
 CREATE TABLE packs (
-    -- AUTOINCREMENT: ids are never reused, so a pack folder left behind by a
-    -- failed delete can never be adopted by a new pack (ADR-0004).
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    title      TEXT NOT NULL,
-    short_name TEXT NOT NULL,
-    status     TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'live')),
-    folder     TEXT NOT NULL,
-    thumbnail  TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    id                 INTEGER PRIMARY KEY,
+    title              TEXT NOT NULL,
+    -- The pack folder is named after the Short Name, so Short Names are
+    -- unique within the Library, case-insensitively (NTFS folder names are
+    -- case-insensitive; Telegram short names are unique too).
+    short_name         TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    status             TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'live')),
+    thumbnail          TEXT,
+    -- Old folder name while a Draft Short Name edit's folder rename is
+    -- pending (committed, not yet applied on disk); NULL otherwise.
+    folder_rename_from TEXT,
+    created_at         TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE stickers (

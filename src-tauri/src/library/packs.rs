@@ -1,42 +1,93 @@
 //! Pack operations and Title / Short Name validation (SPEC §3, §7).
 //!
-//! Create, edit, status toggle and delete follow ADR-0004's commit-first
-//! ordering for the pack folder: creation commits only once `pack_<id>`
-//! exists; deletion commits the row removal before touching the folder.
+//! A pack's folder inside the Library is named after its Short Name (owner
+//! decision 2026-11-20), so Short Names are unique within the Library,
+//! case-insensitively, and never a Windows reserved device name. Folder
+//! changes follow ADR-0004's commit-first ordering: creation commits only
+//! once the folder exists; deletion commits the row removal before touching
+//! the folder; a Draft Short Name edit commits the new name plus a
+//! `folder_rename_from` marker, then renames the folder, then clears the
+//! marker — `settle_pack_folder` rolls an interrupted rename forward.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 use super::schema::{load_pack, Pack, PackStatus};
 
-/// Folder of `pack` inside the Library.
+/// Folder of `pack` inside the Library: named after its Short Name. While a
+/// folder rename is pending, the folder may still sit under the old name;
+/// call `settle_pack_folder` before touching files.
 pub fn pack_dir(library_dir: &Path, pack: &Pack) -> PathBuf {
-    library_dir.join(&pack.folder)
+    library_dir.join(&pack.short_name)
 }
 
-/// Folder name for pack `id` (`pack_<id>`): stable across Title and Short
-/// Name edits, which is why it does not derive from either.
-fn folder_name(pack_id: i64) -> String {
-    format!("pack_{pack_id}")
+/// True when the Library already holds a pack with this Short Name,
+/// case-insensitively (the column is COLLATE NOCASE), other than `except`.
+fn short_name_taken(conn: &Connection, short_name: &str, except: Option<i64>) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT 1 FROM packs WHERE short_name = ?1 AND id IS NOT ?2",
+        params![short_name, except],
+        |_| Ok(()),
+    )
+    .optional()
+    .map(|found| found.is_some())
+    .map_err(|e| format!("cannot check Short Name uniqueness: {e}"))
 }
 
-/// True only for folder names this module produces. Guards every
-/// recursive delete: a corrupted `folder` column ('', '..', a path) must
-/// never resolve to the Library itself or anything outside it.
-fn is_pack_folder_name(name: &str) -> bool {
-    name.strip_prefix("pack_")
-        .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
+fn short_name_in_use(short_name: &str) -> String {
+    format!("Short Name {short_name:?} is already used by another pack in this Library")
 }
 
-/// Create a pack (Draft, SPEC §3). `short_name` is validated when given,
-/// otherwise auto-derived from the Title. The `pack_<id>` folder is created
-/// inside the transaction, before commit, so a committed pack always has its
-/// folder (ADR-0004). An existing EMPTY folder of that name is a harmless
-/// pre-commit crash orphan and is adopted; a non-empty one was not made by
-/// this create and is refused rather than silently absorbed.
+/// True when `dir` is absent or an empty folder — free for a pack to use.
+fn folder_is_free(dir: &Path) -> Result<bool, String> {
+    if !dir.exists() {
+        return Ok(true);
+    }
+    Ok(dir.is_dir()
+        && fs::read_dir(dir)
+            .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+            .next()
+            .is_none())
+}
+
+fn folder_occupied(dir: &Path) -> String {
+    format!(
+        "{} already exists and is not an empty folder; it does not belong to this pack, \
+         so move or remove it first",
+        dir.display()
+    )
+}
+
+/// `base` with a numeric suffix (`cats_2`), shortened so the result stays
+/// within 64 characters without a trailing or doubled underscore.
+fn with_suffix(base: &str, n: u32) -> String {
+    let suffix = format!("_{n}");
+    let keep: String = base.chars().take(64 - suffix.len()).collect();
+    format!("{}{suffix}", keep.trim_end_matches('_'))
+}
+
+/// First free Short Name for an auto-derived `base`: `base`, `base_2`,
+/// `base_3`, … skipping names used by a pack or by a non-empty folder.
+fn unique_auto_short_name(conn: &Connection, library_dir: &Path, base: &str) -> Result<String, String> {
+    for n in 1..=10_000 {
+        let candidate = if n == 1 { base.to_string() } else { with_suffix(base, n) };
+        if !short_name_taken(conn, &candidate, None)? && folder_is_free(&library_dir.join(&candidate))? {
+            return Ok(candidate);
+        }
+    }
+    Err(format!("cannot find a free Short Name derived from {base:?}"))
+}
+
+/// Create a pack (Draft, SPEC §3). A given `short_name` is validated and
+/// must be unused; otherwise one is auto-derived from the Title and made
+/// unique with a numeric suffix. The folder is created inside the
+/// transaction, before commit, so a committed pack always has its folder
+/// (ADR-0004). An existing EMPTY folder of that name is a harmless orphan
+/// and is adopted; a non-empty one does not belong to this pack and is
+/// refused rather than silently absorbed.
 pub fn create_pack(
     conn: &mut Connection,
     library_dir: &Path,
@@ -44,64 +95,44 @@ pub fn create_pack(
     short_name: Option<&str>,
 ) -> Result<Pack, String> {
     let title = validate_title(title)?;
-    let short_name = match short_name {
-        Some(given) => {
-            validate_short_name(given)?;
-            given.to_string()
-        }
-        None => auto_short_name(&title),
-    };
-
     let tx = conn
         .transaction()
         .map_err(|e| format!("cannot start transaction: {e}"))?;
+    let short_name = match short_name {
+        Some(given) => {
+            validate_short_name(given)?;
+            if short_name_taken(&tx, given, None)? {
+                return Err(short_name_in_use(given));
+            }
+            given.to_string()
+        }
+        None => unique_auto_short_name(&tx, library_dir, &auto_short_name(&title))?,
+    };
     tx.execute(
-        "INSERT INTO packs (title, short_name, folder) VALUES (?1, ?2, '')",
+        "INSERT INTO packs (title, short_name) VALUES (?1, ?2)",
         params![title, short_name],
     )
     .map_err(|e| format!("cannot create pack: {e}"))?;
     let pack_id = tx.last_insert_rowid();
-    let folder = folder_name(pack_id);
-    let dir = library_dir.join(&folder);
-    let created_dir = prepare_pack_folder(&dir)?;
-    let committed = tx
-        .execute(
-            "UPDATE packs SET folder = ?1 WHERE id = ?2",
-            params![folder, pack_id],
-        )
-        .map_err(|e| format!("cannot record pack folder: {e}"))
-        .and_then(|_| tx.commit().map_err(|e| format!("cannot commit new pack: {e}")));
-    if let Err(e) = committed {
-        // Not committed: the empty folder we just made is undone (best
-        // effort; if this fails too it is the accepted empty orphan).
+
+    let dir = library_dir.join(&short_name);
+    if !folder_is_free(&dir)? {
+        return Err(format!("cannot create pack: {}", folder_occupied(&dir)));
+    }
+    let created_dir = !dir.exists();
+    if created_dir {
+        fs::create_dir(&dir)
+            .map_err(|e| format!("cannot create pack folder {}: {e}", dir.display()))?;
+    }
+    if let Err(e) = tx.commit() {
+        // Not committed: undo the empty folder we just made (best effort;
+        // if this fails too it is the accepted empty orphan, ADR-0004).
         if created_dir {
             let _ = fs::remove_dir(&dir);
         }
-        return Err(e);
+        return Err(format!("cannot commit new pack: {e}"));
     }
     load_pack(conn, pack_id)
-}
-
-/// Ensure `dir` exists as an empty folder. Returns true when this call
-/// created it (so a failed commit knows to undo it).
-fn prepare_pack_folder(dir: &Path) -> Result<bool, String> {
-    if dir.exists() {
-        let empty = dir.is_dir()
-            && fs::read_dir(dir)
-                .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
-                .next()
-                .is_none();
-        if !empty {
-            return Err(format!(
-                "cannot create pack: {} already exists and is not an empty folder; \
-                 it was not created for this pack, so move or remove it first",
-                dir.display()
-            ));
-        }
-        return Ok(false);
-    }
-    fs::create_dir(dir).map_err(|e| format!("cannot create pack folder {}: {e}", dir.display()))?;
-    Ok(true)
 }
 
 /// Run a single-row pack UPDATE and return the updated pack; an unknown id
@@ -123,22 +154,107 @@ pub fn set_title(conn: &Connection, pack_id: i64, title: &str) -> Result<Pack, S
     update_pack(conn, pack_id, "UPDATE packs SET title = ?1 WHERE id = ?2", &title)
 }
 
-/// Edit a pack's Short Name; Draft only. Locked once Live because Telegram
-/// short names are immutable after creation (SPEC §3).
-pub fn set_short_name(conn: &Connection, pack_id: i64, short_name: &str) -> Result<Pack, String> {
+/// True when `dir` holds an entry named exactly `name` (case-sensitive
+/// match, even on case-insensitive filesystems where `exists()` is not).
+fn has_exact_entry(dir: &Path, name: &str) -> Result<bool, String> {
+    let entries = fs::read_dir(dir).map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("cannot read {}: {e}", dir.display()))?;
+        if entry.file_name() == name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Edit a pack's Short Name; Draft only — locked once Live because Telegram
+/// short names are immutable after creation (SPEC §3). Renames the pack
+/// folder to match, commit-first: if the rename cannot happen now (e.g. the
+/// folder is open in Explorer), the edit still stands and the returned pack
+/// carries `folder_rename_from`; `settle_pack_folder` retries it.
+pub fn set_short_name(
+    conn: &Connection,
+    library_dir: &Path,
+    pack_id: i64,
+    short_name: &str,
+) -> Result<Pack, String> {
     validate_short_name(short_name)?;
-    if load_pack(conn, pack_id)?.status == PackStatus::Live {
+    let pack = settle_pack_folder(conn, library_dir, pack_id)?;
+    if pack.status == PackStatus::Live {
         return Err(
             "Short Name is locked while the pack is Live (Telegram short names cannot change)"
                 .to_string(),
         );
     }
-    update_pack(
-        conn,
-        pack_id,
-        "UPDATE packs SET short_name = ?1 WHERE id = ?2",
-        short_name,
+    // (A still-blocked earlier rename already failed `settle_pack_folder`.)
+    if pack.short_name == short_name {
+        return Ok(pack);
+    }
+    if short_name_taken(conn, short_name, Some(pack_id))? {
+        return Err(short_name_in_use(short_name));
+    }
+    // A case-only change keeps the same folder (NTFS is case-insensitive);
+    // otherwise the destination must be free. An empty orphan is cleared
+    // so the rename can land (Windows cannot rename onto an existing dir).
+    let dest = library_dir.join(short_name);
+    if !pack.short_name.eq_ignore_ascii_case(short_name) && dest.exists() {
+        if !folder_is_free(&dest)? {
+            return Err(format!("cannot change Short Name: {}", folder_occupied(&dest)));
+        }
+        fs::remove_dir(&dest)
+            .map_err(|e| format!("cannot clear empty folder {}: {e}", dest.display()))?;
+    }
+    conn.execute(
+        "UPDATE packs SET short_name = ?1, folder_rename_from = ?2 WHERE id = ?3",
+        params![short_name, pack.short_name, pack_id],
     )
+    .map_err(|e| format!("cannot update pack {pack_id}: {e}"))?;
+    // Committed: from here the rename is roll-forward. A failure now leaves
+    // the marker pending instead of failing the edit.
+    match settle_pack_folder(conn, library_dir, pack_id) {
+        Ok(settled) => Ok(settled),
+        Err(_) => load_pack(conn, pack_id),
+    }
+}
+
+/// Complete a pending folder rename (left by an interrupted or blocked
+/// Short Name edit) and return the settled pack. Idempotent; runs on pack
+/// open/refresh and before any operation touching the pack's files.
+/// Errors when the rename still cannot happen, or when both folders exist
+/// (modified outside the app — never guessed).
+pub fn settle_pack_folder(conn: &Connection, library_dir: &Path, pack_id: i64) -> Result<Pack, String> {
+    let pack = load_pack(conn, pack_id)?;
+    let Some(old) = pack.folder_rename_from.clone() else {
+        return Ok(pack);
+    };
+    let old_present = has_exact_entry(library_dir, &old)?;
+    let new_present = has_exact_entry(library_dir, &pack.short_name)?;
+    let new_dir = pack_dir(library_dir, &pack);
+    match (old_present, new_present) {
+        (true, true) => {
+            return Err(format!(
+                "both {} and {} exist; the Library was modified outside the app",
+                library_dir.join(&old).display(),
+                new_dir.display()
+            ))
+        }
+        (true, false) => fs::rename(library_dir.join(&old), &new_dir).map_err(|e| {
+            format!(
+                "cannot rename pack folder {} to {}: {e}; close any window using it and refresh",
+                library_dir.join(&old).display(),
+                new_dir.display()
+            )
+        })?,
+        // Already renamed (crash before the marker was cleared), or the
+        // folder vanished externally — desync detection reports Missing.
+        (false, _) => {}
+    }
+    conn.execute(
+        "UPDATE packs SET folder_rename_from = NULL WHERE id = ?1",
+        params![pack_id],
+    )
+    .map_err(|e| format!("cannot clear folder rename of pack {pack_id}: {e}"))?;
+    load_pack(conn, pack_id)
 }
 
 /// Toggle Draft/Live, both ways (SPEC §3). The Live→Draft warning is UI
@@ -163,32 +279,42 @@ pub struct LeftoverFolder {
 /// Delete a pack, Draft or Live alike: both remove the local folder and
 /// files (SPEC §3); confirmation and the Live "Telegram pack remains"
 /// warning are UI (SPM-3). Commit-first (ADR-0004): the row deletion
-/// (cascading stickers and journal) commits, THEN the folder is removed.
-/// `Ok(Some(leftover))` means the pack is gone from the Library but its
-/// folder could not be removed — reported, never a row pointing at nothing.
+/// (cascading stickers and journal) commits, THEN the folder is removed —
+/// under both names if a rename was pending. `Ok(Some(leftover))` means the
+/// pack is gone from the Library but a folder could not be removed —
+/// reported, never a row pointing at nothing.
 pub fn delete_pack(
     conn: &Connection,
     library_dir: &Path,
     pack_id: i64,
 ) -> Result<Option<LeftoverFolder>, String> {
     let pack = load_pack(conn, pack_id)?;
-    if !is_pack_folder_name(&pack.folder) {
-        return Err(format!(
-            "refusing to delete pack {pack_id}: its folder {:?} is not a pack folder name",
-            pack.folder
-        ));
+    // Guard every recursive delete: only names that pass Short Name
+    // validation (no separators, dots, or reserved names) are folder names,
+    // so a corrupted row can never resolve to the Library or beyond.
+    let mut folders = vec![pack.short_name.clone()];
+    folders.extend(pack.folder_rename_from.clone());
+    for folder in &folders {
+        if validate_short_name(folder).is_err() {
+            return Err(format!(
+                "refusing to delete pack {pack_id}: {folder:?} is not a valid pack folder name"
+            ));
+        }
     }
     conn.execute("DELETE FROM packs WHERE id = ?1", params![pack_id])
         .map_err(|e| format!("cannot delete pack {pack_id}: {e}"))?;
-    let dir = pack_dir(library_dir, &pack);
-    match fs::remove_dir_all(&dir) {
-        Ok(()) => Ok(None),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Ok(Some(LeftoverFolder {
-            path: dir,
-            reason: e.to_string(),
-        })),
+    let mut leftover = None;
+    for folder in folders {
+        let dir = library_dir.join(folder);
+        match fs::remove_dir_all(&dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                leftover.get_or_insert(LeftoverFolder { path: dir, reason: e.to_string() });
+            }
+        }
     }
+    Ok(leftover)
 }
 
 /// Validate a Title: free text, 1–64 characters after trimming (SPEC §7).
@@ -226,14 +352,35 @@ pub fn validate_short_name(short_name: &str) -> Result<(), String> {
     if short_name.contains("__") {
         return Err("Short Name must not contain consecutive underscores".to_string());
     }
+    if is_windows_reserved(short_name) {
+        return Err(format!(
+            "Short Name {short_name:?} is a name Windows reserves and cannot be a pack folder"
+        ));
+    }
     Ok(())
+}
+
+/// Windows reserved device names (case-insensitive): CON, PRN, AUX, NUL,
+/// COM0–COM9, LPT0–LPT9. Valid on Telegram, but no folder can carry them,
+/// and the pack folder is named after the Short Name.
+fn is_windows_reserved(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    match lower.as_str() {
+        "con" | "prn" | "aux" | "nul" => true,
+        _ => {
+            lower.len() == 4
+                && (lower.starts_with("com") || lower.starts_with("lpt"))
+                && lower.as_bytes()[3].is_ascii_digit()
+        }
+    }
 }
 
 /// Auto-derive a Short Name from a Title (SPEC §3): lowercase, runs of
 /// non-alphanumeric characters collapse to a single underscore, no leading
 /// or trailing underscore. Titles without letters get a `pack` prefix so the
 /// result always begins with a letter; the result is truncated to 64
-/// characters and always passes `validate_short_name`.
+/// characters and always passes `validate_short_name` (a Windows reserved
+/// result gets a `_pack` suffix). Uniqueness is `create_pack`'s job.
 pub fn auto_short_name(title: &str) -> String {
     let mut out = String::new();
     let mut pending_separator = false;
@@ -256,7 +403,12 @@ pub fn auto_short_name(title: &str) -> String {
     // Truncate to 64 chars; a trailing underscore from the cut is trimmed.
     // The construction never produces consecutive underscores.
     let truncated: String = out.chars().take(64).collect();
-    truncated.trim_end_matches('_').to_string()
+    let short = truncated.trim_end_matches('_').to_string();
+    if is_windows_reserved(&short) {
+        format!("{short}_pack")
+    } else {
+        short
+    }
 }
 
 #[cfg(test)]
@@ -329,6 +481,37 @@ mod tests {
         }
     }
 
+    #[test]
+    fn short_name_rejects_windows_reserved_names() {
+        for reserved in ["con", "CON", "Prn", "aux", "nul", "com0", "COM1", "com9", "lpt0", "LPT9"] {
+            let err = validate_short_name(reserved).unwrap_err();
+            assert!(err.contains("Windows"), "{reserved:?}: {err}");
+        }
+        // Only the exact device names are reserved.
+        for fine in ["con_pack", "console", "com10", "lpt", "comx", "nul1"] {
+            assert!(validate_short_name(fine).is_ok(), "rejected {fine:?}");
+        }
+    }
+
+    #[test]
+    fn auto_short_name_sidesteps_reserved_names() {
+        assert_eq!(auto_short_name("Con"), "con_pack");
+        assert_eq!(auto_short_name("LPT1!"), "lpt1_pack");
+        assert_eq!(auto_short_name("Cons"), "cons");
+    }
+
+    #[test]
+    fn numeric_suffix_respects_the_length_limit() {
+        assert_eq!(with_suffix("cats", 2), "cats_2");
+        let long = "x".repeat(64);
+        let suffixed = with_suffix(&long, 12);
+        assert_eq!(suffixed.chars().count(), 64);
+        assert!(suffixed.ends_with("_12"));
+        // A cut that lands on an underscore never yields "__".
+        let underscored = format!("{}_y", "x".repeat(61));
+        assert!(validate_short_name(&with_suffix(&underscored, 2)).is_ok());
+    }
+
     // ---- Pack operations (Library-backed) ----
 
     struct Lib {
@@ -352,27 +535,40 @@ mod tests {
             create_pack(&mut self.conn, self.dir.path(), title, short_name)
         }
 
+        fn rename(&self, pack_id: i64, short_name: &str) -> Result<Pack, String> {
+            set_short_name(&self.conn, self.dir.path(), pack_id, short_name)
+        }
+
         fn pack_count(&self) -> i64 {
             self.conn
                 .query_row("SELECT COUNT(*) FROM packs", [], |r| r.get(0))
                 .unwrap()
         }
+
+        /// Library entries other than the database, sorted.
+        fn folders(&self) -> Vec<String> {
+            let mut names: Vec<String> = fs::read_dir(self.path())
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .filter(|n| !n.starts_with(crate::library::DB_FILE_NAME))
+                .collect();
+            names.sort();
+            names
+        }
     }
 
     #[test]
-    fn create_pack_is_draft_with_auto_short_name_and_its_own_folder() {
+    fn create_pack_is_draft_with_auto_short_name_and_a_folder_named_after_it() {
         let mut lib = Lib::new();
         let pack = lib.create("  My Cool Pack!  ", None).unwrap();
         assert_eq!(pack.title, "My Cool Pack!");
         assert_eq!(pack.short_name, "my_cool_pack");
         assert_eq!(pack.status, PackStatus::Draft);
-        assert_eq!(pack.folder, format!("pack_{}", pack.id));
         assert_eq!(pack.thumbnail, None);
+        assert_eq!(pack.folder_rename_from, None);
+        assert_eq!(pack_dir(lib.path(), &pack), lib.path().join("my_cool_pack"));
         assert!(pack_dir(lib.path(), &pack).is_dir());
-        // Persisted exactly as returned.
-        let stored = load_pack(&lib.conn, pack.id).unwrap();
-        assert_eq!(stored.short_name, pack.short_name);
-        assert_eq!(stored.folder, pack.folder);
+        assert_eq!(load_pack(&lib.conn, pack.id).unwrap().short_name, "my_cool_pack");
     }
 
     #[test]
@@ -380,6 +576,7 @@ mod tests {
         let mut lib = Lib::new();
         let pack = lib.create("Title", Some("Custom_Name_1")).unwrap();
         assert_eq!(pack.short_name, "Custom_Name_1");
+        assert!(lib.path().join("Custom_Name_1").is_dir());
     }
 
     #[test]
@@ -389,49 +586,64 @@ mod tests {
         assert!(lib.create(&"x".repeat(65), None).is_err());
         assert!(lib.create("Fine", Some("1bad")).is_err());
         assert!(lib.create("Fine", Some("a__b")).is_err());
+        assert!(lib.create("Fine", Some("nul")).is_err());
         assert_eq!(lib.pack_count(), 0);
-        let entries: Vec<_> = fs::read_dir(lib.path())
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .filter(|n| n.starts_with("pack_"))
-            .collect();
-        assert!(entries.is_empty(), "stray folders: {entries:?}");
+        assert!(lib.folders().is_empty(), "stray folders: {:?}", lib.folders());
+    }
+
+    #[test]
+    fn auto_short_names_get_a_numeric_suffix_when_taken() {
+        let mut lib = Lib::new();
+        assert_eq!(lib.create("Cats", None).unwrap().short_name, "cats");
+        assert_eq!(lib.create("Cats", None).unwrap().short_name, "cats_2");
+        assert_eq!(lib.create("CATS!", None).unwrap().short_name, "cats_3");
+        assert_eq!(lib.folders(), vec!["cats", "cats_2", "cats_3"]);
+    }
+
+    #[test]
+    fn auto_short_name_skips_a_non_empty_leftover_folder() {
+        // E.g. a folder left behind by a delete that could not remove it.
+        let mut lib = Lib::new();
+        fs::create_dir(lib.path().join("cats")).unwrap();
+        fs::write(lib.path().join("cats").join("001.png"), "old").unwrap();
+        assert_eq!(lib.create("Cats", None).unwrap().short_name, "cats_2");
+        assert_eq!(fs::read_to_string(lib.path().join("cats").join("001.png")).unwrap(), "old");
+    }
+
+    #[test]
+    fn explicit_short_name_already_used_is_refused_case_insensitively() {
+        let mut lib = Lib::new();
+        lib.create("Cats", Some("cats")).unwrap();
+        for taken in ["cats", "CATS", "Cats"] {
+            let err = lib.create("Other", Some(taken)).unwrap_err();
+            assert!(err.contains("already used"), "{taken:?}: {err}");
+        }
+        assert_eq!(lib.pack_count(), 1);
     }
 
     #[test]
     fn create_pack_reuses_an_empty_orphan_folder() {
-        // A crash before the create commit can leave an empty pack_<id>
-        // folder behind (ADR-0004); the next create with that id adopts it.
+        // A crash before the create commit can leave an empty folder behind
+        // (ADR-0004); the next create with that Short Name adopts it.
         let mut lib = Lib::new();
-        fs::create_dir(lib.path().join("pack_1")).unwrap();
+        fs::create_dir(lib.path().join("first")).unwrap();
         let pack = lib.create("First", None).unwrap();
-        assert_eq!(pack.folder, "pack_1");
-        assert!(lib.path().join("pack_1").is_dir());
+        assert_eq!(pack.short_name, "first");
+        assert_eq!(lib.folders(), vec!["first"]);
     }
 
     #[test]
-    fn create_pack_refuses_a_non_empty_folder_it_did_not_create() {
+    fn create_pack_refuses_an_explicit_name_whose_folder_is_not_empty() {
         let mut lib = Lib::new();
-        fs::create_dir(lib.path().join("pack_1")).unwrap();
-        fs::write(lib.path().join("pack_1").join("001.png"), "stranger").unwrap();
-        let err = lib.create("First", None).unwrap_err();
-        assert!(err.contains("pack_1"), "unexpected error: {err}");
+        fs::create_dir(lib.path().join("first")).unwrap();
+        fs::write(lib.path().join("first").join("001.png"), "stranger").unwrap();
+        let err = lib.create("First", Some("first")).unwrap_err();
+        assert!(err.contains("first"), "unexpected error: {err}");
         assert_eq!(lib.pack_count(), 0);
         assert_eq!(
-            fs::read_to_string(lib.path().join("pack_1").join("001.png")).unwrap(),
+            fs::read_to_string(lib.path().join("first").join("001.png")).unwrap(),
             "stranger"
         );
-    }
-
-    #[test]
-    fn pack_ids_and_folders_are_never_reused_after_delete() {
-        let mut lib = Lib::new();
-        lib.create("A", None).unwrap();
-        let b = lib.create("B", None).unwrap();
-        delete_pack(&lib.conn, lib.path(), b.id).unwrap();
-        let c = lib.create("C", None).unwrap();
-        assert!(c.id > b.id, "id {} reused", c.id);
-        assert_ne!(c.folder, b.folder);
     }
 
     #[test]
@@ -442,7 +654,7 @@ mod tests {
         assert_eq!(renamed.title, "New Title");
         // Editing the Title never touches the Short Name or the folder.
         assert_eq!(renamed.short_name, "old");
-        assert_eq!(renamed.folder, pack.folder);
+        assert_eq!(lib.folders(), vec!["old"]);
         set_status(&lib.conn, pack.id, PackStatus::Live).unwrap();
         assert_eq!(set_title(&lib.conn, pack.id, "Live Title").unwrap().title, "Live Title");
         assert!(set_title(&lib.conn, pack.id, "").is_err());
@@ -450,22 +662,143 @@ mod tests {
     }
 
     #[test]
-    fn short_name_is_editable_only_while_draft() {
+    fn short_name_edit_renames_the_folder_with_its_files() {
         let mut lib = Lib::new();
         let pack = lib.create("Pack", None).unwrap();
+        fs::write(pack_dir(lib.path(), &pack).join("001.png"), "A").unwrap();
+        let renamed = lib.rename(pack.id, "renamed_1").unwrap();
+        assert_eq!(renamed.short_name, "renamed_1");
+        assert_eq!(renamed.folder_rename_from, None);
+        assert_eq!(lib.folders(), vec!["renamed_1"]);
         assert_eq!(
-            set_short_name(&lib.conn, pack.id, "renamed_1").unwrap().short_name,
-            "renamed_1"
+            fs::read_to_string(lib.path().join("renamed_1").join("001.png")).unwrap(),
+            "A"
         );
-        assert!(set_short_name(&lib.conn, pack.id, "bad name").is_err());
+        // Unchanged name is a no-op.
+        assert_eq!(lib.rename(pack.id, "renamed_1").unwrap().short_name, "renamed_1");
+    }
+
+    #[test]
+    fn short_name_case_only_edit_renames_the_folder() {
+        let mut lib = Lib::new();
+        let pack = lib.create("Pack", Some("my_pack")).unwrap();
+        assert_eq!(lib.rename(pack.id, "My_Pack").unwrap().short_name, "My_Pack");
+        assert_eq!(lib.folders(), vec!["My_Pack"]);
+    }
+
+    #[test]
+    fn short_name_edit_is_refused_when_invalid_or_taken() {
+        let mut lib = Lib::new();
+        let a = lib.create("A", Some("alpha")).unwrap();
+        lib.create("B", Some("beta")).unwrap();
+        assert!(lib.rename(a.id, "bad name").is_err());
+        assert!(lib.rename(a.id, "aux").is_err());
+        let err = lib.rename(a.id, "BETA").unwrap_err();
+        assert!(err.contains("already used"), "unexpected error: {err}");
+        fs::create_dir(lib.path().join("gamma")).unwrap();
+        fs::write(lib.path().join("gamma").join("x.png"), "x").unwrap();
+        assert!(lib.rename(a.id, "gamma").is_err());
+        assert!(lib.rename(999, "nope").is_err());
+        assert_eq!(load_pack(&lib.conn, a.id).unwrap().short_name, "alpha");
+        assert!(lib.path().join("alpha").is_dir());
+    }
+
+    #[test]
+    fn short_name_edit_can_land_on_an_empty_orphan_folder() {
+        let mut lib = Lib::new();
+        let pack = lib.create("A", Some("alpha")).unwrap();
+        fs::create_dir(lib.path().join("omega")).unwrap();
+        assert_eq!(lib.rename(pack.id, "omega").unwrap().short_name, "omega");
+        assert_eq!(lib.folders(), vec!["omega"]);
+    }
+
+    #[test]
+    fn short_name_is_locked_while_live() {
+        let mut lib = Lib::new();
+        let pack = lib.create("Pack", None).unwrap();
         set_status(&lib.conn, pack.id, PackStatus::Live).unwrap();
-        let err = set_short_name(&lib.conn, pack.id, "other").unwrap_err();
+        let err = lib.rename(pack.id, "other").unwrap_err();
         assert!(err.contains("Live"), "unexpected error: {err}");
-        assert_eq!(load_pack(&lib.conn, pack.id).unwrap().short_name, "renamed_1");
+        assert_eq!(load_pack(&lib.conn, pack.id).unwrap().short_name, "pack");
+        assert_eq!(lib.folders(), vec!["pack"]);
         // Unlocked again after toggling back to Draft.
         set_status(&lib.conn, pack.id, PackStatus::Draft).unwrap();
-        assert_eq!(set_short_name(&lib.conn, pack.id, "other").unwrap().short_name, "other");
-        assert!(set_short_name(&lib.conn, 999, "nope").is_err());
+        assert_eq!(lib.rename(pack.id, "other").unwrap().short_name, "other");
+    }
+
+    /// Simulate a crash right after the Short Name edit committed: the row
+    /// carries the new name plus the marker; the folder has the old name.
+    fn commit_rename_without_moving(lib: &Lib, pack_id: i64, old: &str, new: &str) {
+        lib.conn
+            .execute(
+                "UPDATE packs SET short_name = ?1, folder_rename_from = ?2 WHERE id = ?3",
+                params![new, old, pack_id],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn settle_rolls_an_interrupted_folder_rename_forward() {
+        let mut lib = Lib::new();
+        let pack = lib.create("Pack", Some("before")).unwrap();
+        fs::write(lib.path().join("before").join("001.png"), "A").unwrap();
+        commit_rename_without_moving(&lib, pack.id, "before", "after");
+        let settled = settle_pack_folder(&lib.conn, lib.path(), pack.id).unwrap();
+        assert_eq!(settled.folder_rename_from, None);
+        assert_eq!(lib.folders(), vec!["after"]);
+        assert_eq!(fs::read_to_string(lib.path().join("after").join("001.png")).unwrap(), "A");
+        // Idempotent.
+        settle_pack_folder(&lib.conn, lib.path(), pack.id).unwrap();
+        assert_eq!(lib.folders(), vec!["after"]);
+    }
+
+    #[test]
+    fn settle_clears_the_marker_when_the_rename_already_happened() {
+        // Crash after the folder rename but before the marker was cleared.
+        let mut lib = Lib::new();
+        let pack = lib.create("Pack", Some("before")).unwrap();
+        fs::rename(lib.path().join("before"), lib.path().join("after")).unwrap();
+        commit_rename_without_moving(&lib, pack.id, "before", "after");
+        let settled = settle_pack_folder(&lib.conn, lib.path(), pack.id).unwrap();
+        assert_eq!(settled.folder_rename_from, None);
+        assert_eq!(lib.folders(), vec!["after"]);
+    }
+
+    #[test]
+    fn settle_refuses_when_both_folders_exist() {
+        let mut lib = Lib::new();
+        let pack = lib.create("Pack", Some("before")).unwrap();
+        commit_rename_without_moving(&lib, pack.id, "before", "after");
+        fs::create_dir(lib.path().join("after")).unwrap();
+        let err = settle_pack_folder(&lib.conn, lib.path(), pack.id).unwrap_err();
+        assert!(err.contains("outside the app"), "unexpected error: {err}");
+        assert!(load_pack(&lib.conn, pack.id).unwrap().folder_rename_from.is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn blocked_folder_rename_stays_pending_and_retries_later() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut lib = Lib::new();
+        let pack = lib.create("Pack", Some("before")).unwrap();
+        // The edit committed; then the folder cannot be renamed — a
+        // read-only Library folder stands in for a folder held open by
+        // Explorer on Windows. (Read-only also blocks DB writes, so the
+        // commit is simulated before the block is applied.)
+        commit_rename_without_moving(&lib, pack.id, "before", "after");
+        fs::set_permissions(lib.path(), fs::Permissions::from_mode(0o555)).unwrap();
+        let blocked = settle_pack_folder(&lib.conn, lib.path(), pack.id);
+        fs::set_permissions(lib.path(), fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(blocked.unwrap_err().contains("close any window"));
+        let pending = load_pack(&lib.conn, pack.id).unwrap();
+        assert_eq!(pending.short_name, "after");
+        assert_eq!(pending.folder_rename_from.as_deref(), Some("before"));
+        assert_eq!(lib.folders(), vec!["before"]);
+        // Once unblocked, the next edit settles first, then applies itself.
+        let renamed = lib.rename(pack.id, "third").unwrap();
+        assert_eq!(renamed.short_name, "third");
+        assert_eq!(renamed.folder_rename_from, None);
+        assert_eq!(lib.folders(), vec!["third"]);
     }
 
     #[test]
@@ -492,7 +825,7 @@ mod tests {
                     params![pack.id],
                 )
                 .unwrap();
-            assert_eq!(delete_pack(&lib.conn, lib.path(), pack.id).unwrap().map(|l| l.reason), None);
+            assert!(delete_pack(&lib.conn, lib.path(), pack.id).unwrap().is_none());
             assert!(load_pack(&lib.conn, pack.id).is_err());
             let stickers: i64 = lib
                 .conn
@@ -503,6 +836,16 @@ mod tests {
             // The Library itself is untouched.
             crate::library::validate_intact(lib.path()).unwrap();
         }
+    }
+
+    #[test]
+    fn delete_pack_removes_both_folders_of_a_pending_rename() {
+        let mut lib = Lib::new();
+        let pack = lib.create("Pack", Some("before")).unwrap();
+        commit_rename_without_moving(&lib, pack.id, "before", "after");
+        fs::create_dir(lib.path().join("after")).unwrap();
+        assert!(delete_pack(&lib.conn, lib.path(), pack.id).unwrap().is_none());
+        assert!(lib.folders().is_empty(), "left: {:?}", lib.folders());
     }
 
     #[test]
@@ -521,17 +864,25 @@ mod tests {
     }
 
     #[test]
-    fn delete_pack_refuses_a_folder_value_outside_the_pack_scheme() {
-        // Defence in depth: a corrupted folder column ('', '..', a path)
-        // must never turn into a recursive delete of the Library or beyond.
-        for bad in ["", "..", ".", "../elsewhere", "pack_1/..", "pack_x", "library.db"] {
+    fn delete_pack_refuses_a_folder_value_outside_the_short_name_rules() {
+        // Defence in depth: a corrupted short_name or rename marker ('',
+        // '..', a path) must never become a recursive delete of the Library.
+        for (column, bad) in [
+            ("short_name", ""),
+            ("short_name", ".."),
+            ("short_name", "../elsewhere"),
+            ("short_name", "library.db"),
+            ("short_name", "a/b"),
+            ("folder_rename_from", ".."),
+            ("folder_rename_from", ""),
+        ] {
             let mut lib = Lib::new();
             let pack = lib.create("P", None).unwrap();
             lib.conn
-                .execute("UPDATE packs SET folder = ?1 WHERE id = ?2", params![bad, pack.id])
+                .execute(&format!("UPDATE packs SET {column} = ?1 WHERE id = ?2"), params![bad, pack.id])
                 .unwrap();
-            assert!(delete_pack(&lib.conn, lib.path(), pack.id).is_err(), "accepted {bad:?}");
-            assert!(load_pack(&lib.conn, pack.id).is_ok(), "row deleted for {bad:?}");
+            assert!(delete_pack(&lib.conn, lib.path(), pack.id).is_err(), "accepted {column}={bad:?}");
+            assert!(load_pack(&lib.conn, pack.id).is_ok(), "row deleted for {column}={bad:?}");
             crate::library::validate_intact(lib.path()).unwrap();
         }
     }

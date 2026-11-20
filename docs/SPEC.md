@@ -31,6 +31,10 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
   consecutive underscores, ≤64 characters. Auto-derived from the title, manually editable
   **only while Draft; locked once Live** (Telegram short names are immutable after creation).
   The `_by_<bot_username>` suffix applies only to bot-created sets (future sync, not v1).
+  Short Names are **unique within the Library** (case-insensitive) because each pack's folder
+  is named after its Short Name; an auto-derived name that is taken gets a numeric suffix
+  (`cats_2`), a typed one is refused. Windows reserved names (`con`, `prn`, `aux`, `nul`,
+  `com0`–`com9`, `lpt0`–`lpt9`) are refused.
 - **Status**: **Draft** (default for new packs; not yet on Telegram) or **Live** (exists on
   Telegram). v1: manual toggle both ways; Live→Draft shows a warning. Live status otherwise
   changes nothing in v1 beyond the badge and the short-name lock.
@@ -54,7 +58,8 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 
 ### Library
 - App-managed folder chosen at first run (suggested default `Documents\Stickerpack Library`),
-  containing the SQLite DB and one folder per pack. Path shown in settings.
+  containing the SQLite DB and one folder per pack, named after the pack's Short Name (a Draft
+  Short Name edit renames the folder). Path shown in settings.
 - **Manual re-pointing in v1**: settings can point the app at another library folder (moved or
   restored library). Re-pointing expects an intact library (DB included).
 - A **fresh** library + DB can always be created from scratch (first run, or re-point at an
@@ -193,7 +198,7 @@ stickers, Missing stickers, and the thumbnail.
 | Emoji string | 1–20 emoji | warn only |
 | Pack size | ≤120 stickers | warn only |
 | Title | 1–64 chars | validate |
-| Short name | a-z A-Z 0-9 _, starts with letter, no `__`, ≤64 | validate; locked when Live |
+| Short name | a-z A-Z 0-9 _, starts with letter, no `__`, ≤64; unique in Library; not a Windows reserved name | validate; locked when Live |
 
 ## 8. Out of scope for v1 (future seams)
 
