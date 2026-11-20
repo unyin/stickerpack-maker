@@ -136,6 +136,14 @@ fn load_journal(conn: &Connection, pack_id: i64) -> Result<Option<(Vec<Step>, i6
     }
 }
 
+/// True when a committed rename plan for the pack is still pending (its
+/// file moves will be rolled forward by `recover`). Callers use it to tell
+/// a pre-commit failure (nothing changed; staged copies may be discarded)
+/// from a post-commit one (the operation stands and will complete).
+pub fn has_pending_plan(conn: &Connection, pack_id: i64) -> Result<bool, String> {
+    Ok(load_journal(conn, pack_id)?.is_some())
+}
+
 fn clear_journal(conn: &Connection, pack_id: i64) -> Result<(), String> {
     conn.execute(
         "DELETE FROM rename_journal WHERE pack_id = ?1",
@@ -183,7 +191,8 @@ pub enum FaultPoint {
 /// move files in two phases. `mutate` runs inside the commit transaction and
 /// must bring the rows to the plan's final state (renumber via vacate-then-
 /// assign; SQLite cannot defer composite UNIQUE). A pending journal from an
-/// interrupted operation is recovered first.
+/// interrupted operation is rolled forward first; stray temps are NOT swept
+/// here, so copies the caller staged for this plan survive.
 pub fn apply_plan(
     conn: &mut Connection,
     pack_dir: &Path,
@@ -205,7 +214,7 @@ pub fn apply_plan_with_fault(
     mutate: impl FnOnce(&Transaction) -> Result<(), String>,
     fault: &dyn Fn(FaultPoint) -> Result<(), String>,
 ) -> Result<(), String> {
-    recover(conn, pack_dir, pack_id)?;
+    roll_forward(conn, pack_dir, pack_id)?;
 
     if steps.is_empty() {
         let tx = conn
@@ -291,7 +300,17 @@ pub fn apply_plan_with_fault(
 /// Roll an interrupted operation forward to its committed state, then sweep
 /// stray pre-commit temps. Idempotent; runs on pack open and manual refresh
 /// BEFORE desync detection, never on app start (SPEC §4, ADR-0004).
+/// Operations call it before staging anything, never between staging and
+/// `apply_plan` — the sweep would delete their staged copies.
 pub fn recover(conn: &Connection, pack_dir: &Path, pack_id: i64) -> Result<(), String> {
+    roll_forward(conn, pack_dir, pack_id)?;
+    sweep_stray_temps(pack_dir)
+}
+
+/// Complete a pending journal, if any. Unlike `recover` it never sweeps:
+/// `apply_plan` runs it after the caller has staged copies for this very
+/// plan, and those staged temps must survive until the plan adopts them.
+fn roll_forward(conn: &Connection, pack_dir: &Path, pack_id: i64) -> Result<(), String> {
     if let Some((steps, phase)) = load_journal(conn, pack_id)? {
         // Pass A: complete phase 1 for any source still under its old name —
         // only while phase 1 is unconfirmed. Once phase 2 has placed files,
@@ -335,7 +354,6 @@ pub fn recover(conn: &Connection, pack_dir: &Path, pack_id: i64) -> Result<(), S
         }
         clear_journal(conn, pack_id)?;
     }
-    sweep_stray_temps(pack_dir)?;
     Ok(())
 }
 
@@ -689,6 +707,27 @@ mod tests {
         assert_eq!(h.read(&staged), None);
         // Removing an already-absent name is not an error (rollback retry).
         remove_names(h.path(), &[staged]).unwrap();
+    }
+
+    #[test]
+    fn plan_adopts_a_copy_staged_just_before_it() {
+        // Regression: apply_plan must not sweep the caller's staged temps.
+        let mut h = Harness::new(&[("001.png", "A")]);
+        let src = h.dir.path().join("source.png");
+        fs::write(&src, "B").unwrap();
+        let staged = stage_copy(h.path(), &src).unwrap();
+        fs::remove_file(&src).unwrap();
+        let Harness { dir, conn } = &mut h;
+        apply_plan(conn, dir.path(), 1, &[Step::rename(staged, "002.png")], |tx| {
+            exec(
+                tx,
+                "INSERT INTO stickers (id, pack_id, position, file_name, format)
+                     VALUES (2, 1, 2, '002.png', 'png')",
+            )
+        })
+        .unwrap();
+        assert_eq!(h.read("002.png").as_deref(), Some("B"));
+        assert_eq!(h.names(), vec!["001.png", "002.png"]);
     }
 
     #[test]
