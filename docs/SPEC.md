@@ -151,27 +151,39 @@ stickers, Missing stickers, and the thumbnail.
 
 ### Import and canvas
 - Source formats: .jpg, .jpeg, .jfif, .png, .webp.
-- Canvas sizes itself to the imported image. Imports larger than **2000×2000** trigger a
-  dialog: **OK** scales to fit within 2000×2000 preserving aspect ratio (longest side 2000);
-  **Cancel** aborts the import.
+- The canvas always starts at **512×512** (owner decision 2026-11-20); it never sizes itself
+  to the imported image. The opened image is placed at its native pixel size, centred on the
+  canvas, and may overflow it.
+- Imports larger than **2000×2000** (the import cap) trigger a dialog: **OK** scales to fit
+  within 2000×2000 preserving aspect ratio (longest side 2000); **Cancel** aborts the import.
 - The image is draggable on the canvas (pan/zoom for editing comfort).
 - One session at a time (owner decision 2026-11-20): with no session open, **Open image**
   starts one; while a session is open, another image can only be brought in with **Add image
-  as layer** (placed centred on top, same 2000×2000 rule). Starting over means **Close**
-  first, which warns when there are unsaved changes.
+  as layer** (native pixel size, centred on the canvas, on top; may overflow; same 2000×2000
+  rule). Starting over means **Close** first, which warns when there are unsaved changes.
 
 ### Crop and sizing
 - Togglable **512×512 box overlay**, fixed at canvas center; never draggable/resizable;
   drawn **above all layers** so it stays visible when layers cover the canvas.
   Drag the image to choose what survives.
 - **Crop** is destructive: everything outside the box is discarded; canvas becomes 512×512.
+  **Open SPM-6 decision:** this conflicts with "only sizing tools 1 and 2 change the canvas
+  size" below; SPM-6 must settle whether Crop sets the canvas or only discards pixels.
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
   image" = everything on the canvas treated as one layer, exactly like selecting every layer
   and resizing them together (owner decision 2026-11-20):
-  1. Fit to 512×512 and pad the rest with transparency.
-  2. Scale longest side to 512 px (the canvas becomes the scaled image, no padding).
-  3. Free resize: entered value = longest side, a whole number of pixels from 1 to 2000.
-- The sizing tools change the canvas and the image, **never the view**: zoom and pan stay where
+  1. **Fit to 512×512**: scale the whole image so its longest side is 512, set the canvas to
+     512×512 and centre the image; the user can then reposition it, and the rest is
+     transparent padding.
+  2. **Scale longest side to 512**: scale the whole image so its longest side is 512, then set
+     the canvas to the scaled image's size in whole pixels (no padding).
+  3. **Free resize**: scale the whole image so its longest side is the entered value, a whole
+     number of pixels from 1 to 2000. The canvas size does not change; the image keeps its
+     centre where it was.
+- Only sizing tools 1 and 2 change the canvas size (owner decision 2026-11-20). Nothing else
+  does: not opening an image (always 512×512), adding a layer, merging, deleting, free
+  resize, or undo/redo of any of these.
+- The sizing tools change the canvas or the image, **never the view**: zoom and pan stay where
   the user left them (owner decision 2026-11-20). The canvas keeps its top-left corner where
   it was on screen, so the outline grows or shrinks by the same factor as the canvas.
   Undo/redo of a sizing tool behaves the same.
@@ -203,7 +215,8 @@ stickers, Missing stickers, and the thumbnail.
 - The live readout shows by how much the image is off; sizing tools fix it in one click.
 - Closing the editor with unsaved changes warns first. Unfinished, non-conforming work
   cannot be parked — there is deliberately no scratch/draft save location.
-- Thumbnail mode is the same editor with a 100×100 canvas and the thumbnail constraint set.
+- Thumbnail mode is the same editor with a canvas that starts at 100×100 (instead of
+  512×512) and the thumbnail constraint set.
 
 ## 7. Constraints quick reference
 
@@ -254,7 +267,7 @@ stickers, Missing stickers, and the thumbnail.
    (Normal/Reorder modes, detail + aggregate panels, thumbnail slot), emoji edit/copy,
    explorer reveal, delete semantics, 120 warning, bulk import with validation.
 4. **Per-sticker command UX design pass** — completed 2026-11-19; command map in §5.
-5. **Editor foundation**: import pipeline + 2000 cap dialog, canvas fit, layers, undo/redo,
+5. **Editor foundation**: import pipeline + 2000 cap dialog, view fit, layers, undo/redo,
    drag/pan/zoom, merge selected layers, flatten-on-save plumbing.
 6. **Crop & sizing**: 512 box overlay, destructive crop, three sizing tools, live readout.
 7. **Background removal**: ONNX placement ADR, offline auto removal, refine brush.
