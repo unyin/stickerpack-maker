@@ -1,0 +1,3 @@
+# Stickers are independent copies, never shared references
+
+A sticker can be reused across packs, but Telegram treats each set as a separate container: every sticker has its own identity per set, and editing it in one set never affects another. We therefore model a sticker as belonging to exactly one pack; "duplicate to pack B" copies the image file and emoji string into a new, independently editable sticker. The rejected alternative — one file referenced by many packs — would propagate edits across packs, contradicting Telegram's semantics, and complicate deletion. File duplication is deliberate; "move" is duplicate-then-delete-original, offered as one action to keep packs clean.

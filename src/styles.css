@@ -1,0 +1,191 @@
+:root {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --border: #d9dee5;
+  --text: #1c2430;
+  --muted: #5c6b7a;
+  --accent: #4f46e5;
+  --accent-text: #ffffff;
+  --danger-bg: #fdf0ef;
+  --danger-border: #e5a3a0;
+  --danger-text: #8a2c26;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  font-family: system-ui, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 10px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 700;
+}
+
+.nav {
+  display: flex;
+  gap: 8px;
+}
+
+.nav-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.nav-btn:hover {
+  background: var(--bg);
+}
+
+.nav-btn.active {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.banner {
+  margin: 12px 20px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--danger-border);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.content {
+  flex: 1;
+  overflow: auto;
+  padding: 24px 20px;
+}
+
+.view {
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+h1 {
+  font-size: 22px;
+  margin: 0 0 8px;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.placeholder {
+  margin-top: 16px;
+  padding: 24px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-top: 16px;
+}
+
+.field-label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.path {
+  display: block;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: Consolas, monospace;
+  font-size: 13px;
+  word-break: break-all;
+}
+
+button {
+  font: inherit;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border: none;
+  padding: 8px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+button.secondary {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 8px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button.secondary:hover {
+  background: var(--bg);
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.message {
+  color: var(--danger-text);
+  min-height: 1em;
+  font-size: 14px;
+}
+
+.first-run {
+  max-width: 640px;
+  margin: 8vh auto 0;
+  padding: 0 20px;
+}
+
+.fatal {
+  max-width: 640px;
+  margin: 10vh auto;
+  padding: 0 20px;
+}

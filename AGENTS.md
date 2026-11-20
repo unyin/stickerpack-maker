@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues live in GitHub Issues on `unyin/stickerpack-maker`, managed via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues are tracked with Trekker (`.trekker/trekker.db`), managed via the `trekker` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

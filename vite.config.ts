@@ -1,0 +1,14 @@
+import { defineConfig } from "vite";
+
+// Tauri expects a fixed dev-server port (see src-tauri/tauri.conf.json devUrl).
+export default defineConfig({
+  clearScreen: false,
+  server: {
+    port: 5173,
+    strictPort: true,
+  },
+  build: {
+    target: "es2022",
+    outDir: "dist",
+  },
+});
