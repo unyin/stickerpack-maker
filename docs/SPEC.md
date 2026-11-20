@@ -169,11 +169,15 @@ stickers, Missing stickers, and the thumbnail.
   draggable/resizable; drawn **above all layers** so it stays visible when layers cover the
   canvas.
   Drag the image to choose what survives. The overlay is **on by default** and the **Crop
-  box** button shows or hides it (owner decision 2026-11-20). It follows the canvas size,
+  box** button shows or hides it (owner decision 2026-11-20). The box is the set's side,
+  **capped at the canvas size on each axis**, so it is never larger than the canvas: a
+  512×439 canvas gets a 512×439 box (owner decision 2026-11-20). It follows the canvas size,
   staying centred; when the canvas and box sides differ by an odd number, its top-left is
-  rounded down to a whole pixel, so it always covers whole pixels.
+  rounded down to a whole pixel, so it always covers whole pixels. The Crop button names
+  the actual box size (e.g. **Crop to 512×439**).
 - **Crop** is destructive: everything outside the box (512×512 for stickers, 100×100 for
-  thumbnails) is discarded; the canvas size stays as it is (owner decision 2026-11-20).
+  thumbnails, capped at the canvas size as above) is discarded; the canvas size stays as it
+  is (owner decision 2026-11-20).
   - A layer inside the box is left exactly as it is. A layer crossing the box edge keeps
     only the whole pixels it covers inside the box: it becomes an unrotated, unscaled layer
     at that spot, with its rotation and scale baked into its pixels. It keeps its name and

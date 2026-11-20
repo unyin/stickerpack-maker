@@ -364,17 +364,20 @@ export function mergeLayers(
 }
 
 /**
- * The crop box (SPEC §6): `side` x `side` (the constraint set's side), fixed
- * at the canvas centre. Its top-left is rounded down to a whole pixel, so an
- * odd difference (a 512×341 canvas after Longest side) still crops whole
- * pixels. The overlay draws exactly this rectangle and Crop keeps exactly it.
+ * The crop box (SPEC §6): the constraint set's `side`, capped at the canvas
+ * size on each axis (owner, 2026-11-20), so it is never larger than the
+ * canvas: a 512×439 canvas gets a 512×439 box. Centred on the canvas, with
+ * its top-left rounded down to a whole pixel. The overlay draws exactly this
+ * rectangle and Crop keeps exactly it.
  */
 export function cropBox(canvas: Size, side: number): Rect {
+  const width = Math.min(side, canvas.width);
+  const height = Math.min(side, canvas.height);
   return {
-    x: Math.floor((canvas.width - side) / 2),
-    y: Math.floor((canvas.height - side) / 2),
-    width: side,
-    height: side,
+    x: Math.floor((canvas.width - width) / 2),
+    y: Math.floor((canvas.height - height) / 2),
+    width,
+    height,
   };
 }
 

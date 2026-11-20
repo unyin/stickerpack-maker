@@ -131,9 +131,9 @@ export function selectModeFor(event: {
  * (every layer already inside the box), or it would discard every layer
  * (a session keeps at least one, SPEC §6).
  */
-export function cropBlocker(plan: readonly CropAction[], constraints: ConstraintSet): string | null {
+export function cropBlocker(plan: readonly CropAction[], box: Rect): string | null {
   if (plan.every((a) => a.kind === "keep")) {
-    return `Everything is already inside the ${constraints.side}×${constraints.side} box.`;
+    return `Everything is already inside the ${box.width}×${box.height} box.`;
   }
   if (plan.every((a) => a.kind === "remove")) return NOTHING_IN_BOX;
   return null;

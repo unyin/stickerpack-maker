@@ -73,8 +73,8 @@ export class EditorStage {
   private readonly guides = new Konva.Layer({ listening: false });
   private readonly outline: Konva.Rect;
   /**
-   * The crop box overlay (SPEC §6): the constraint set's side, fixed at the
-   * canvas centre (`cropBox`, the rectangle Crop keeps). A solid halo under
+   * The crop box overlay (SPEC §6): the constraint set's side capped at the
+   * canvas size, fixed at the canvas centre (`cropBox`, the rectangle Crop keeps). A solid halo under
    * a dashed line keeps it visible over any image.
    */
   private readonly boxHalo = new Konva.Rect({ strokeWidth: 3, strokeScaleEnabled: false, listening: false });

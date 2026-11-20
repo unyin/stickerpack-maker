@@ -90,7 +90,8 @@ function buildEditor(): HTMLElement {
   }) as HTMLInputElement;
   const resizeButton = button("Resize", () => freeResize());
   const boxButton = button("Crop box", () => toggleBox());
-  const cropButton = button(`Crop to ${targetSide}×${targetSide}`, () => run(cropToBox));
+  // Labelled with the actual box size in refresh(): it is capped at the canvas.
+  const cropButton = button("Crop", () => run(cropToBox));
   const resetViewButton = button("Reset view", () => stage?.fit());
   const closeButton = button("Close", () => run(closeSession));
   const upButton = button("Move up", () => moveSelected(+1));
@@ -112,10 +113,9 @@ function buildEditor(): HTMLElement {
   longestButton.title = longestTitle;
   resizeButton.title = resizeTitle;
   resetViewButton.title = "Zoom and centre the canvas in view (changes the view only)";
-  boxButton.title = `Show or hide the ${targetSide}×${targetSide} crop box`;
-  const cropTitle =
-    `Discard everything outside the ${targetSide}×${targetSide} box; drag the image to choose what stays. ` +
-    "The canvas size stays";
+  boxButton.title = "Show or hide the crop box";
+  const cropTitle = (size: string) =>
+    `Discard everything outside the ${size} box; drag the image to choose what stays. The canvas size stays`;
   sideInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") freeResize();
   });
@@ -260,8 +260,9 @@ function buildEditor(): HTMLElement {
     const current = session;
     if (!current) return;
     const doc = current.doc;
-    const plan = planCrop(doc, cropBox(doc, targetSide));
-    if (cropBlocker(plan, constraints)) return;
+    const box = cropBox(doc, targetSide);
+    const plan = planCrop(doc, box);
+    if (cropBlocker(plan, box)) return;
     const clips = plan.flatMap((action) => {
       if (action.kind !== "clip") return [];
       const layer = doc.layers.find((l) => l.id === action.id);
@@ -397,9 +398,13 @@ function buildEditor(): HTMLElement {
       button.title = reason ?? action;
     }
     sideInput.disabled = busy;
-    const cropReason = cropBlocker(planCrop(doc, cropBox(doc, targetSide)), constraints);
+    // One cropBox result drives the label, the blocker and (in the stage) the overlay.
+    const box = cropBox(doc, targetSide);
+    const boxSize = `${box.width}×${box.height}`;
+    const cropReason = cropBlocker(planCrop(doc, box), box);
+    cropButton.textContent = `Crop to ${boxSize}`;
     cropButton.disabled = busy || cropReason !== null;
-    cropButton.title = cropReason ?? cropTitle;
+    cropButton.title = cropReason ?? cropTitle(boxSize);
     boxButton.setAttribute("aria-pressed", String(showBox));
     readout.textContent = readoutText(doc, constraints);
     readout.classList.toggle("off", !constraintStatus(doc, constraints).ok);

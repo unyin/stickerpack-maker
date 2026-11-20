@@ -68,22 +68,51 @@ function copyClips(doc: Doc, plan: readonly CropAction[]): Map<string, RgbaImage
 
 const SETS: readonly ConstraintSet[] = [STICKER, THUMBNAIL];
 
-test("the crop box is the set's side, fixed at the canvas centre, on whole pixels", () => {
+test("the crop box is the set's side capped at the canvas, fixed at the canvas centre, on whole pixels", () => {
   for (const set of SETS) {
     const S = set.side;
     // On the starting canvas the box is the canvas.
     expect(cropBox(startCanvas(set), S)).toEqual({ x: 0, y: 0, width: S, height: S });
-    // It follows the canvas size and stays centred.
+    // A larger canvas: the full side, centred.
     expect(cropBox({ width: S + 40, height: S + 20 }, S)).toEqual({ x: 20, y: 10, width: S, height: S });
     // An odd difference rounds the top-left down to a whole pixel.
-    expect(cropBox({ width: S, height: S - 7 }, S)).toEqual({ x: 0, y: -4, width: S, height: S });
+    expect(cropBox({ width: S + 7, height: S }, S)).toEqual({ x: 3, y: 0, width: S, height: S });
+    // A smaller axis caps the box at the canvas there: never larger than the canvas.
+    expect(cropBox({ width: S, height: S - 7 }, S)).toEqual({ x: 0, y: 0, width: S, height: S - 7 });
+    expect(cropBox({ width: S + 9, height: S - 30 }, S)).toEqual({ x: 4, y: 0, width: S, height: S - 30 });
+    expect(cropBox({ width: 3, height: 2 }, S)).toEqual({ x: 0, y: 0, width: 3, height: 2 });
   }
-  // After Longest side the sticker canvas is S wide and shorter: the box overhangs it vertically.
-  const S = STICKER.side;
-  const doc = newDocument(image(S * 2, S), "wide", startCanvas(STICKER));
-  const scaled = scaleLongestSide(doc, placedBounds(S * 2, S, doc.layers[0].transform), S);
-  expect([scaled.width, scaled.height]).toEqual([S, S / 2]);
-  expect(cropBox(scaled, S)).toEqual({ x: 0, y: -S / 4, width: S, height: S });
+});
+
+test("after Longest side the box equals the canvas, and Crop clips to exactly the canvas", () => {
+  for (const set of SETS) {
+    const S = set.side;
+    // A wide image overflowing the starting canvas, scaled so its longest side is S.
+    const doc = newDocument(coords(S * 2, S + 20), "wide", startCanvas(set));
+    const scaled = scaleLongestSide(doc, placedBounds(S * 2, S + 20, doc.layers[0].transform), S);
+    const box = cropBox(scaled, S);
+    expect(box).toEqual({ x: 0, y: 0, width: scaled.width, height: scaled.height });
+    expect(scaled.height).toBeLessThan(S);
+    // Drag the image past the box's right edge, then Crop.
+    const moved = setTransform(scaled, "layer-1", { ...scaled.layers[0].transform, x: 10.5 });
+    const plan = planCrop(moved, box);
+    expect(plan).toEqual([
+      { kind: "clip", id: "layer-1", rect: { x: 10, y: 0, width: scaled.width - 10, height: scaled.height } },
+    ]);
+    // Clipped pixels come from Rust; their size is the plan's rect.
+    const images = new Map([["layer-1", image(scaled.width - 10, scaled.height)]]);
+    const cropped = cropLayers(moved, plan, images);
+    const layer = cropped.layers[0] as RasterLayer;
+    expect(pixelBounds(placedBounds(layer.image.width, layer.image.height, layer.transform))).toEqual({
+      ...box,
+      x: 10,
+      width: box.width - 10,
+    });
+    expect([cropped.width, cropped.height]).toEqual([scaled.width, scaled.height]);
+    expect(cropBlocker(planCrop(cropped, cropBox(cropped, S)), cropBox(cropped, S))).toBe(
+      `Everything is already inside the ${scaled.width}×${scaled.height} box.`,
+    );
+  }
 });
 
 test("pixelBounds rounds outwards, ignoring float noise", () => {
@@ -184,13 +213,18 @@ test("cropBlocker: disabled when nothing is outside the box, or nothing is insid
   for (const set of SETS) {
     const S = set.side;
     const doc = newDocument(image(S, S), "fits", startCanvas(set));
-    expect(cropBlocker(planCrop(doc, cropBox(doc, S)), set)).toBe(
-      `Everything is already inside the ${S}×${S} box.`,
-    );
+    const box = cropBox(doc, S);
+    expect(cropBlocker(planCrop(doc, box), box)).toBe(`Everything is already inside the ${S}×${S} box.`);
     const over = setTransform(doc, "layer-1", { ...IDENTITY, x: 1 });
-    expect(cropBlocker(planCrop(over, cropBox(over, S)), set)).toBeNull();
+    expect(cropBlocker(planCrop(over, box), box)).toBeNull();
     const away = setTransform(doc, "layer-1", { ...IDENTITY, x: S * 3 });
-    expect(cropBlocker(planCrop(away, cropBox(away, S)), set)).toBe(NOTHING_IN_BOX);
+    expect(cropBlocker(planCrop(away, box), box)).toBe(NOTHING_IN_BOX);
+    // The reason names the actual (capped) box size.
+    const short = { ...doc, height: S - 10 };
+    const capped = cropBox(short, S);
+    expect(cropBlocker(planCrop(doc, capped), capped)).toBeNull();
+    const fits = setTransform(short, "layer-1", { ...IDENTITY, scaleY: (S - 10) / S });
+    expect(cropBlocker(planCrop(fits, capped), capped)).toBe(`Everything is already inside the ${S}×${S - 10} box.`);
   }
 });
 
