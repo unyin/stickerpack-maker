@@ -1,6 +1,6 @@
 // Pure decisions behind the Editor view: no Konva, no DOM, unit-tested.
 import type { RgbaImage } from "../model/image";
-import { IDENTITY, type Doc, type Transform } from "../model/document";
+import { IDENTITY, KEEP_ONE_LAYER, type Doc, type Transform } from "../model/document";
 import type { SelectMode } from "../model/session";
 
 export const MIN_ZOOM = 0.05;
@@ -73,6 +73,13 @@ export function mergeBlocker(doc: Doc, selection: readonly string[]): string | n
   if (chosen.some((l) => l.kind === "text")) {
     return "Text layers can't be merged yet: that arrives with the text tool.";
   }
+  return null;
+}
+
+/** Why the selection cannot be deleted, or null when it can (SPEC §6). */
+export function deleteBlocker(doc: Doc, selection: readonly string[]): string | null {
+  if (selection.length === 0) return "Select the layers to delete.";
+  if (selection.length >= doc.layers.length) return KEEP_ONE_LAYER;
   return null;
 }
 

@@ -5,6 +5,7 @@ import type { RgbaImage } from "../src/editor/model/image";
 import { addRasterLayer, addTextLayer, newDocument } from "../src/editor/model/document";
 import {
   centeredPlacement,
+  deleteBlocker,
   fitView,
   MAX_ZOOM,
   mergeBlocker,
@@ -76,4 +77,17 @@ test("Ctrl, Cmd or Shift turn a click into a toggle", () => {
   expect(selectModeFor({ ctrlKey: true, metaKey: false, shiftKey: false })).toBe("toggle");
   expect(selectModeFor({ ctrlKey: false, metaKey: true, shiftKey: false })).toBe("toggle");
   expect(selectModeFor({ ctrlKey: false, metaKey: false, shiftKey: true })).toBe("toggle");
+});
+
+test("delete needs a selection and must leave at least one layer, and says why not", () => {
+  let doc = newDocument(image(10, 10), "base");
+  doc = addRasterLayer(doc, image(2, 2), "cutout");
+  const [base, cutout] = doc.layers.map((l) => l.id);
+  expect(deleteBlocker(doc, [])).toBe("Select the layers to delete.");
+  expect(deleteBlocker(doc, [cutout])).toBeNull();
+  expect(deleteBlocker(doc, [base, cutout])).toBe(
+    "A session needs at least one layer; use Close to start over.",
+  );
+  const single = newDocument(image(4, 4), "only");
+  expect(deleteBlocker(single, [single.layers[0].id])).toContain("at least one layer");
 });

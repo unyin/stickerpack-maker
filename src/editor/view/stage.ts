@@ -69,6 +69,9 @@ export class EditorStage {
   private readonly stage: Konva.Stage;
   private readonly content = new Konva.Layer();
   private readonly backdrop: Konva.Rect;
+  /** Non-interactive layer drawn above the content: document outline (and later the 512 box). */
+  private readonly guides = new Konva.Layer({ listening: false });
+  private readonly outline: Konva.Rect;
   // Konva never holds state the model lacks (ADR-0005): the model's Transform
   // has no skew and no flips, and SPEC §6 needs only aspect-preserving resize
   // plus rotate. So only the corner anchors exist, ratio is kept, flips off.
@@ -96,16 +99,24 @@ export class EditorStage {
       // Dragging empty space pans the view; dragging a layer moves it.
       draggable: true,
     });
+    // Checkerboard under the layers shows transparency...
     this.backdrop = new Konva.Rect({
       fillPatternImage: checkerTile(token("--panel"), token("--border")) as unknown as HTMLImageElement,
+      listening: false,
+    });
+    // ...while guides sit ABOVE every layer, so covering layers never hide
+    // them (owner, 2026-11-20). SPM-6's 512 box belongs on this layer too.
+    this.outline = new Konva.Rect({
       stroke: token("--muted"),
       strokeWidth: 1,
       strokeScaleEnabled: false,
       listening: false,
     });
+    this.guides.add(this.outline);
     this.content.add(this.backdrop);
     this.content.add(this.transformer);
     this.stage.add(this.content);
+    this.stage.add(this.guides);
 
     this.stage.on("wheel", (e) => this.onWheel(e));
     this.stage.on("dragmove dragend", (e) => {
@@ -177,6 +188,7 @@ export class EditorStage {
   private render(): void {
     const doc = this.session.doc;
     this.backdrop.size({ width: doc.width, height: doc.height });
+    this.outline.size({ width: doc.width, height: doc.height });
     const live = new Set(doc.layers.map((l) => l.id));
     for (const [id, node] of this.nodes) {
       if (!live.has(id)) {
@@ -208,6 +220,7 @@ export class EditorStage {
     );
     this.transformer.moveToTop();
     this.content.batchDraw();
+    this.guides.batchDraw();
   }
 
   private nodeFor(layer: Layer): Konva.Shape {

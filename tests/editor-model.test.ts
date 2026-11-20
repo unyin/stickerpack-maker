@@ -5,6 +5,7 @@ import type { RgbaImage } from "../src/editor/model/image";
 import {
   addRasterLayer,
   addTextLayer,
+  deleteLayers,
   IDENTITY,
   layerIndex,
   mergeLayers,
@@ -232,4 +233,36 @@ test("a failing operation leaves the session unchanged", () => {
   expect(s.doc).toBe(before);
   expect(s.canUndo).toBe(false);
   expect(s.isDirty).toBe(false);
+});
+
+test("deleting layers removes them in one step and always keeps one", () => {
+  let doc = newDocument(image(4, 4), "a");
+  doc = addRasterLayer(doc, image(1, 1), "b");
+  doc = addRasterLayer(doc, image(1, 1), "c");
+  const [a, b, c] = doc.layers.map((l) => l.id);
+  const left = deleteLayers(doc, [a, c]);
+  expect(names(left)).toEqual(["b"]);
+  // Untouched layers are reused (structural sharing).
+  expect(left.layers[0]).toBe(doc.layers[1]);
+  expect(() => deleteLayers(doc, [a, b, c])).toThrow("at least one layer");
+  expect(() => deleteLayers(left, [b])).toThrow("at least one layer");
+  expect(() => deleteLayers(doc, [])).toThrow();
+  expect(() => deleteLayers(doc, ["nope"])).toThrow();
+  // Ids are never reused after a delete.
+  const next = addRasterLayer(left, image(1, 1), "d");
+  expect(next.layers[1].id).not.toBe(c);
+});
+
+test("a deletion is one undo step and drops the deleted layers from the selection", () => {
+  const s = new EditorSession(newDocument(image(4, 4), "base"));
+  s.apply((d) => addRasterLayer(d, image(1, 1), "x"));
+  s.apply((d) => addRasterLayer(d, image(1, 1), "y"));
+  const [, x, y] = s.doc.layers.map((l) => l.id);
+  s.select(x);
+  s.select(y, "toggle");
+  s.apply((d) => deleteLayers(d, s.selection));
+  expect(names(s.doc)).toEqual(["base"]);
+  expect(s.selection).toEqual([]);
+  s.undo();
+  expect(names(s.doc)).toEqual(["base", "x", "y"]);
 });

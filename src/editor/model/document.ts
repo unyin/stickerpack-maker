@@ -131,6 +131,21 @@ export function moveLayer(doc: Doc, id: string, toIndex: number): Doc {
   return withLayers(doc, layers);
 }
 
+/** Why deleting would leave a session without layers (SPEC §6). */
+export const KEEP_ONE_LAYER = "A session needs at least one layer; use Close to start over.";
+
+/**
+ * Delete layers as one operation (SPEC §6, owner decision 2026-11-20). A
+ * session always keeps at least one layer; ids are never reused afterwards.
+ */
+export function deleteLayers(doc: Doc, ids: readonly string[]): Doc {
+  const chosen = new Set(ids);
+  if (chosen.size === 0) throw new Error("no layers chosen to delete");
+  for (const id of chosen) layerIndex(doc, id); // throws for unknown layers
+  if (chosen.size >= doc.layers.length) throw new Error(KEEP_ONE_LAYER);
+  return withLayers(doc, doc.layers.filter((l) => !chosen.has(l.id)));
+}
+
 /**
  * Replace two or more layers with one merged raster layer (the composite
  * is produced in Rust, ADR-0005). The merged layer takes the slot of the

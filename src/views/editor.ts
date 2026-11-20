@@ -8,6 +8,7 @@ import { baseName } from "../api";
 import { IMPORT_MAX_SIDE, importImage, mergeImages, pickImageFile, probeImage } from "../editor/api";
 import {
   addRasterLayer,
+  deleteLayers,
   IDENTITY,
   layerIndex,
   mergeLayers,
@@ -17,7 +18,7 @@ import {
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
 import { EditorSession } from "../editor/model/session";
-import { centeredPlacement, mergeBlocker, selectModeFor } from "../editor/view/geometry";
+import { centeredPlacement, deleteBlocker, mergeBlocker, selectModeFor } from "../editor/view/geometry";
 import { EditorStage } from "../editor/view/stage";
 import { el, withMessage } from "../ui";
 
@@ -39,20 +40,22 @@ function buildEditor(): HTMLElement {
   const layersList = el("ol", { class: "editor-layers-list" });
   const zoomLabel = el("span", { class: "editor-zoom muted" });
   const dirtyLabel = el("span", { class: "editor-dirty" }, "● Unsaved changes");
-  const mergeHint = el("p", { class: "editor-hint muted" });
+  const layerHint = el("p", { class: "editor-hint muted" });
 
   const openButton = button("Open image", () => run(openImage), "primary");
   const addButton = button("Add image as layer", () => run(addImageAsLayer), "primary");
   const undoButton = button("Undo", () => session?.undo());
   const redoButton = button("Redo", () => session?.redo());
-  const fitButton = button("Fit", () => stage?.fit());
+  const fitButton = button("Fit view", () => stage?.fit());
   const closeButton = button("Close", () => run(closeSession));
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
+  const deleteButton = button("Delete", () => deleteSelected());
 
   undoButton.title = "Undo (Ctrl+Z)";
   redoButton.title = "Redo (Ctrl+Y)";
+  fitButton.title = "Zoom and centre the canvas in view (changes the view only, not the image)";
 
   const empty = el(
     "div",
@@ -80,8 +83,8 @@ function buildEditor(): HTMLElement {
     { class: "editor-layers" },
     el("h2", {}, "Layers"),
     layersList,
-    el("div", { class: "editor-layer-actions" }, upButton, downButton, mergeButton),
-    mergeHint,
+    el("div", { class: "editor-layer-actions" }, upButton, downButton, mergeButton, deleteButton),
+    layerHint,
   );
 
   const workspace = el("div", { class: "editor-workspace" }, canvasHost, layersPanel);
@@ -181,6 +184,14 @@ function buildEditor(): HTMLElement {
     session = null;
   }
 
+  /** Delete the selected layers as one undoable step (SPEC §6); one layer always stays. */
+  function deleteSelected(): void {
+    const current = session;
+    if (!current || busy || deleteBlocker(current.doc, current.selection)) return;
+    const chosen = [...current.selection];
+    current.apply((doc) => deleteLayers(doc, chosen));
+  }
+
   function moveSelected(step: number): void {
     const current = session;
     if (!current || current.selection.length !== 1) return;
@@ -224,6 +235,7 @@ function buildEditor(): HTMLElement {
     const single = current.selection.length === 1 ? current.selection[0] : null;
     const index = single ? layerIndex(doc, single) : -1;
     const blocker = mergeBlocker(doc, current.selection);
+    const deleteReason = deleteBlocker(doc, current.selection);
     addButton.disabled = busy;
     closeButton.disabled = busy;
     undoButton.disabled = busy || !current.canUndo;
@@ -232,7 +244,11 @@ function buildEditor(): HTMLElement {
     downButton.disabled = busy || !single || index === 0;
     mergeButton.disabled = busy || blocker !== null;
     mergeButton.title = blocker ?? "Merge the selected layers into one";
-    mergeHint.textContent = current.selection.length > 0 ? (blocker ?? "") : "";
+    deleteButton.disabled = busy || deleteReason !== null;
+    deleteButton.title = deleteReason ?? "Delete the selected layers (Delete key)";
+    // Explain disabled actions only once something is selected.
+    layerHint.textContent =
+      current.selection.length > 0 ? [blocker, deleteReason].filter((r) => r !== null).join(" ") : "";
     dirtyLabel.hidden = !current.isDirty;
   }
 
@@ -246,6 +262,7 @@ function buildEditor(): HTMLElement {
     if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) current.undo();
     else if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) current.redo();
     else if (e.key === "Escape") current.clearSelection();
+    else if (e.key === "Delete") deleteSelected();
     else return;
     e.preventDefault();
   });

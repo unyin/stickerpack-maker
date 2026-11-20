@@ -161,7 +161,8 @@ stickers, Missing stickers, and the thumbnail.
   first, which warns when there are unsaved changes.
 
 ### Crop and sizing
-- Togglable **512×512 box overlay**, fixed at canvas center; never draggable/resizable.
+- Togglable **512×512 box overlay**, fixed at canvas center; never draggable/resizable;
+  drawn **above all layers** so it stays visible when layers cover the canvas.
   Drag the image to choose what survives.
 - **Crop** is destructive: everything outside the box is discarded; canvas becomes 512×512.
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant):
@@ -180,6 +181,9 @@ stickers, Missing stickers, and the thumbnail.
 - **Text**: own layer, movable/resizable until save (system fonts, size, color).
 - **Merge selected layers**: flatten chosen layers together mid-session so effects can be
   applied to the merged result before the final save flatten.
+- **Delete selected layers** (button or Delete key; undoable; owner decision 2026-11-20). A
+  session always keeps at least one layer: deleting every layer is refused — use Close to
+  start over.
 
 ### Save (hard-blocked)
 - No project files: saved output is flattened and final. Re-editing opens the flattened image.
