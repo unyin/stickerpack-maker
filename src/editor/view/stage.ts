@@ -39,9 +39,8 @@ function checkerTile(light: string, dark: string): HTMLCanvasElement {
 }
 
 /**
- * Reads a shared design token from src/styles.css. The canvas takes these
- * colours once, at stage creation; a live theme switch (SPM-14) would need the
- * stage to re-read them (e.g. on reopen).
+ * Reads a shared design token from src/styles.css. Konva draws to a canvas, so
+ * CSS cannot restyle it: the stage re-reads these whenever the theme changes.
  */
 function token(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -85,6 +84,8 @@ export class EditorStage {
   private readonly nodes = new Map<string, Konva.Shape>();
   private readonly pending = new Set<string>();
   private readonly resizeObserver: ResizeObserver;
+  /** Watches <html data-theme> (set by src/theme.ts) to recolour the canvas. */
+  private readonly themeObserver = new MutationObserver(() => this.applyTheme());
   private readonly unsubscribe: () => void;
   private viewChanged?: (view: ViewTransform) => void;
   /**
@@ -105,14 +106,10 @@ export class EditorStage {
       draggable: true,
     });
     // Checkerboard under the layers shows transparency...
-    this.backdrop = new Konva.Rect({
-      fillPatternImage: checkerTile(token("--panel"), token("--border")) as unknown as HTMLImageElement,
-      listening: false,
-    });
+    this.backdrop = new Konva.Rect({ listening: false });
     // ...while guides sit ABOVE every layer, so covering layers never hide
     // them (owner, 2026-11-20). SPM-6's crop box belongs on this layer too.
     this.outline = new Konva.Rect({
-      stroke: token("--muted"),
       strokeWidth: 1,
       strokeScaleEnabled: false,
       listening: false,
@@ -133,6 +130,8 @@ export class EditorStage {
       if (e.target === this.stage) this.session.clearSelection();
     });
 
+    this.applyTheme();
+    this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
     this.unsubscribe = session.subscribe(() => this.render());
@@ -190,8 +189,17 @@ export class EditorStage {
 
   destroy(): void {
     this.unsubscribe();
+    this.themeObserver.disconnect();
     this.resizeObserver.disconnect();
     this.stage.destroy();
+  }
+
+  /** Take the canvas colours (checkerboard, outline) from the current theme's tokens. */
+  private applyTheme(): void {
+    this.backdrop.fillPatternImage(checkerTile(token("--panel"), token("--border")) as unknown as HTMLImageElement);
+    this.outline.stroke(token("--muted"));
+    this.content.batchDraw();
+    this.guides.batchDraw();
   }
 
   private setView(view: ViewTransform): void {
