@@ -272,6 +272,10 @@ stickers, Missing stickers, and the thumbnail.
 - Editor: middle-mouse click-and-drag pans the view without moving the image.
 - Editor: every edge of the selection box is grabbable for resizing, not just the corners.
 - Editor: custom canvas resizing (in v1 only Fit and Longest side change the canvas).
+- Drag and drop an image file to open it in the Editor. (v3 idea: drag and drop onto an
+  open session to add it as a layer.)
+- Editor: the Delete key removes the selected layers, but not while text is being entered
+  or edited in a text layer.
 
 ## 10. Draft work packages (for review — not yet filed as issues)
 
