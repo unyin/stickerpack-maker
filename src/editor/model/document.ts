@@ -195,32 +195,29 @@ export function contentBounds(doc: Doc): Rect {
 /** Below this, two positions or sizes count as equal (float noise). */
 const EPSILON = 1e-6;
 
+/** Largest longest side free resize accepts: the Editor's 2000 px import cap (SPEC §6). */
+export const MAX_RESIZE_SIDE = 2000;
+
 /**
- * Sizing tool 1 (SPEC §6): fit the WHOLE image to a `box` x `box` square
- * and pad the rest with transparency. "Whole image" means everything on the
- * canvas treated as one layer (owner, 2026-11-20) — exactly like selecting
- * every layer and resizing them together: `content` (the union of all
- * layers' on-screen boxes) is scaled by ONE factor so its longest side is
- * `box` (up or down), then centred; the canvas becomes the square.
- * Non-destructive: only transforms change, so layers stay separate and text
- * stays editable; pixels are resampled when merged or saved. Content that
- * already fills the box, centred, returns the document unchanged (no step).
+ * Scale the whole image as ONE group — everything on the canvas, like
+ * selecting every layer and resizing them together (owner, 2026-11-20) —
+ * by `factor`, centred on a new `width` x `height` canvas. Only transforms
+ * change: layers stay separate, text stays editable, pixels are resampled
+ * when merged or saved. Already in place: the document is returned as is
+ * (no undo step).
  */
-export function fitToBox(doc: Doc, content: Rect, box: number = STICKER_SIDE): Doc {
-  const longest = Math.max(content.width, content.height);
-  if (!(longest > 0)) throw new Error("there is no content to fit");
-  const factor = box / longest;
-  const padX = (box - content.width * factor) / 2;
-  const padY = (box - content.height * factor) / 2;
-  const alreadyFits =
-    doc.width === box &&
-    doc.height === box &&
+function scaleGroup(doc: Doc, content: Rect, factor: number, width: number, height: number): Doc {
+  const padX = (width - content.width * factor) / 2;
+  const padY = (height - content.height * factor) / 2;
+  const alreadyThere =
+    doc.width === width &&
+    doc.height === height &&
     Math.abs(factor - 1) < EPSILON &&
     Math.abs(content.x - padX) < EPSILON &&
     Math.abs(content.y - padY) < EPSILON;
-  if (alreadyFits) return doc;
-  // Scaling the group about its top-left corner, then moving that corner
-  // to the padding offset: uniform scaling commutes with each rotation.
+  if (alreadyThere) return doc;
+  // Scale about the group's top-left corner, then move that corner to the
+  // padding offset: uniform scaling commutes with each layer's rotation.
   const layers = doc.layers.map((layer) => ({
     ...layer,
     transform: {
@@ -231,7 +228,39 @@ export function fitToBox(doc: Doc, content: Rect, box: number = STICKER_SIDE): D
       scaleY: layer.transform.scaleY * factor,
     },
   }));
-  return { ...doc, width: box, height: box, layers };
+  return { ...doc, width, height, layers };
+}
+
+function longestSideOf(content: Rect): number {
+  const longest = Math.max(content.width, content.height);
+  if (!(longest > 0)) throw new Error("there is no content to resize");
+  return longest;
+}
+
+/**
+ * Sizing tool 1 (SPEC §6): fit the whole image (`content`, the union of all
+ * layers' on-screen boxes) into a `box` x `box` square and pad the rest with
+ * transparency: its longest side becomes `box` (up or down), centred, and
+ * the canvas becomes the square.
+ */
+export function fitToBox(doc: Doc, content: Rect, box: number = STICKER_SIDE): Doc {
+  return scaleGroup(doc, content, box / longestSideOf(content), box, box);
+}
+
+/**
+ * Sizing tools 2 and 3 (SPEC §6): scale the whole image so its longest side
+ * is `side` px — 512 for tool 2, the owner's entered value for tool 3 (free
+ * resize). No padding: the canvas becomes the scaled content, in whole
+ * pixels (a fractional side is centred within its rounded size).
+ */
+export function scaleLongestSide(doc: Doc, content: Rect, side: number): Doc {
+  if (!Number.isInteger(side) || side < 1 || side > MAX_RESIZE_SIDE) {
+    throw new Error(`The longest side must be a whole number of pixels from 1 to ${MAX_RESIZE_SIDE}.`);
+  }
+  const factor = side / longestSideOf(content);
+  const width = Math.max(1, Math.round(content.width * factor));
+  const height = Math.max(1, Math.round(content.height * factor));
+  return scaleGroup(doc, content, factor, width, height);
 }
 
 /** Why deleting would leave a session without layers (SPEC §6). */

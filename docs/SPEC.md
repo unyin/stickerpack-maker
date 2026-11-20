@@ -165,10 +165,13 @@ stickers, Missing stickers, and the thumbnail.
   drawn **above all layers** so it stays visible when layers cover the canvas.
   Drag the image to choose what survives.
 - **Crop** is destructive: everything outside the box is discarded; canvas becomes 512×512.
-- Sizing tools (whole image, aspect preserved, transparency padding where relevant):
+- Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
+  image" = everything on the canvas treated as one layer, exactly like selecting every layer
+  and resizing them together (owner decision 2026-11-20):
   1. Fit to 512×512 and pad the rest with transparency.
-  2. Scale longest side to 512 px.
-  3. Free resize: entered value = longest side.
+  2. Scale longest side to 512 px (the canvas becomes the scaled image, no padding).
+  3. Free resize: entered value = longest side, a whole number of pixels from 1 to 2000.
+- **Reset view** re-centres and re-zooms the view without changing the image.
 - Live readout of current dimensions vs the active constraint set.
 
 ### Layers and tools

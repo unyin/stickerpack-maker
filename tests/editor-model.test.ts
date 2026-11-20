@@ -15,6 +15,7 @@ import {
   newDocument,
   nextLayerId,
   placedBounds,
+  scaleLongestSide,
   setLayerImage,
   setTransform,
   type Doc,
@@ -350,4 +351,57 @@ test("fit is one undo step that restores canvas and layers", () => {
   s.undo();
   expect([s.doc.width, s.doc.height]).toEqual([1000, 500]);
   expect(s.doc.layers[0].transform).toEqual(IDENTITY);
+});
+
+// ---- Sizing tools 2 and 3: scale the longest side (SPEC §6) ----
+// Same whole-image group as Fit, but the canvas becomes the scaled content
+// (no padding): tool 2 uses 512, tool 3 the owner's entered value.
+
+test("scaling the longest side to 512 shrinks the group and the canvas becomes the content", () => {
+  let doc = newDocument(image(300, 200), "base");
+  doc = addRasterLayer(doc, image(2000, 1000), "big", { ...IDENTITY, x: -850, y: -400 });
+  const scaled = scaleLongestSide(doc, contentBounds(doc), 512);
+  expect([scaled.width, scaled.height]).toEqual([512, 256]);
+  const [base, big] = scaled.layers;
+  expect(big.transform.scaleX).toBeCloseTo(0.256);
+  expect(base.transform.scaleX).toBeCloseTo(0.256);
+  expect(big.transform.x).toBeCloseTo(0);
+  expect(big.transform.y).toBeCloseTo(0);
+  expect(base.transform.x).toBeCloseTo(850 * 0.256);
+  const after = contentBounds(scaled);
+  expect(after.width).toBeCloseTo(512);
+  expect(after.height).toBeCloseTo(256);
+});
+
+test("the canvas is whole pixels; a fractional side is centred within it", () => {
+  // 300x200 -> 512 x 341.33: canvas 512x341, content centred (-0.17 px).
+  const doc = newDocument(image(300, 200), "base");
+  const scaled = scaleLongestSide(doc, contentBounds(doc), 512);
+  expect([scaled.width, scaled.height]).toEqual([512, 341]);
+  const after = contentBounds(scaled);
+  expect(after.y + after.height / 2).toBeCloseTo(341 / 2);
+  expect(after.x).toBeCloseTo(0);
+});
+
+test("free resize uses the entered longest side, up or down, for tall images too", () => {
+  const tall = newDocument(image(200, 400), "tall");
+  const grown = scaleLongestSide(tall, contentBounds(tall), 1000);
+  expect([grown.width, grown.height]).toEqual([500, 1000]);
+  const shrunk = scaleLongestSide(tall, contentBounds(tall), 100);
+  expect([shrunk.width, shrunk.height]).toEqual([50, 100]);
+  expect(() => scaleLongestSide(tall, contentBounds(tall), 0)).toThrow();
+  expect(() => scaleLongestSide(tall, contentBounds(tall), 1.5)).toThrow();
+  expect(() => scaleLongestSide(tall, contentBounds(tall), 2001)).toThrow();
+});
+
+test("scaling to the size the content already has changes nothing (no undo step)", () => {
+  const doc = newDocument(image(512, 300), "done");
+  expect(scaleLongestSide(doc, contentBounds(doc), 512)).toBe(doc);
+  const s = new EditorSession(doc);
+  s.apply((d) => scaleLongestSide(d, contentBounds(d), 512));
+  expect(s.canUndo).toBe(false);
+  s.apply((d) => scaleLongestSide(d, contentBounds(d), 256));
+  expect([s.doc.width, s.doc.height]).toEqual([256, 150]);
+  s.undo();
+  expect([s.doc.width, s.doc.height]).toEqual([512, 300]);
 });

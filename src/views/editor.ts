@@ -11,18 +11,22 @@ import {
   deleteLayers,
   fitToBox,
   IDENTITY,
+  MAX_RESIZE_SIDE,
   layerIndex,
   mergeLayers,
   moveLayer,
   newDocument,
   nextLayerId,
+  scaleLongestSide,
   STICKER_SIDE,
+  type Doc,
+  type Rect,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
 import { EditorSession } from "../editor/model/session";
 import { centeredPlacement, deleteBlocker, mergeBlocker, selectModeFor } from "../editor/view/geometry";
 import { EditorStage } from "../editor/view/stage";
-import { el, withMessage } from "../ui";
+import { el, errorMessage, withMessage } from "../ui";
 
 let root: HTMLElement | null = null;
 
@@ -48,7 +52,22 @@ function buildEditor(): HTMLElement {
   const addButton = button("Add image as layer", () => run(addImageAsLayer), "primary");
   const undoButton = button("Undo", () => session?.undo());
   const redoButton = button("Redo", () => session?.redo());
-  const fitButton = button("Fit to 512×512", () => fitWholeImage());
+  // Sizing tools (SPEC §6), all on the whole image as one group.
+  const fitButton = button("Fit to 512×512", () => resizeWholeImage((doc, c) => fitToBox(doc, c, STICKER_SIDE)));
+  const longestButton = button("Longest side 512", () =>
+    resizeWholeImage((doc, c) => scaleLongestSide(doc, c, STICKER_SIDE)),
+  );
+  const sideInput = el("input", {
+    class: "editor-side-input",
+    type: "number",
+    min: "1",
+    max: String(MAX_RESIZE_SIDE),
+    step: "1",
+    placeholder: "px",
+    "aria-label": "Longest side in pixels",
+  }) as HTMLInputElement;
+  const resizeButton = button("Resize", () => freeResize());
+  const resetViewButton = button("Reset view", () => stage?.fit());
   const closeButton = button("Close", () => run(closeSession));
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
@@ -60,6 +79,14 @@ function buildEditor(): HTMLElement {
   fitButton.title =
     "Scale everything on the canvas together, as one image, so its longest side is 512 px; " +
     "the canvas becomes 512×512 with transparent padding";
+  longestButton.title =
+    "Scale everything on the canvas together so its longest side is 512 px; the canvas becomes the image (no padding)";
+  resizeButton.title = `Scale everything on the canvas together so its longest side is the entered size (1–${MAX_RESIZE_SIDE} px)`;
+  resetViewButton.title = "Zoom and centre the canvas in view (changes the view only)";
+  sideInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") freeResize();
+  });
+  sideInput.addEventListener("input", () => refresh());
 
   const empty = el(
     "div",
@@ -75,7 +102,16 @@ function buildEditor(): HTMLElement {
     addButton,
     undoButton,
     redoButton,
-    fitButton,
+    el(
+      "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Size" },
+      el("span", { class: "muted" }, "Size:"),
+      fitButton,
+      longestButton,
+      el("label", { class: "editor-side" }, "Longest side ", sideInput, " px"),
+      resizeButton,
+    ),
+    resetViewButton,
     zoomLabel,
     dirtyLabel,
     el("span", { class: "editor-spacer" }),
@@ -191,14 +227,37 @@ function buildEditor(): HTMLElement {
   }
 
   /**
-   * Sizing tool 1 (SPEC §6): everything on the canvas, as one group, scaled
-   * so its longest side is 512 and centred on a 512×512 canvas.
+   * Apply a sizing tool (SPEC §6) to the whole image: everything on the
+   * canvas as one group, measured like a multi-layer selection. One undo step.
    */
-  function fitWholeImage(): void {
+  function resizeWholeImage(tool: (doc: Doc, content: Rect) => Doc): void {
     const current = session;
     if (!current || !stage || busy) return;
     const content = stage.contentBounds();
-    current.apply((doc) => fitToBox(doc, content, STICKER_SIDE));
+    message.textContent = "";
+    try {
+      current.apply((doc) => tool(doc, content));
+    } catch (err) {
+      message.textContent = errorMessage(err);
+    }
+  }
+
+  /** The free-resize value, or null when the field is empty or not a whole number in range. */
+  function enteredSide(): number | null {
+    const value = Number(sideInput.value);
+    return sideInput.value.trim() !== "" && Number.isInteger(value) && value >= 1 && value <= MAX_RESIZE_SIDE
+      ? value
+      : null;
+  }
+
+  /** Sizing tool 3 (SPEC §6): free resize, the entered value is the longest side. */
+  function freeResize(): void {
+    const side = enteredSide();
+    if (side === null) {
+      message.textContent = `Enter the longest side as a whole number of pixels from 1 to ${MAX_RESIZE_SIDE}.`;
+      return;
+    }
+    resizeWholeImage((doc, content) => scaleLongestSide(doc, content, side));
   }
 
   /** Delete the selected layers as one undoable step (SPEC §6); one layer always stays. */
@@ -255,7 +314,15 @@ function buildEditor(): HTMLElement {
     const deleteReason = deleteBlocker(doc, current.selection);
     addButton.disabled = busy;
     // Disabled once the content already fills the 512 box, centred.
-    fitButton.disabled = busy || !stage || fitToBox(doc, stage.contentBounds(), STICKER_SIDE) === doc;
+    // Each sizing tool is disabled when it would change nothing.
+    const content = stage ? stage.contentBounds() : null;
+    const unchanged = (tool: (d: Doc, c: Rect) => Doc) => busy || !content || tool(doc, content) === doc;
+    fitButton.disabled = unchanged((d, c) => fitToBox(d, c, STICKER_SIDE));
+    longestButton.disabled = unchanged((d, c) => scaleLongestSide(d, c, STICKER_SIDE));
+    const side = enteredSide();
+    resizeButton.disabled = side === null || unchanged((d, c) => scaleLongestSide(d, c, side));
+    sideInput.disabled = busy;
+    resetViewButton.disabled = busy;
     closeButton.disabled = busy;
     undoButton.disabled = busy || !current.canUndo;
     redoButton.disabled = busy || !current.canRedo;
