@@ -33,6 +33,7 @@ fast_image_resize = "6"
 # 2D rasteriser: composites transformed layers for "merge selected layers"
 # (and later the save flatten). Premultiplied RGBA internally.
 tiny-skia = "0.12"
+tauri-plugin-opener = "2"
 
 [dev-dependencies]
 tempfile = "3"
