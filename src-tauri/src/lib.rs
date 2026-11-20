@@ -1,6 +1,8 @@
 mod commands;
 mod config;
 mod db;
+/// Editor pixel work (ADR-0005): Tauri-free, unit-tested; commands wrap it.
+pub mod editor;
 /// Library core (SPEC §3-4): data model, file operations, crash-safe
 /// renames, desync detection. Public because the core is a UI-agnostic,
 /// unit-testable library; Tauri command wiring (SPM-3) consumes it.
@@ -45,6 +47,8 @@ pub fn run() {
             commands::default_library_path,
             commands::create_library,
             commands::repoint_library,
+            commands::editor_probe_image,
+            commands::editor_import_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -23,6 +23,11 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 # Grapheme clusters: counts emoji as people see them (ZWJ sequences, flags,
 # skin tones), for the Emoji String 1-20 warning. Already in the tree via Tauri.
 unicode-segmentation = "1"
+# Editor pixel work in Rust (ADR-0005). Decoders for the five import
+# formats only (.jfif is JPEG); webp decoding is pure Rust (image-webp).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+# High-quality, alpha-aware resizing for the 2000x2000 import cap and sizing tools.
+fast_image_resize = "6"
 
 [dev-dependencies]
 tempfile = "3"

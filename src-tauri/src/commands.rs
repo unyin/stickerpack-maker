@@ -8,7 +8,7 @@ use serde::Serialize;
 use tauri::{Manager, State};
 
 use crate::config::AppConfig;
-use crate::{library, SharedConfig};
+use crate::{editor, library, SharedConfig};
 
 /// Library lifecycle status reported to the UI.
 /// Mirrors the `LibraryStatus` union in src/api.ts (serde lowercase).
@@ -121,6 +121,24 @@ pub fn repoint_library(
     let dir = PathBuf::from(path);
     library::validate_intact(&dir)?;
     set_library_path(&app, &state, dir)
+}
+
+// ---- Editor (ADR-0005: one-shot pixel work in Rust) ----
+
+/// Header-only probe of an import candidate: displayed size and whether it
+/// exceeds the 2000x2000 cap (the UI then asks to scale or cancel).
+#[tauri::command(async)]
+pub fn editor_probe_image(path: String) -> Result<editor::import::ImageInfo, String> {
+    editor::import::probe(&PathBuf::from(path))
+}
+
+/// Decode an image for the Editor and return it as a binary frame (u32 LE
+/// width, u32 LE height, straight RGBA8) — raw bytes, never JSON.
+/// `scale_to_fit` is the owner's OK in the 2000x2000 cap dialog.
+#[tauri::command(async)]
+pub fn editor_import_image(path: String, scale_to_fit: bool) -> Result<tauri::ipc::Response, String> {
+    let image = editor::import::import(&PathBuf::from(path), scale_to_fit)?;
+    Ok(tauri::ipc::Response::new(image.to_frame()))
 }
 
 #[cfg(test)]
