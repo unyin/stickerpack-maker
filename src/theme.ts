@@ -2,6 +2,10 @@
 // with a per-machine override stored in the webview's localStorage. Keeping
 // the preference out of the Rust config leaves theming frontend-only.
 // theme.ts sets data-theme on <html>; styles.css carries the token sets.
+// The native window chrome (the Windows title bar) is not part of the page,
+// so the window's own theme is set to match: null lets it follow the OS.
+
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export type ThemePreference = "system" | "light" | "dark";
 
@@ -19,6 +23,10 @@ function apply(): void {
   const resolved =
     preference === "system" ? (media.matches ? "dark" : "light") : preference;
   document.documentElement.dataset.theme = resolved;
+  // Outside Tauri (tests, a plain browser) there is no window to theme.
+  getCurrentWindow()
+    .setTheme(preference === "system" ? null : preference)
+    .catch(() => {});
 }
 
 /** Resolve and apply the theme once at boot; track OS changes while on system. */
