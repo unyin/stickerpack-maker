@@ -173,11 +173,11 @@ stickers, Missing stickers, and the thumbnail.
   3. Free resize: entered value = longest side, a whole number of pixels from 1 to 2000.
 - The sizing tools change the canvas and the image, **never the view**: zoom and pan stay where
   the user left them (owner decision 2026-11-20). The canvas keeps its top-left corner where
-  it was on screen, so the outline grows or shrinks by exactly the amount the canvas did.
+  it was on screen, so the outline grows or shrinks by the same factor as the canvas.
   Undo/redo of a sizing tool behaves the same.
-- **Reset view** is the only way to re-fit: it re-centres and re-zooms the view so the whole
-  canvas is on screen, without changing the image. The view is fitted automatically only when
-  an editing session opens.
+- **Reset view** is the only way to re-fit: it re-centres the canvas and zooms to fit it in
+  the view (never above 100%), without changing the image. The view is fitted automatically
+  only when an editing session opens.
 - Live readout of current dimensions vs the active constraint set.
 
 ### Layers and tools

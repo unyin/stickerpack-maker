@@ -87,7 +87,10 @@ export class EditorStage {
   private readonly resizeObserver: ResizeObserver;
   private readonly unsubscribe: () => void;
   private viewChanged?: (view: ViewTransform) => void;
-  /** Whether the view has been fitted once; a 0×0 host defers the first fit to resize(). */
+  /**
+   * Whether the view is settled: fitted once, or zoomed/panned by the user.
+   * Until then a 0×0 host defers the first fit to resize().
+   */
   private fitted = false;
 
   constructor(
@@ -122,7 +125,9 @@ export class EditorStage {
 
     this.stage.on("wheel", (e) => this.onWheel(e));
     this.stage.on("dragmove dragend", (e) => {
-      if (e.target === this.stage) this.viewChanged?.(this.view());
+      if (e.target !== this.stage) return;
+      if (e.type === "dragend") this.fitted = true; // a hand pan is never overwritten
+      this.viewChanged?.(this.view());
     });
     this.stage.on("click tap", (e) => {
       if (e.target === this.stage) this.session.clearSelection();
@@ -134,7 +139,7 @@ export class EditorStage {
     this.render();
     // The one automatic fit: when the session opens. A detached or 0×0 host
     // (e.g. another view showing) defers it to the first real resize().
-    if (container.clientWidth > 0 && container.clientHeight > 0) this.fit();
+    this.fit();
   }
 
   /** Called with the current zoom/pan whenever it changes. */
@@ -161,11 +166,13 @@ export class EditorStage {
   }
 
   /**
-   * Fit the whole document in view (never above 100%). Runs once when the
-   * stage opens and on Reset view; editing, sizing tools included, never
-   * moves the view.
+   * Centre the document and zoom to fit it (never above 100%). Runs once
+   * when the stage opens (deferred while the host is 0×0) and on Reset view;
+   * editing, sizing tools included, never moves the view.
    */
   fit(): void {
+    const { clientWidth, clientHeight } = this.container;
+    if (clientWidth === 0 || clientHeight === 0) return; // stays deferred to resize()
     const doc = this.session.doc;
     this.setView(fitView({ width: this.stage.width(), height: this.stage.height() }, doc, FIT_MARGIN));
     this.fitted = true;
@@ -205,6 +212,7 @@ export class EditorStage {
     const pointer = this.stage.getPointerPosition();
     if (!pointer) return;
     this.setView(zoomAround(this.view(), pointer, e.evt.deltaY));
+    this.fitted = true; // a hand zoom is never overwritten
   }
 
   /** Bring Konva in line with the model: create, update, order, drop nodes. */
