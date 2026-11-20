@@ -86,3 +86,12 @@ export function readoutText(canvas: Size, set: ConstraintSet): string {
   });
   return `${size} · needs ${requirement(set)}: ${parts.join(", ")}`;
 }
+
+/**
+ * Font sizes a text layer may have, in px (SPM-9). Resizing a text layer on
+ * the canvas scales it beyond these; the size field stays within them.
+ */
+export const TEXT_FONT_SIZE = {
+  min: limits.text.minFontSize,
+  max: limits.text.maxFontSize,
+} as const;

@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
-import type { Rect, Transform } from "./model/document";
+import type { CutResult, Layer, Point, Rect, TextRender, TextStyle, Transform } from "./model/document";
 
 /** Extensions the Editor imports; mirrors IMPORT_EXTENSIONS in import.rs. */
 export const IMPORT_EXTENSIONS = ["jpg", "jpeg", "jfif", "png", "webp"];
@@ -69,10 +69,40 @@ export async function pickImageFile(): Promise<string | null> {
 /** Header naming each merge input's size and transform; mirrors MERGE_LAYERS_HEADER. */
 export const MERGE_LAYERS_HEADER = "x-merge-layers";
 
-/** A raster layer handed to Rust for merging. */
-export interface MergeInput {
-  image: RgbaImage;
-  transform: Transform;
+/**
+ * A layer handed to Rust for merging or cropping: a raster layer's pixels,
+ * or a text layer's text (Rust rasterises it at its transform, SPM-9).
+ */
+export type MergeInput =
+  | { image: RgbaImage; transform: Transform }
+  | { text: TextStyle; render: TextRender; transform: Transform };
+
+/** A model layer as a merge or crop input. */
+export function layerInput(layer: Layer): MergeInput {
+  if (layer.kind === "raster") return { image: layer.image, transform: layer.transform };
+  const { text, fontFamily, fontSize, color } = layer;
+  return { text: { text, fontFamily, fontSize, color }, render: layer.render, transform: layer.transform };
+}
+
+/**
+ * The wire form of merge and crop inputs: raster pixels concatenated as
+ * one raw body, and per layer its size and transform (plus, for text, its
+ * text and no body bytes; the size is then its rendered box).
+ */
+function encodeLayers(inputs: readonly MergeInput[]): { body: Uint8Array; meta: Record<string, unknown>[] } {
+  const rasters = inputs.flatMap((i) => ("image" in i ? [i.image] : []));
+  const body = new Uint8Array(rasters.reduce((n, img) => n + img.pixels.length, 0));
+  let offset = 0;
+  for (const img of rasters) {
+    body.set(img.pixels, offset);
+    offset += img.pixels.length;
+  }
+  const meta = inputs.map((i) =>
+    "image" in i
+      ? { width: i.image.width, height: i.image.height, transform: i.transform }
+      : { width: i.render.image.width, height: i.render.image.height, transform: i.transform, text: i.text },
+  );
+  return { body, meta };
 }
 
 /** A merged image and where its top-left sits in the document. */
@@ -83,22 +113,11 @@ export interface PlacedImage {
 }
 
 /**
- * Composite raster layers (bottom to top) in Rust (ADR-0005). Pixels go as
- * one raw body; sizes and transforms ride in a header.
+ * Composite layers (bottom to top) in Rust (ADR-0005), text included.
+ * Pixels go as one raw body; sizes, transforms and text ride in a header.
  */
 export async function mergeImages(inputs: readonly MergeInput[]): Promise<PlacedImage> {
-  const total = inputs.reduce((n, i) => n + i.image.pixels.length, 0);
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const input of inputs) {
-    body.set(input.image.pixels, offset);
-    offset += input.image.pixels.length;
-  }
-  const meta = inputs.map((i) => ({
-    width: i.image.width,
-    height: i.image.height,
-    transform: i.transform,
-  }));
+  const { body, meta } = encodeLayers(inputs);
   const frame = await invoke<ArrayBuffer>("editor_merge_layers", body, {
     headers: { [MERGE_LAYERS_HEADER]: JSON.stringify(meta) },
   });
@@ -119,32 +138,20 @@ export function decodePlacedFrame(frame: ArrayBuffer): PlacedImage {
 /** Header naming each crop input's size, transform and clip; mirrors CROP_LAYERS_HEADER. */
 export const CROP_LAYERS_HEADER = "x-crop-layers";
 
-/** A raster layer handed to Rust for cropping, with the whole pixels it keeps. */
-export interface CropInput {
-  image: RgbaImage;
-  transform: Transform;
-  clip: Rect;
-}
+/** A layer handed to Rust for cropping, with the whole pixels it keeps. */
+export type CropInput = MergeInput & { clip: Rect };
 
 /**
- * Re-render raster layers clipped to their rectangles in Rust (ADR-0005),
- * one image per input, each exactly its clip's size. Pixels go as one raw
- * body; sizes, transforms and clips ride in a header. The response is the
- * clips' RGBA bytes concatenated, so it is split here by the known sizes.
+ * Re-render layers clipped to their rectangles in Rust (ADR-0005), one
+ * image per input, each exactly its clip's size; text layers are rasterised.
+ * Pixels go as one raw body; sizes, transforms, text and clips ride in a
+ * header. The response is the clips' RGBA bytes concatenated, so it is
+ * split here by the known sizes.
  */
 export async function cropImages(inputs: readonly CropInput[]): Promise<RgbaImage[]> {
-  const body = new Uint8Array(inputs.reduce((n, i) => n + i.image.pixels.length, 0));
-  let offset = 0;
-  for (const input of inputs) {
-    body.set(input.image.pixels, offset);
-    offset += input.image.pixels.length;
-  }
-  const meta = inputs.map((i) => ({
-    width: i.image.width,
-    height: i.image.height,
-    transform: i.transform,
-    clip: i.clip,
-  }));
+  const encoded = encodeLayers(inputs);
+  const body = encoded.body;
+  const meta = encoded.meta.map((m, i) => ({ ...m, clip: inputs[i].clip }));
   const frame = await invoke<ArrayBuffer>("editor_crop_layers", body, {
     headers: { [CROP_LAYERS_HEADER]: JSON.stringify(meta) },
   });
@@ -164,4 +171,68 @@ export function splitClips(frame: ArrayBuffer, clips: readonly Rect[]): RgbaImag
     offset += length;
     return { width: c.width, height: c.height, pixels };
   });
+}
+
+/** The system's font families (Rust scans them once), sorted. */
+export function listFonts(): Promise<string[]> {
+  return invoke<string[]>("editor_list_fonts");
+}
+
+/** Draw a text layer at scale 1 in Rust: the pixels the view shows and the layer's box (SPM-9). */
+export async function renderText(style: TextStyle): Promise<TextRender> {
+  const { text, fontFamily, fontSize, color } = style;
+  const frame = await invoke<ArrayBuffer>("editor_render_text", { spec: { text, fontFamily, fontSize, color } });
+  return decodeTextFrame(frame);
+}
+
+/** Parse `TextRender::to_frame`: five f32 LE metrics, then an image frame. */
+export function decodeTextFrame(frame: ArrayBuffer): TextRender {
+  if (frame.byteLength < 20) throw new Error("text frame is truncated");
+  const m = new DataView(frame, 0, 20);
+  const f = (i: number) => m.getFloat32(i * 4, true);
+  return {
+    metrics: { originX: f(0), originY: f(1), ascent: f(2), descent: f(3), lineHeight: f(4) },
+    image: decodeFrame(frame, 20),
+  };
+}
+
+/** Header carrying a cut's layer size, transform and polygon; mirrors CUT_LAYER_HEADER. */
+export const CUT_LAYER_HEADER = "x-cut-layer";
+
+/**
+ * Cut a selection (a polygon in document pixels) out of a raster layer in
+ * Rust (SPM-9): the layer with a hole, and the cutout with its top-left in
+ * the layer's own pixel grid. Rust refuses a selection with nothing visible.
+ */
+export async function cutImage(image: RgbaImage, transform: Transform, polygon: readonly Point[]): Promise<CutResult> {
+  const meta = { width: image.width, height: image.height, transform, polygon: polygon.map((p) => [p.x, p.y]) };
+  const frame = await invoke<ArrayBuffer>("editor_cut_layer", new Uint8Array(image.pixels.buffer, image.pixels.byteOffset, image.pixels.byteLength), {
+    headers: { [CUT_LAYER_HEADER]: JSON.stringify(meta) },
+  });
+  return decodeCutFrame(frame, image.width, image.height);
+}
+
+/** Parse `Cut::to_frame`: the hole's RGBA bytes (the source's size), then a placed frame. */
+export function decodeCutFrame(frame: ArrayBuffer, width: number, height: number): CutResult {
+  const holeBytes = width * height * 4;
+  if (frame.byteLength < holeBytes) throw new Error("cut frame is truncated");
+  const hole: RgbaImage = { width, height, pixels: new Uint8ClampedArray(frame, 0, holeBytes) };
+  const placed = decodePlacedFrame(frame.slice(holeBytes));
+  return { hole, cutout: placed.image, x: placed.x, y: placed.y };
+}
+
+/** Header saying whether a pasted image over the import cap may be scaled; mirrors SCALE_TO_FIT_HEADER. */
+export const SCALE_TO_FIT_HEADER = "x-scale-to-fit";
+
+/** Probe a pasted image's encoded bytes (PNG, JPEG or WEBP): its size and the import cap. */
+export function probePasted(bytes: Uint8Array): Promise<ImageInfo> {
+  return invoke<ImageInfo>("editor_probe_pasted", bytes);
+}
+
+/** Decode a pasted image in Rust with the import cap rule; `scaleToFit` is the OK in the cap dialog. */
+export async function importPasted(bytes: Uint8Array, scaleToFit: boolean): Promise<RgbaImage> {
+  const frame = await invoke<ArrayBuffer>("editor_import_pasted", bytes, {
+    headers: { [SCALE_TO_FIT_HEADER]: String(scaleToFit) },
+  });
+  return decodeFrame(frame);
 }

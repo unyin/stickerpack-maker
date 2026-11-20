@@ -2,6 +2,7 @@
 // returns a new Doc and reuses every layer (and pixel buffer) it did not
 // change, so history can keep whole states cheaply. No Konva, no DOM.
 import { IMPORT_MAX_SIDE, type RgbaImage } from "./image";
+import { textLayerName } from "./text";
 
 /** Transform of a layer in document pixels; rotation in degrees (Konva's convention). */
 export interface Transform {
@@ -23,7 +24,32 @@ export interface RasterLayer {
   readonly image: RgbaImage;
 }
 
-/** Text stays editable vector data until merged or saved (SPEC §6). */
+/**
+ * Where text sits in its box, in px at scale 1 (from the Rust layout): the
+ * layout's top-left within the box and the font's line metrics. The view's
+ * text-editing overlay lines itself up with these.
+ */
+export interface TextMetrics {
+  readonly originX: number;
+  readonly originY: number;
+  readonly ascent: number;
+  /** Below the baseline, positive. */
+  readonly descent: number;
+  readonly lineHeight: number;
+}
+
+/**
+ * A text layer drawn at scale 1 by the Rust rasteriser (src-tauri/src/editor/text.rs):
+ * the pixels the view shows, whose size is the layer's box. Derived from the
+ * style, so it changes only together with it (ADR-0005; CMT-61: the view,
+ * the sizing tools and Crop all measure text by this one box).
+ */
+export interface TextRender {
+  readonly image: RgbaImage;
+  readonly metrics: TextMetrics;
+}
+
+/** Text stays editable vector data until merged, cropped across or saved (SPEC §6). */
 export interface TextLayer {
   readonly kind: "text";
   readonly id: string;
@@ -33,6 +59,7 @@ export interface TextLayer {
   readonly fontFamily: string;
   readonly fontSize: number;
   readonly color: string;
+  readonly render: TextRender;
 }
 
 export type Layer = RasterLayer | TextLayer;
@@ -116,16 +143,60 @@ export function addRasterLayer(
   return withLayers(doc, [...doc.layers, layer], doc.nextId + 1);
 }
 
-/** Add a text layer on top, named after its text. */
-export function addTextLayer(doc: Doc, style: TextStyle, transform: Transform = IDENTITY): Doc {
+/** The style fields of a text layer. */
+export function textStyleOf(layer: TextLayer): TextStyle {
+  const { text, fontFamily, fontSize, color } = layer;
+  return { text, fontFamily, fontSize, color };
+}
+
+/** Add a text layer on top, named after its text; `render` is its Rust rendering. */
+export function addTextLayer(
+  doc: Doc,
+  style: TextStyle,
+  render: TextRender,
+  transform: Transform = IDENTITY,
+): Doc {
   const layer: TextLayer = {
     kind: "text",
     id: nextLayerId(doc),
-    name: style.text,
+    name: textLayerName(style.text),
     transform,
-    ...style,
+    ...textStyle(style),
+    render,
   };
   return withLayers(doc, [...doc.layers, layer], doc.nextId + 1);
+}
+
+function textStyle(style: TextStyle): TextStyle {
+  const { text, fontFamily, fontSize, color } = style;
+  return { text, fontFamily, fontSize, color };
+}
+
+function sameStyle(a: TextStyle, b: TextStyle): boolean {
+  return a.text === b.text && a.fontFamily === b.fontFamily && a.fontSize === b.fontSize && a.color === b.color;
+}
+
+/**
+ * Change a text layer's text or style, with its new rendering. Its box's
+ * top-left stays where it is; the layer is renamed after its text. The same
+ * style returns the document as is (no undo step).
+ */
+export function setTextStyle(doc: Doc, id: string, style: TextStyle, render: TextRender): Doc {
+  const layer = doc.layers[layerIndex(doc, id)];
+  if (layer.kind !== "text") throw new Error(`layer ${id} is not a text layer`);
+  if (sameStyle(layer, style)) return doc;
+  return replaceAt(doc, id, () => ({ ...layer, ...textStyle(style), name: textLayerName(style.text), render }));
+}
+
+/** The pixels the view draws for a layer: a raster's image, or a text layer's rendering. */
+export function layerImage(layer: Layer): RgbaImage {
+  return layer.kind === "raster" ? layer.image : layer.render.image;
+}
+
+/** A layer's on-screen box in document pixels (text: its rendered box, CMT-61). */
+export function layerBounds(layer: Layer): Rect {
+  const image = layerImage(layer);
+  return placedBounds(image.width, image.height, layer.transform);
 }
 
 export function setTransform(doc: Doc, id: string, transform: Transform): Doc {
@@ -196,17 +267,12 @@ export function unionRect(rects: readonly Rect[]): Rect {
 
 /**
  * The whole image's bounds: the union of every layer's on-screen box,
- * including parts beyond the canvas. Raster layers are computed here; text
- * has no intrinsic size in the model, so `measureText` (the view's Konva
- * measurement) supplies each text layer's box — one measure for the view
- * and the tools.
+ * including parts beyond the canvas. A text layer's box is its Rust
+ * rendering's, the same box merge, Crop and the save rasterise it into
+ * (CMT-61), so "longest side exactly 512" holds for text too.
  */
-export function contentBounds(doc: Doc, measureText: (layer: TextLayer) => Rect): Rect {
-  return unionRect(
-    doc.layers.map((l) =>
-      l.kind === "raster" ? placedBounds(l.image.width, l.image.height, l.transform) : measureText(l),
-    ),
-  );
+export function contentBounds(doc: Doc): Rect {
+  return unionRect(doc.layers.map(layerBounds));
 }
 
 /** Below this, two positions or sizes count as equal (float noise). */
@@ -400,11 +466,14 @@ export function pixelBounds(r: Rect): Rect {
 
 /**
  * What Crop does to one layer:
- * - "keep": it lies inside the box, so it is left exactly as it is;
+ * - "keep": it lies inside the box, so it is left exactly as it is (text
+ *   stays editable text);
  * - "remove": it lies entirely outside the box, so it is discarded;
  * - "clip": it crosses the box edge, so it is re-rendered (in Rust) into
  *   `rect`, the whole pixels it covers inside the box, and becomes an
- *   untransformed raster layer placed at `rect`.
+ *   untransformed raster layer placed at `rect` (text is rasterised: it
+ *   cannot stay editable and lose its outside part).
+ * Text layers are measured by their rendered box, like images by theirs.
  */
 export type CropAction =
   | { readonly kind: "keep"; readonly id: string }
@@ -414,10 +483,7 @@ export type CropAction =
 /** Crop's plan for every layer, bottom to top (SPEC §6). */
 export function planCrop(doc: Doc, box: Rect): CropAction[] {
   return doc.layers.map((layer): CropAction => {
-    // Nothing creates text layers yet: the text tool (SPM-9) decides how
-    // Crop treats them. Until then they are left as they are.
-    if (layer.kind === "text") return { kind: "keep", id: layer.id };
-    const b = pixelBounds(placedBounds(layer.image.width, layer.image.height, layer.transform));
+    const b = pixelBounds(layerBounds(layer));
     const left = Math.max(b.x, box.x);
     const top = Math.max(b.y, box.y);
     const right = Math.min(b.x + b.width, box.x + box.width);
@@ -456,11 +522,72 @@ export function cropLayers(
     if (action.kind !== "clip") return;
     const image = images.get(action.id);
     const { rect } = action;
-    if (layer.kind !== "raster") throw new Error(`layer ${action.id} is not a raster layer`);
     if (!image || image.width !== rect.width || image.height !== rect.height) {
       throw new Error(`the cropped pixels for layer ${action.id} do not match its box`);
     }
-    layers.push({ ...layer, image, transform: { ...IDENTITY, x: rect.x, y: rect.y } });
+    // A clipped text layer becomes pixels: same id, name and stack position.
+    const { id, name } = layer;
+    layers.push({ kind: "raster", id, name, image, transform: { ...IDENTITY, x: rect.x, y: rect.y } });
   });
   return withLayers(doc, layers);
+}
+
+/** A point in document pixels. */
+export interface Point {
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * Where a layer's own pixel (`u`, `v`) is drawn in the document: its
+ * transform applied (translate, rotate, scale; like placedBounds, the view
+ * and Rust).
+ */
+export function localToDoc(t: Transform, u: number, v: number): Point {
+  const rad = (t.rotation * Math.PI) / 180;
+  const sx = u * t.scaleX;
+  const sy = v * t.scaleY;
+  return { x: t.x + sx * Math.cos(rad) - sy * Math.sin(rad), y: t.y + sx * Math.sin(rad) + sy * Math.cos(rad) };
+}
+
+/** What a cut produces (src-tauri/src/editor/cut.rs). */
+export interface CutResult {
+  /** The source's pixels with the selected ones cleared; the source's size. */
+  readonly hole: RgbaImage;
+  /** The selected pixels, trimmed to the visible ones. */
+  readonly cutout: RgbaImage;
+  /** The cutout's top-left in the source's own pixel grid. */
+  readonly x: number;
+  readonly y: number;
+}
+
+/** Name of the floating layer a cut creates. */
+export const CUTOUT_NAME = "Cutout";
+
+/**
+ * Cut as ONE operation (SPEC §6, SPM-9): the source raster layer keeps a
+ * transparent hole (same size and transform, so nothing moves), and the
+ * selected pixels become a new floating layer directly above it, at the
+ * same spot: it takes the source's rotation and scale, placed where the
+ * cutout's top-left pixel was drawn.
+ */
+export function cutLayer(doc: Doc, sourceId: string, cut: CutResult): Doc {
+  const index = layerIndex(doc, sourceId);
+  const source = doc.layers[index];
+  if (source.kind !== "raster") throw new Error(`layer ${sourceId} is not a raster layer`);
+  if (cut.hole.width !== source.image.width || cut.hole.height !== source.image.height) {
+    throw new Error(`the cut pixels for layer ${sourceId} do not match its size`);
+  }
+  const at = localToDoc(source.transform, cut.x, cut.y);
+  const cutout: RasterLayer = {
+    kind: "raster",
+    id: nextLayerId(doc),
+    name: CUTOUT_NAME,
+    transform: { ...source.transform, x: at.x, y: at.y },
+    image: cut.cutout,
+  };
+  const layers = doc.layers.slice();
+  layers[index] = { ...source, image: cut.hole };
+  layers.splice(index + 1, 0, cutout);
+  return withLayers(doc, layers, doc.nextId + 1);
 }

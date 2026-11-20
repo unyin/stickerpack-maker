@@ -24,15 +24,19 @@ import {
   setLayerImage,
   setTransform,
   type Doc,
+  type TextRender,
 } from "../src/editor/model/document";
 import { History } from "../src/editor/model/history";
 import { EditorSession } from "../src/editor/model/session";
 
-/** Rasters only: these tests have no text layers to measure. */
-function contentBounds(doc: Doc) {
-  return modelContentBounds(doc, () => {
-    throw new Error("unexpected text layer");
-  });
+const contentBounds = (doc: Doc) => modelContentBounds(doc);
+
+/** A text layer's Rust rendering stand-in: a blank box of the given size. */
+function textRender(width = 20, height = 10): TextRender {
+  return {
+    image: image(width, height),
+    metrics: { originX: 0, originY: 0, ascent: 8, descent: 2, lineHeight: 11 },
+  };
 }
 
 function image(width: number, height: number, fill = 0): RgbaImage {
@@ -105,7 +109,7 @@ test("centeredPlacement centres an image on the canvas at its own size, on whole
 test("only Fit and Longest side change the canvas size", () => {
   let doc = newDocument(image(800, 300), "base", STICKER_CANVAS);
   doc = addRasterLayer(doc, image(40, 40), "cutout", centeredPlacement(doc, image(40, 40)));
-  doc = addTextLayer(doc, { text: "hi", fontFamily: "Arial", fontSize: 12, color: "#000" });
+  doc = addTextLayer(doc, { text: "hi", fontFamily: "Arial", fontSize: 12, color: "#000" }, textRender());
   const [base, cutout, text] = doc.layers.map((l) => l.id);
   doc = setTransform(doc, cutout, { ...IDENTITY, x: 5 });
   doc = moveLayer(doc, text, 0);
@@ -143,7 +147,7 @@ test("operations are pure: the input document is never changed", () => {
 test("new layers go on top with unique ids; text layers carry their text", () => {
   let doc = newDocument(image(10, 10), "base", STICKER_CANVAS);
   doc = addRasterLayer(doc, image(5, 5), "cutout", { ...IDENTITY, x: 2, y: 3 });
-  doc = addTextLayer(doc, { text: "hi", fontFamily: "Arial", fontSize: 24, color: "#ff0000" });
+  doc = addTextLayer(doc, { text: "hi", fontFamily: "Arial", fontSize: 24, color: "#ff0000" }, textRender());
   expect(names(doc)).toEqual(["base", "cutout", "hi"]);
   const ids = doc.layers.map((l) => l.id);
   expect(new Set(ids).size).toBe(3);
@@ -157,7 +161,7 @@ test("the id an add or merge creates equals nextLayerId of the input doc", () =>
   const base = newDocument(image(4, 4), "base", STICKER_CANVAS);
   const raster = addRasterLayer(base, image(1, 1), "a");
   expect(raster.layers[1].id).toBe(nextLayerId(base));
-  const text = addTextLayer(raster, { text: "hi", fontFamily: "sans-serif", fontSize: 24, color: "#000" });
+  const text = addTextLayer(raster, { text: "hi", fontFamily: "sans-serif", fontSize: 24, color: "#000" }, textRender());
   expect(text.layers[2].id).toBe(nextLayerId(raster));
   const merged = mergeLayers(text, [text.layers[0].id, text.layers[1].id], image(1, 1), IDENTITY);
   expect(merged.layers.map((l) => l.id)).toContain(nextLayerId(text));
@@ -502,16 +506,11 @@ test("resizeSideProblem accepts whole numbers from 1 to the import cap only", ()
   expect(() => scaleLongestSide(doc, contentBounds(doc), 0)).toThrow(text);
 });
 
-test("contentBounds includes text layers via the supplied measurement", () => {
+test("contentBounds measures text layers by their rendered box under their transform", () => {
   let doc = snug(100, 100, "base");
-  doc = addTextLayer(doc, { text: "hi", fontFamily: "Arial", fontSize: 20, color: "#000" });
-  const seen: string[] = [];
-  const bounds = modelContentBounds(doc, (layer) => {
-    seen.push(layer.id);
-    return { x: 50, y: -10, width: 200, height: 30 };
-  });
-  expect(seen).toEqual(["layer-2"]);
-  expect(bounds).toEqual({ x: 0, y: -10, width: 250, height: 110 });
+  const style = { text: "hi", fontFamily: "Arial", fontSize: 20, color: "#000000" };
+  doc = addTextLayer(doc, style, textRender(100, 15), { ...IDENTITY, x: 50, y: -10, scaleX: 2, scaleY: 2 });
+  expect(contentBounds(doc)).toEqual({ x: 0, y: -10, width: 250, height: 110 });
 });
 
 test("free resize scales the whole image to the entered longest side and keeps the canvas", () => {

@@ -50,15 +50,19 @@ test("zoomAround keeps the point under the pointer fixed and clamps", () => {
   expect(zoomAround({ scale: MIN_ZOOM, x: 0, y: 0 }, pointer, 1).scale).toBe(MIN_ZOOM);
 });
 
-test("merge needs two or more selected raster layers, and says why not", () => {
+test("merge needs two or more selected layers, text included, and says why not", () => {
   let doc = newDocument(image(10, 10), "base", STICKER_CANVAS);
   doc = addRasterLayer(doc, image(2, 2), "cutout");
-  doc = addTextLayer(doc, { text: "hi", fontFamily: "Arial", fontSize: 12, color: "#000" });
+  doc = addTextLayer(
+    doc,
+    { text: "hi", fontFamily: "Arial", fontSize: 12, color: "#000000" },
+    { image: image(10, 5), metrics: { originX: 0, originY: 0, ascent: 8, descent: 2, lineHeight: 11 } },
+  );
   const [base, cutout, text] = doc.layers.map((l) => l.id);
   expect(mergeBlocker(doc, [])).toBe("Select two or more layers to merge.");
   expect(mergeBlocker(doc, [base])).toBe("Select two or more layers to merge.");
   expect(mergeBlocker(doc, [base, cutout])).toBeNull();
-  expect(mergeBlocker(doc, [base, text])).toContain("text");
+  expect(mergeBlocker(doc, [base, text])).toBeNull();
 });
 
 test("Ctrl, Cmd or Shift turn a click into a toggle", () => {
