@@ -130,7 +130,7 @@ export class EditorStage {
     this.resizeObserver.observe(container);
     this.unsubscribe = session.subscribe(() => this.render());
     this.render();
-    this.fit();
+    this.fit(); // the one automatic fit: when the session opens
   }
 
   /** Called with the current zoom/pan whenever it changes. */
@@ -156,7 +156,11 @@ export class EditorStage {
     );
   }
 
-  /** Fit the whole document in view (never above 100%). */
+  /**
+   * Fit the whole document in view (never above 100%). Runs once when the
+   * stage opens and on Reset view; editing, sizing tools included, never
+   * moves the view.
+   */
   fit(): void {
     const doc = this.session.doc;
     this.setView(fitView({ width: this.stage.width(), height: this.stage.height() }, doc, FIT_MARGIN));
@@ -200,7 +204,6 @@ export class EditorStage {
   /** Bring Konva in line with the model: create, update, order, drop nodes. */
   private render(): void {
     const doc = this.session.doc;
-    const resized = doc.width !== this.backdrop.width() || doc.height !== this.backdrop.height();
     this.backdrop.size({ width: doc.width, height: doc.height });
     this.outline.size({ width: doc.width, height: doc.height });
     const live = new Set(doc.layers.map((l) => l.id));
@@ -235,9 +238,9 @@ export class EditorStage {
     this.transformer.moveToTop();
     this.content.batchDraw();
     this.guides.batchDraw();
-    // A new canvas size (sizing tools, or undo/redo of one) re-fits the view
-    // so the whole canvas is on screen.
-    if (resized) this.fit();
+    // A new canvas size (sizing tools, or undo/redo of one) leaves zoom and pan
+    // alone (SPEC §6): the canvas keeps its top-left on screen and the outline
+    // changes by exactly the amount the document did. Only Reset view re-fits.
   }
 
   private nodeFor(layer: Layer): Konva.Shape {

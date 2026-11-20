@@ -171,7 +171,13 @@ stickers, Missing stickers, and the thumbnail.
   1. Fit to 512×512 and pad the rest with transparency.
   2. Scale longest side to 512 px (the canvas becomes the scaled image, no padding).
   3. Free resize: entered value = longest side, a whole number of pixels from 1 to 2000.
-- **Reset view** re-centres and re-zooms the view without changing the image.
+- The sizing tools change the canvas and the image, **never the view**: zoom and pan stay where
+  the user left them (owner decision 2026-11-20). The canvas keeps its top-left corner on
+  screen, so the outline grows or shrinks by exactly the amount the canvas did. Undo/redo of a
+  sizing tool behaves the same.
+- **Reset view** is the only way to re-fit: it re-centres and re-zooms the view so the whole
+  canvas is on screen, without changing the image. The view is fitted automatically only when
+  an editing session opens.
 - Live readout of current dimensions vs the active constraint set.
 
 ### Layers and tools
