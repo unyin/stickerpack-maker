@@ -2,9 +2,11 @@
 import {
   fitToBox,
   KEEP_ONE_LAYER,
+  NOTHING_IN_BOX,
   resizeLongestSide,
   resizeSideProblem,
   scaleLongestSide,
+  type CropAction,
   type Doc,
   type Rect,
 } from "../model/document";
@@ -122,4 +124,17 @@ export function selectModeFor(event: {
   shiftKey: boolean;
 }): SelectMode {
   return event.ctrlKey || event.metaKey || event.shiftKey ? "toggle" : "replace";
+}
+
+/**
+ * Why Crop is disabled, or null when it can run: it would change nothing
+ * (every layer already inside the box), or it would discard every layer
+ * (a session keeps at least one, SPEC §6).
+ */
+export function cropBlocker(plan: readonly CropAction[], constraints: ConstraintSet): string | null {
+  if (plan.every((a) => a.kind === "keep")) {
+    return `Everything is already inside the ${constraints.side}×${constraints.side} box.`;
+  }
+  if (plan.every((a) => a.kind === "remove")) return NOTHING_IN_BOX;
+  return null;
 }

@@ -362,3 +362,102 @@ export function mergeLayers(
   });
   return withLayers(doc, layers, doc.nextId + 1);
 }
+
+/**
+ * The crop box (SPEC §6): `side` x `side` (the constraint set's side), fixed
+ * at the canvas centre. Its top-left is rounded down to a whole pixel, so an
+ * odd difference (a 512×341 canvas after Longest side) still crops whole
+ * pixels. The overlay draws exactly this rectangle and Crop keeps exactly it.
+ */
+export function cropBox(canvas: Size, side: number): Rect {
+  return {
+    x: Math.floor((canvas.width - side) / 2),
+    y: Math.floor((canvas.height - side) / 2),
+    width: side,
+    height: side,
+  };
+}
+
+/** Snap to the nearest whole pixel when float noise is all that separates them (merge.rs `snap`). */
+function snapPixel(v: number): number {
+  return Math.abs(v - Math.round(v)) < PIXEL_SNAP ? Math.round(v) : v;
+}
+
+/** The whole pixels a rectangle touches: its bounds rounded outwards (after snapping). */
+export function pixelBounds(r: Rect): Rect {
+  const x = Math.floor(snapPixel(r.x));
+  const y = Math.floor(snapPixel(r.y));
+  return {
+    x,
+    y,
+    width: Math.ceil(snapPixel(r.x + r.width)) - x,
+    height: Math.ceil(snapPixel(r.y + r.height)) - y,
+  };
+}
+
+/**
+ * What Crop does to one layer:
+ * - "keep": it lies inside the box, so it is left exactly as it is;
+ * - "remove": it lies entirely outside the box, so it is discarded;
+ * - "clip": it crosses the box edge, so it is re-rendered (in Rust) into
+ *   `rect`, the whole pixels it covers inside the box, and becomes an
+ *   untransformed raster layer placed at `rect`.
+ */
+export type CropAction =
+  | { readonly kind: "keep"; readonly id: string }
+  | { readonly kind: "remove"; readonly id: string }
+  | { readonly kind: "clip"; readonly id: string; readonly rect: Rect };
+
+/** Crop's plan for every layer, bottom to top (SPEC §6). */
+export function planCrop(doc: Doc, box: Rect): CropAction[] {
+  return doc.layers.map((layer): CropAction => {
+    // Nothing creates text layers yet: the text tool (SPM-9) decides how
+    // Crop treats them. Until then they are left as they are.
+    if (layer.kind === "text") return { kind: "keep", id: layer.id };
+    const b = pixelBounds(placedBounds(layer.image.width, layer.image.height, layer.transform));
+    const left = Math.max(b.x, box.x);
+    const top = Math.max(b.y, box.y);
+    const right = Math.min(b.x + b.width, box.x + box.width);
+    const bottom = Math.min(b.y + b.height, box.y + box.height);
+    if (right <= left || bottom <= top) return { kind: "remove", id: layer.id };
+    const inside = left === b.x && top === b.y && right === b.x + b.width && bottom === b.y + b.height;
+    if (inside) return { kind: "keep", id: layer.id };
+    return { kind: "clip", id: layer.id, rect: { x: left, y: top, width: right - left, height: bottom - top } };
+  });
+}
+
+/** Why Crop would leave a session without layers (SPEC §6). */
+export const NOTHING_IN_BOX = "Nothing is inside the box: drag the image into it first.";
+
+/**
+ * Apply a crop plan as ONE operation (SPEC §6): clipped layers get their new
+ * pixels (`images`, by layer id, each exactly its rect's size) at their rect,
+ * untransformed, keeping their id, name and stack position; layers entirely
+ * outside the box are removed. The canvas size never changes. A plan that
+ * changes nothing returns the document as is (no undo step).
+ */
+export function cropLayers(
+  doc: Doc,
+  plan: readonly CropAction[],
+  images: ReadonlyMap<string, RgbaImage>,
+): Doc {
+  if (plan.length !== doc.layers.length || plan.some((a, i) => a.id !== doc.layers[i].id)) {
+    throw new Error("the crop plan does not match the document");
+  }
+  if (plan.every((a) => a.kind === "keep")) return doc;
+  if (plan.every((a) => a.kind === "remove")) throw new Error(NOTHING_IN_BOX);
+  const layers: Layer[] = [];
+  plan.forEach((action, i) => {
+    const layer = doc.layers[i];
+    if (action.kind === "keep") layers.push(layer);
+    if (action.kind !== "clip") return;
+    const image = images.get(action.id);
+    const { rect } = action;
+    if (layer.kind !== "raster") throw new Error(`layer ${action.id} is not a raster layer`);
+    if (!image || image.width !== rect.width || image.height !== rect.height) {
+      throw new Error(`the cropped pixels for layer ${action.id} do not match its box`);
+    }
+    layers.push({ ...layer, image, transform: { ...IDENTITY, x: rect.x, y: rect.y } });
+  });
+  return withLayers(doc, layers);
+}
