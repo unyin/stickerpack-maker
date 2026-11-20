@@ -14,7 +14,9 @@ import {
 import {
   addRasterLayer,
   cropBox,
+  cropClipInputs,
   cropLayers,
+  cropOutcome,
   IDENTITY,
   newDocument,
   NOTHING_IN_BOX,
@@ -100,7 +102,7 @@ test("after Longest side the box equals the canvas, and Crop clips to exactly th
       { kind: "clip", id: "layer-1", rect: { x: 10, y: 0, width: scaled.width - 10, height: scaled.height } },
     ]);
     // Clipped pixels come from Rust; their size is the plan's rect.
-    const images = new Map([["layer-1", image(scaled.width - 10, scaled.height)]]);
+    const images = new Map([["layer-1", image(scaled.width - 10, scaled.height, 255)]]);
     const cropped = cropLayers(moved, plan, images);
     const layer = cropped.layers[0] as RasterLayer;
     expect(pixelBounds(placedBounds(layer.image.width, layer.image.height, layer.transform))).toEqual({
@@ -308,4 +310,73 @@ test("the readout follows undo and redo of a canvas change", () => {
     `${S * 2}×${S} px · needs longest side ${S}: ${S} px over`,
     `${S}×${S / 2} px · sticker size OK (longest side ${S})`,
   ]);
+});
+
+/** A 20x2 strip turned 45 degrees (running down and to the right) from (x, y). */
+function strip(x: number, y: number): Doc {
+  const doc = newDocument(coords(20, 2), "strip", { width: 10, height: 10 });
+  return setTransform(doc, "layer-1", { ...IDENTITY, x, y, rotation: 45 });
+}
+
+const BOX10 = { x: 0, y: 0, width: 10, height: 10 };
+
+test("a turned layer whose bounding box overlaps the box but whose rectangle does not is removed", () => {
+  // Along x - y = 14..11.2 from (6, -8) to (20, 6): its bounding box covers
+  // part of the box, the strip itself stays beyond the box's corner (x - y <= 10).
+  const doc = strip(6, -8);
+  const b = placedBounds(20, 2, doc.layers[0].transform);
+  expect(b.x).toBeLessThan(BOX10.x + BOX10.width);
+  expect(b.y).toBeLessThan(BOX10.y + BOX10.height);
+  expect(b.x + b.width).toBeGreaterThan(BOX10.x);
+  expect(b.y + b.height).toBeGreaterThan(BOX10.y);
+  expect(planCrop(doc, BOX10)).toEqual([{ kind: "remove", id: "layer-1" }]);
+});
+
+test("with only such layers Crop is blocked with NOTHING_IN_BOX", () => {
+  const doc = strip(6, -8);
+  const plan = planCrop(doc, BOX10);
+  expect(cropOutcome(plan)).toBe("nothing-inside");
+  expect(cropBlocker(plan, BOX10)).toBe(NOTHING_IN_BOX);
+  expect(() => cropLayers(doc, plan, new Map())).toThrow(NOTHING_IN_BOX);
+});
+
+test("a turned layer that truly crosses the box is still clipped", () => {
+  // The same strip started 4 px further left reaches x - y = 10 .. 8.6.
+  const plan = planCrop(strip(2, -8), BOX10);
+  expect(plan.map((a) => a.kind)).toEqual(["clip"]);
+  const clip = plan[0] as Extract<CropAction, { kind: "clip" }>;
+  expect(clip.rect.x + clip.rect.width).toBeLessThanOrEqual(10);
+  expect(clip.rect.y + clip.rect.height).toBeLessThanOrEqual(10);
+});
+
+test("a crossing layer whose part in the box is transparent is kept, like a transparent layer inside the box", () => {
+  let doc = newDocument(coords(12, 12), "base", { width: 10, height: 10 });
+  doc = setTransform(doc, "layer-1", { ...IDENTITY, x: -1, y: -1 });
+  doc = addRasterLayer(doc, coords(4, 4), "ghost", { ...IDENTITY, x: 8, y: 8 });
+  const plan = planCrop(doc, BOX10);
+  expect(plan.map((a) => a.kind)).toEqual(["clip", "clip"]);
+  const images = copyClips(doc, plan);
+  const ghost = plan[1] as Extract<CropAction, { kind: "clip" }>;
+  images.set("layer-2", image(ghost.rect.width, ghost.rect.height)); // Rust drew nothing
+  expect(cropLayers(doc, plan, images).layers.map((l) => l.id)).toEqual(["layer-1", "layer-2"]);
+  // Even when it is the only layer.
+  const only = newDocument(image(4, 4, 1), "only", { width: 10, height: 10 });
+  const edge = setTransform(only, "layer-1", { ...IDENTITY, x: 8 });
+  const edgePlan = planCrop(edge, BOX10);
+  const out = cropLayers(edge, edgePlan, new Map([["layer-1", image(2, 4)]]));
+  expect(out.layers.map((l) => l.id)).toEqual(["layer-1"]);
+});
+
+test("cropOutcome and cropClipInputs summarise a plan", () => {
+  let doc = newDocument(coords(4, 4), "in", { width: 10, height: 10 });
+  expect(cropOutcome(planCrop(doc, BOX10))).toBe("nothing-outside");
+  doc = addRasterLayer(doc, coords(4, 4), "edge", { ...IDENTITY, x: 8, y: 0 });
+  doc = addRasterLayer(doc, coords(4, 4), "far", { ...IDENTITY, x: 30, y: 0 });
+  const plan = planCrop(doc, BOX10);
+  expect(cropOutcome(plan)).toBe("crop");
+  const inputs = cropClipInputs(doc, plan);
+  expect(inputs.map((i) => i.id)).toEqual(["layer-2"]);
+  expect(inputs[0].image).toBe((doc.layers[1] as RasterLayer).image);
+  expect(inputs[0].transform).toBe(doc.layers[1].transform);
+  expect(inputs[0].clip).toEqual({ x: 8, y: 0, width: 2, height: 4 });
 });

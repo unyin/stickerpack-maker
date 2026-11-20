@@ -77,12 +77,21 @@ function requirement(set: ConstraintSet): string {
  * or how far off it is, e.g. "600×400 px · needs longest side 512: 88 px over".
  */
 export function readoutText(canvas: Size, set: ConstraintSet): string {
+  return readoutTextFor(canvas, set, constraintStatus(canvas, set));
+}
+
+function readoutTextFor(canvas: Size, set: ConstraintSet, status: ConstraintStatus): string {
   const size = `${canvas.width}×${canvas.height} px`;
-  const status = constraintStatus(canvas, set);
   if (status.ok) return `${size} · ${set.mode} size OK (${requirement(set)})`;
   const parts = status.off.map((s) => {
     const amount = `${Math.abs(s.by)} px ${s.by > 0 ? "over" : "under"}`;
     return set.square ? `${s.side} ${amount}` : amount;
   });
   return `${size} · needs ${requirement(set)}: ${parts.join(", ")}`;
+}
+
+/** The readout's text and whether the canvas meets the set, from one status computation. */
+export function readoutStatus(canvas: Size, set: ConstraintSet): { text: string; ok: boolean } {
+  const status = constraintStatus(canvas, set);
+  return { text: readoutTextFor(canvas, set, status), ok: status.ok };
 }

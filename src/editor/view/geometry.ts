@@ -1,5 +1,6 @@
 // Pure decisions behind the Editor view: no Konva, no DOM, unit-tested.
 import {
+  cropOutcome,
   fitToBox,
   KEEP_ONE_LAYER,
   NOTHING_IN_BOX,
@@ -132,9 +133,12 @@ export function selectModeFor(event: {
  * (a session keeps at least one, SPEC §6).
  */
 export function cropBlocker(plan: readonly CropAction[], box: Rect): string | null {
-  if (plan.every((a) => a.kind === "keep")) {
-    return `Everything is already inside the ${box.width}×${box.height} box.`;
+  switch (cropOutcome(plan)) {
+    case "nothing-outside":
+      return `Everything is already inside the ${box.width}×${box.height} box.`;
+    case "nothing-inside":
+      return NOTHING_IN_BOX;
+    case "crop":
+      return null;
   }
-  if (plan.every((a) => a.kind === "remove")) return NOTHING_IN_BOX;
-  return null;
 }

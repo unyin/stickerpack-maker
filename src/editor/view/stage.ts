@@ -3,8 +3,7 @@
 // lacks, so undo/redo and save never read from Konva.
 import Konva from "konva";
 import type { RgbaImage } from "../model/image";
-import type { ConstraintSet } from "../model/constraints";
-import { contentBounds, cropBox, setTransform, type Doc, type Layer, type Rect, type Transform } from "../model/document";
+import { contentBounds, setTransform, type Doc, type Layer, type Rect, type Transform } from "../model/document";
 import type { EditorSession } from "../model/session";
 import { fitView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
 
@@ -73,9 +72,9 @@ export class EditorStage {
   private readonly guides = new Konva.Layer({ listening: false });
   private readonly outline: Konva.Rect;
   /**
-   * The crop box overlay (SPEC §6): the constraint set's side capped at the
-   * canvas size, fixed at the canvas centre (`cropBox`, the rectangle Crop keeps). A solid halo under
-   * a dashed line keeps it visible over any image.
+   * The crop box overlay (SPEC §6), drawn at the rectangle the view hands
+   * `setCropBox` (the one Crop keeps). A solid halo under a dashed line keeps
+   * it visible over any image.
    */
   private readonly boxHalo = new Konva.Rect({ strokeWidth: 3, strokeScaleEnabled: false, listening: false });
   private readonly box = new Konva.Rect({
@@ -110,7 +109,6 @@ export class EditorStage {
   constructor(
     private readonly container: HTMLDivElement,
     private readonly session: EditorSession,
-    private readonly constraints: ConstraintSet,
   ) {
     this.stage = new Konva.Stage({
       container,
@@ -191,6 +189,13 @@ export class EditorStage {
     this.fitted = true;
   }
 
+  /** Place the crop box overlay; the view computes the box once per refresh and passes it here. */
+  setCropBox(box: Rect): void {
+    this.boxHalo.setAttrs(box);
+    this.box.setAttrs(box);
+    this.guides.batchDraw();
+  }
+
   /** Show or hide the crop box overlay (it is on when the stage opens). */
   setCropBoxVisible(visible: boolean): void {
     this.boxHalo.visible(visible);
@@ -254,10 +259,6 @@ export class EditorStage {
     const doc = this.session.doc;
     this.backdrop.size({ width: doc.width, height: doc.height });
     this.outline.size({ width: doc.width, height: doc.height });
-    // The box follows the canvas size, staying centred on it.
-    const box = cropBox(doc, this.constraints.side);
-    this.boxHalo.setAttrs(box);
-    this.box.setAttrs(box);
     const live = new Set(doc.layers.map((l) => l.id));
     for (const [id, node] of this.nodes) {
       if (!live.has(id)) {
