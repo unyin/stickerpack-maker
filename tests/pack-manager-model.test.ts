@@ -1,0 +1,187 @@
+// Pure rules behind the Pack Manager (SPEC §5): selection, modes, reorder
+// hit-testing, the Emoji String warning, and user-facing wording.
+import { expect, test } from "bun:test";
+import limits from "../src/shared/limits.json";
+import type { StickerView } from "../src/pack-manager/api";
+import { EMOJI_MAX, emojiCount, emojiWarning } from "../src/pack-manager/model/emoji";
+import {
+  combinedSize,
+  formatBytes,
+  importSummary,
+  matchesSearch,
+  MISSING_REASON,
+  packDeleteMessage,
+  packSizeText,
+  sendBlocker,
+  sendReportText,
+} from "../src/pack-manager/model/messages";
+import { dropPosition, escapeAction, selectionActive, slotAt, toggleMode } from "../src/pack-manager/model/modes";
+import {
+  clickSticker,
+  clickThumbnail,
+  modifiersOf,
+  NO_SELECTION,
+  panelFor,
+  pruneSelection,
+} from "../src/pack-manager/model/selection";
+
+const order = [10, 11, 12, 13, 14];
+const plain = { ctrl: false, shift: false };
+const ctrl = { ctrl: true, shift: false };
+const shift = { ctrl: false, shift: true };
+
+test("click selects one sticker, replacing any selection", () => {
+  let s = clickSticker(NO_SELECTION, order, 11, plain);
+  expect(s.ids).toEqual([11]);
+  s = clickSticker(s, order, 13, plain);
+  expect(s).toEqual({ ids: [13], thumbnail: false, anchor: 13 });
+  expect(panelFor(s)).toBe("detail");
+});
+
+test("ctrl+click toggles in and out, keeping pack order", () => {
+  let s = clickSticker(NO_SELECTION, order, 13, plain);
+  s = clickSticker(s, order, 10, ctrl);
+  expect(s.ids).toEqual([10, 13]);
+  expect(panelFor(s)).toBe("aggregate");
+  s = clickSticker(s, order, 13, ctrl);
+  expect(s.ids).toEqual([10]);
+  s = clickSticker(s, order, 10, ctrl);
+  expect(s.ids).toEqual([]);
+  expect(panelFor(s)).toBe("none");
+});
+
+test("shift+click selects the range from the anchor, either direction", () => {
+  let s = clickSticker(NO_SELECTION, order, 11, plain);
+  s = clickSticker(s, order, 13, shift);
+  expect(s.ids).toEqual([11, 12, 13]);
+  // The anchor stays, so a second shift+click re-ranges from it.
+  s = clickSticker(s, order, 10, shift);
+  expect(s.ids).toEqual([10, 11]);
+  // Without an anchor, shift+click is a plain click.
+  expect(clickSticker(NO_SELECTION, order, 12, shift).ids).toEqual([12]);
+  // Ctrl+click moves the anchor.
+  s = clickSticker(clickSticker(NO_SELECTION, order, 10, plain), order, 14, ctrl);
+  expect(clickSticker(s, order, 12, shift).ids).toEqual([12, 13, 14]);
+});
+
+test("the thumbnail is selected alone and never joins a sticker selection", () => {
+  const s = clickThumbnail();
+  expect(panelFor(s)).toBe("thumbnail");
+  const next = clickSticker(s, order, 12, ctrl);
+  expect(next).toEqual({ ids: [12], thumbnail: false, anchor: 12 });
+  expect(clickSticker(s, order, 12, shift).thumbnail).toBe(false);
+});
+
+test("pruning drops stickers that left the pack and reorders to pack order", () => {
+  const s = { ids: [12, 10, 99], thumbnail: false, anchor: 99 };
+  expect(pruneSelection(s, order)).toEqual({ ids: [10, 12], thumbnail: false, anchor: null });
+  expect(clickSticker(s, order, 999, plain)).toBe(s);
+});
+
+test("cmd counts as ctrl", () => {
+  expect(modifiersOf({ ctrlKey: false, metaKey: true, shiftKey: false })).toEqual(ctrl);
+});
+
+test("modes are exclusive; Esc leaves Reorder or clears the selection", () => {
+  expect(toggleMode("normal")).toBe("reorder");
+  expect(toggleMode("reorder")).toBe("normal");
+  expect(escapeAction("reorder")).toBe("exit-reorder");
+  expect(escapeAction("normal")).toBe("clear-selection");
+  expect(selectionActive("normal")).toBe(true);
+  expect(selectionActive("reorder")).toBe(false);
+});
+
+test("a drop slot maps to the moved sticker's new position", () => {
+  // Four stickers; moving the first.
+  expect(dropPosition(0, 0)).toBeNull();
+  expect(dropPosition(0, 1)).toBeNull();
+  expect(dropPosition(0, 2)).toBe(2);
+  expect(dropPosition(0, 4)).toBe(4);
+  // Moving the last one to the front.
+  expect(dropPosition(3, 0)).toBe(1);
+  expect(dropPosition(3, 4)).toBeNull();
+  expect(dropPosition(2, 1)).toBe(2);
+});
+
+test("the slot under the pointer follows the nearest tile's halves", () => {
+  // Two rows of two 100px tiles with 10px gaps.
+  const tiles = [
+    { left: 0, top: 0, width: 100, height: 100 },
+    { left: 110, top: 0, width: 100, height: 100 },
+    { left: 0, top: 110, width: 100, height: 100 },
+    { left: 110, top: 110, width: 100, height: 100 },
+  ];
+  expect(slotAt(tiles, 10, 50)).toBe(0);
+  expect(slotAt(tiles, 90, 50)).toBe(1);
+  expect(slotAt(tiles, 120, 50)).toBe(1);
+  expect(slotAt(tiles, 200, 150)).toBe(4);
+  expect(slotAt(tiles, 400, 400)).toBe(4); // far past the end
+  expect(slotAt(tiles, -50, 150)).toBe(2); // left of the second row
+  expect(slotAt([], 5, 5)).toBe(0);
+});
+
+test("emoji are counted as people see them, and warn outside 1-20", () => {
+  expect(EMOJI_MAX).toBe(limits.emojiString.maxEmoji);
+  expect(emojiCount("😀👍🏽👨‍👩‍👧🇫🇷")).toBe(4);
+  expect(emojiCount(" 😀 ")).toBe(1);
+  expect(emojiWarning("")).toContain("No emoji");
+  expect(emojiWarning("😀")).toBeNull();
+  expect(emojiWarning("😀".repeat(EMOJI_MAX))).toBeNull();
+  expect(emojiWarning("😀".repeat(EMOJI_MAX + 1))).toContain(`at most ${EMOJI_MAX}`);
+});
+
+test("pack deletion wording depends on Draft or Live", () => {
+  expect(packDeleteMessage("Cats", "draft", 3)).toContain("permanently deleted");
+  const live = packDeleteMessage("Cats", "live", 1);
+  expect(live).toContain("stays on Telegram");
+  expect(live).toContain("@Stickers");
+  expect(live).toContain("1 sticker");
+});
+
+test("the size banner appears only above the pack cap", () => {
+  const cap = limits.pack.maxStickers;
+  expect(packSizeText(cap)).toBeNull();
+  expect(packSizeText(cap + 2)).toContain(`at most ${cap}`);
+});
+
+function sticker(id: number, missing: boolean, bytes = 2048): StickerView {
+  return {
+    id,
+    packId: 1,
+    position: id,
+    fileName: `00${id}.png`,
+    format: "png",
+    emojiString: "",
+    missing,
+    emojiWarning: null,
+    file: missing ? null : { bytes, width: 512, height: 512 },
+  };
+}
+
+test("Missing stickers block Send to pack with a reason", () => {
+  expect(sendBlocker([sticker(1, false)])).toBeNull();
+  expect(sendBlocker([sticker(1, true)])).toBe(MISSING_REASON);
+  expect(sendBlocker([sticker(1, true), sticker(2, false)])).toContain("1 of the selected stickers is Missing");
+});
+
+test("combined size sums present files and counts Missing ones", () => {
+  expect(combinedSize([sticker(1, false), sticker(2, false)])).toBe("4.0 KB");
+  expect(combinedSize([sticker(1, false), sticker(2, true)])).toBe("2.0 KB (1 Missing)");
+  expect(formatBytes(10)).toBe("10 bytes");
+  expect(formatBytes(3 * 1024 * 1024)).toBe("3.0 MB");
+});
+
+test("import and send reports say what happened", () => {
+  expect(importSummary(2, 0)).toContain("Added 2 stickers without emoji");
+  expect(importSummary(0, 1)).toContain(`${limits.sticker.side} px`);
+  const report = { copied: [], originalsDeleted: true, unfinished: "x", targetSizeWarning: null };
+  expect(sendReportText(report, "Dogs")).toContain("Moved 0 stickers to “Dogs”. Not finished: x.");
+});
+
+test("send dialog search matches Title or Short Name", () => {
+  const pack = { title: "Happy Cats", shortName: "happy_cats" };
+  expect(matchesSearch(pack, "")).toBe(true);
+  expect(matchesSearch(pack, "CATS")).toBe(true);
+  expect(matchesSearch(pack, "y_c")).toBe(true);
+  expect(matchesSearch(pack, "dogs")).toBe(false);
+});
