@@ -8,7 +8,7 @@ use serde::Serialize;
 use tauri::{Manager, State};
 
 use crate::config::AppConfig;
-use crate::{library, SharedConfig};
+use crate::{editor, library, SharedConfig};
 
 /// Library lifecycle status reported to the UI.
 /// Mirrors the `LibraryStatus` union in src/api.ts (serde lowercase).
@@ -121,6 +121,49 @@ pub fn repoint_library(
     let dir = PathBuf::from(path);
     library::validate_intact(&dir)?;
     set_library_path(&app, &state, dir)
+}
+
+// ---- Editor (ADR-0005: one-shot pixel work in Rust) ----
+
+/// Header-only probe of an import candidate: displayed size and whether it
+/// exceeds the import cap (the UI then asks to scale or cancel).
+#[tauri::command(async)]
+pub fn editor_probe_image(path: String) -> Result<editor::import::ImageInfo, String> {
+    editor::import::probe(&PathBuf::from(path))
+}
+
+/// Decode an image for the Editor and return it as a binary frame (u32 LE
+/// width, u32 LE height, straight RGBA8) — raw bytes, never JSON.
+/// `scale_to_fit` is the owner's OK in the import cap dialog.
+#[tauri::command(async)]
+pub fn editor_import_image(path: String, scale_to_fit: bool) -> Result<tauri::ipc::Response, String> {
+    let image = editor::import::import(&PathBuf::from(path), scale_to_fit)?;
+    Ok(tauri::ipc::Response::new(image.to_frame()))
+}
+
+/// Header carrying the merge request's per-layer sizes and transforms
+/// (JSON array of `LayerMeta`); the pixels travel as the raw body.
+pub const MERGE_LAYERS_HEADER: &str = "x-merge-layers";
+
+/// Merge selected raster layers (SPEC §6). Request: raw body = the layers'
+/// RGBA bytes concatenated bottom to top, header `x-merge-layers` = their
+/// sizes and transforms. Response: `PlacedImage::to_frame` (origin + image).
+#[tauri::command(async)]
+pub fn editor_merge_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
+        return Err("merge request must carry raw pixel bytes".to_string());
+    };
+    let meta_json = request
+        .headers()
+        .get(MERGE_LAYERS_HEADER)
+        .ok_or_else(|| format!("merge request is missing the {MERGE_LAYERS_HEADER} header"))?
+        .to_str()
+        .map_err(|e| format!("merge layer header is not text: {e}"))?;
+    let meta: Vec<editor::merge::LayerMeta> =
+        serde_json::from_str(meta_json).map_err(|e| format!("merge layer header is invalid: {e}"))?;
+    let layers = editor::merge::split_layers(&meta, body)?;
+    let merged = editor::merge::merge(&layers)?;
+    Ok(tauri::ipc::Response::new(merged.to_frame()))
 }
 
 #[cfg(test)]

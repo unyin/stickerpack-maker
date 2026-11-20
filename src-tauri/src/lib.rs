@@ -1,10 +1,15 @@
 mod commands;
 mod config;
 mod db;
+/// Editor pixel work (ADR-0005): Tauri-free, unit-tested; commands wrap it.
+pub mod editor;
 /// Library core (SPEC §3-4): data model, file operations, crash-safe
 /// renames, desync detection. Public because the core is a UI-agnostic,
 /// unit-testable library; Tauri command wiring (SPM-3) consumes it.
 pub mod library;
+/// Sticker, thumbnail and import limits: one definition shared with the
+/// webview (src/shared/limits.json, read by build.rs).
+pub mod limits;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -45,6 +50,9 @@ pub fn run() {
             commands::default_library_path,
             commands::create_library,
             commands::repoint_library,
+            commands::editor_probe_image,
+            commands::editor_import_image,
+            commands::editor_merge_layers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
