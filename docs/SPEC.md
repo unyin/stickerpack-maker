@@ -170,7 +170,8 @@ stickers, Missing stickers, and the thumbnail.
   stays as it is (owner decision 2026-11-20).
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
   image" = everything on the canvas treated as one layer, exactly like selecting every layer
-  and resizing them together (owner decision 2026-11-20):
+  and resizing them together (owner decision 2026-11-20). Sides below are Sticker mode's;
+  Thumbnail mode uses 100 for tools 1 and 2 (see Save):
   1. **Fit to 512×512**: scale the whole image so its longest side is 512, set the canvas to
      512×512 and centre the image; the user can then reposition it, and the rest is
      transparent padding.
@@ -189,7 +190,8 @@ stickers, Missing stickers, and the thumbnail.
 - **Reset view** is the only way to re-fit: it re-centres the canvas and zooms to fit it in
   the view (never above 100%), without changing the image. The view is fitted automatically
   only when an editing session opens.
-- Live readout of current dimensions vs the active constraint set.
+- **Live readout** of the canvas size against the active constraint set (owner decision
+  2026-11-20): Sticker mode means longest side 512; Thumbnail mode means exactly 100×100.
 
 ### Layers and tools
 - Session layer model: base image, pasted cutouts, text objects. Undo/redo throughout.
@@ -207,6 +209,8 @@ stickers, Missing stickers, and the thumbnail.
 
 ### Save (hard-blocked)
 - No project files: saved output is flattened and final. Re-editing opens the flattened image.
+- Saving flattens what is **inside the canvas**; anything outside the canvas is clipped
+  (discarded) (owner decision 2026-11-20).
 - Save dialog: pick target pack (create-new inline); choose **PNG or WEBP** per save.
 - **Saving is blocked unless constraints are met** — no warn-and-proceed path:
   - Sticker mode: longest side exactly **512 px** and file ≤ **512 KB**.
@@ -215,7 +219,9 @@ stickers, Missing stickers, and the thumbnail.
 - Closing the editor with unsaved changes warns first. Unfinished, non-conforming work
   cannot be parked — there is deliberately no scratch/draft save location.
 - Thumbnail mode is the same editor with a canvas that starts at 100×100 (instead of
-  512×512) and the thumbnail constraint set.
+  512×512) and the thumbnail constraint set. Sizing tools 1 and 2 take their side from the
+  active constraint set: in Thumbnail mode they are **Fit to 100×100** and **Longest side
+  100** (owner decision 2026-11-20); free resize is the same in both modes.
 
 ## 7. Constraints quick reference
 
