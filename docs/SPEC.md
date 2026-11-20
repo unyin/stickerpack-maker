@@ -1,7 +1,7 @@
 # Stickerpack Maker — v1 Specification
 
 Status: agreed in a grilling session on 2026-11-18. This document is the source of truth for v1 scope.
-Vocabulary: see `GLOSSARY.md`. Durable decisions: see `docs/adr/` (0001 stack, 0002 independent copies, 0003 order-encoded filenames).
+Vocabulary: see `GLOSSARY.md`. Durable decisions: see `docs/adr/` (0001 stack, 0002 independent copies, 0003 order-encoded filenames, 0004 crash-safe rename mechanics).
 
 ## 1. Overview
 
@@ -31,6 +31,11 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
   consecutive underscores, ≤64 characters. Auto-derived from the title, manually editable
   **only while Draft; locked once Live** (Telegram short names are immutable after creation).
   The `_by_<bot_username>` suffix applies only to bot-created sets (future sync, not v1).
+  Short Names are **unique within the Library** (case-insensitive) because each pack's folder
+  is named after its Short Name; an auto-derived name that is taken gets a numeric suffix
+  (`cats_2`), a typed one is refused. Windows reserved names (`con`, `prn`, `aux`, `nul`,
+  `com0`–`com9`, `lpt0`–`lpt9`) are refused; an auto-derived name that would be reserved
+  gets a `_pack` suffix (e.g. `con_pack`).
 - **Status**: **Draft** (default for new packs; not yet on Telegram) or **Live** (exists on
   Telegram). v1: manual toggle both ways; Live→Draft shows a warning. Live status otherwise
   changes nothing in v1 beyond the badge and the short-name lock.
@@ -54,7 +59,8 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 
 ### Library
 - App-managed folder chosen at first run (suggested default `Documents\Stickerpack Library`),
-  containing the SQLite DB and one folder per pack. Path shown in settings.
+  containing the SQLite DB and one folder per pack, named after the pack's Short Name (a Draft
+  Short Name edit renames the folder). Path shown in settings.
 - **Manual re-pointing in v1**: settings can point the app at another library folder (moved or
   restored library). Re-pointing expects an intact library (DB included).
 - A **fresh** library + DB can always be created from scratch (first run, or re-point at an
@@ -193,7 +199,7 @@ stickers, Missing stickers, and the thumbnail.
 | Emoji string | 1–20 emoji | warn only |
 | Pack size | ≤120 stickers | warn only |
 | Title | 1–64 chars | validate |
-| Short name | a-z A-Z 0-9 _, starts with letter, no `__`, ≤64 | validate; locked when Live |
+| Short name | a-z A-Z 0-9 _, starts with letter, no `__`, ≤64; unique in Library; not a Windows reserved name | validate; locked when Live |
 
 ## 8. Out of scope for v1 (future seams)
 
@@ -206,7 +212,8 @@ stickers, Missing stickers, and the thumbnail.
 
 - **UX**: decided — see the §5 command map (SPM-4, 2026-11-19).
 - **Engineering (each gets an ADR at implementation time)**: ONNX runtime placement
-  (Rust vs webview); canvas library choice; crash-safe rename mechanics.
+  (Rust vs webview); canvas library choice; crash-safe rename mechanics — decided,
+  see ADR-0004 (SPM-2).
 - Small UX defaults assumed unless preferences emerge: system fonts + size/color for text;
   color/width for outline; color/radius/softness for glow; strength/radius for warp.
 
