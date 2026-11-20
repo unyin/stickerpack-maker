@@ -152,9 +152,9 @@ stickers, Missing stickers, and the thumbnail.
 ### Import and canvas
 - Source formats: .jpg, .jpeg, .jfif, .png, .webp.
 - The canvas starts square at the active constraint set's side: **512×512** for stickers,
-  **100×100** for thumbnails (owner decision 2026-11-20); it never sizes itself to the
-  imported image. The opened image is placed at its native pixel size, centred on the
-  canvas, and may overflow it.
+  **100×100** for thumbnails (owner decision 2026-11-20); it is never set from the imported
+  image. The opened image is placed at its native pixel size, centred on the canvas, and may
+  overflow it.
 - Imports larger than **2000×2000** (the import cap) trigger a dialog: **OK** scales to fit
   within 2000×2000 preserving aspect ratio (longest side 2000); **Cancel** aborts the import.
 - The image is draggable on the canvas (pan/zoom for editing comfort).
@@ -184,8 +184,8 @@ stickers, Missing stickers, and the thumbnail.
      number of pixels from 1 to 2000. The canvas size does not change; the image keeps its
      centre where it was.
 - Only sizing tools 1 and 2 change the canvas size (owner decision 2026-11-20). Nothing else
-  does: not opening an image (the canvas starts at the constraint set's side), adding a layer, merging, deleting, Crop, free
-  resize, or undo/redo of any of these.
+  does: not opening an image (the canvas starts at the constraint set's side), adding a
+  layer, merging, deleting, Crop, free resize, or undo/redo of any of these.
 - The sizing tools change the canvas or the image, **never the view**: zoom and pan stay where
   the user left them (owner decision 2026-11-20). The canvas keeps its top-left corner where
   it was on screen, so the outline grows or shrinks by the same factor as the canvas.

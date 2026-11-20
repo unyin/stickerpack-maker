@@ -50,7 +50,7 @@ const STICKER_CANVAS = startCanvas(STICKER);
 
 /**
  * A document whose canvas matches its image (base layer at 0,0), as after
- * "Longest side 512": keeps the sizing arithmetic below readable.
+ * Longest side (tool 2): keeps the sizing arithmetic below readable.
  */
 function snug(width: number, height: number, name: string): Doc {
   return newDocument(image(width, height), name, { width, height });
@@ -122,7 +122,7 @@ test("only Fit and Longest side change the canvas size", () => {
   expect([scaled.width, scaled.height]).toEqual([S, Math.ceil((S * 300) / 800)]);
 });
 
-test("in Thumbnail mode Fit and Longest side target the thumbnail side", () => {
+test("in Thumbnail mode the model functions target the thumbnail side (Longest side is greyed out in the UI)", () => {
   const T = THUMBNAIL.side;
   const doc = newDocument(image(800, 300), "base", startCanvas(THUMBNAIL));
   const fitted = fitToBox(doc, contentBounds(doc), T);
@@ -516,7 +516,7 @@ test("contentBounds includes text layers via the supplied measurement", () => {
 
 test("free resize scales the whole image to the entered longest side and keeps the canvas", () => {
   // A 200x400 image centred on the 512x512 canvas (156, 56).
-  const tall = newDocument(image(200, 400), "tall", STICKER_CANVAS);
+  const tall = newDocument(image(200, 400), "tall", { width: 512, height: 512 });
   const grown = resizeLongestSide(tall, contentBounds(tall), 1000);
   expect([grown.width, grown.height]).toEqual([512, 512]);
   expect(grown.layers[0].transform.scaleX).toBeCloseTo(2.5);

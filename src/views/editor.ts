@@ -324,7 +324,8 @@ function buildEditor(): HTMLElement {
     const blocker = mergeBlocker(doc, current.selection);
     const deleteReason = deleteBlocker(doc, current.selection);
     addButton.disabled = busy;
-    // Each sizing tool is disabled when it would change nothing.
+    // Each sizing tool is disabled when it would change nothing or, for Longest
+    // side, when the set needs a square canvas (SPEC §6).
     const content = stage ? stage.contentBounds() : null;
     const entered = enteredSide();
     const sizing: [HTMLButtonElement, SizeTool, string][] = [
