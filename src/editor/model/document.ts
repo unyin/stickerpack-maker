@@ -134,28 +134,99 @@ export function moveLayer(doc: Doc, id: string, toIndex: number): Doc {
 /** Telegram's sticker size: one side exactly 512 px (SPEC §7). */
 export const STICKER_SIDE = 512;
 
+/** An axis-aligned rectangle in document pixels. */
+export interface Rect {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 /**
- * Sizing tool 1 (SPEC §6): fit the WHOLE image into a `box` x `box` square
- * and pad the rest with transparency. The canvas becomes the square; every
- * layer is scaled by one factor (so the longest canvas side fills the box,
- * up or down) and shifted so the image sits centred. Non-destructive: only
- * transforms change, so layers stay separate and text stays editable;
- * pixels are resampled when merged or saved. A canvas that already is the
- * box is returned unchanged (no undo step).
+ * On-screen box of a `width` x `height` layer placed by `t` — translate,
+ * then rotate (degrees, clockwise), then scale — exactly as the Konva view
+ * and the Rust merge place it.
  */
-export function fitToBox(doc: Doc, box: number = STICKER_SIDE): Doc {
-  if (doc.width === box && doc.height === box) return doc;
-  const factor = box / Math.max(doc.width, doc.height);
-  const padX = (box - doc.width * factor) / 2;
-  const padY = (box - doc.height * factor) / 2;
-  // Scaling uniformly about the canvas origin commutes with each layer's
-  // rotation, so position, size and rotation stay consistent.
+export function placedBounds(width: number, height: number, t: Transform): Rect {
+  const rad = (t.rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const corners = [
+    [0, 0],
+    [width, 0],
+    [0, height],
+    [width, height],
+  ].map(([u, v]) => {
+    const sx = u * t.scaleX;
+    const sy = v * t.scaleY;
+    return [t.x + sx * cos - sy * sin, t.y + sx * sin + sy * cos];
+  });
+  const xs = corners.map((c) => c[0]);
+  const ys = corners.map((c) => c[1]);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+}
+
+/** Union of rectangles; throws for none. */
+export function unionRect(rects: readonly Rect[]): Rect {
+  if (rects.length === 0) throw new Error("there is no content to measure");
+  const x = Math.min(...rects.map((r) => r.x));
+  const y = Math.min(...rects.map((r) => r.y));
+  const right = Math.max(...rects.map((r) => r.x + r.width));
+  const bottom = Math.max(...rects.map((r) => r.y + r.height));
+  return { x, y, width: right - x, height: bottom - y };
+}
+
+/**
+ * The whole image's bounds: the union of every raster layer's on-screen
+ * box, including parts beyond the canvas. Text layers have no intrinsic
+ * size here — the view measures them (EditorStage.contentBounds), and that
+ * measurement is what Fit uses.
+ */
+export function contentBounds(doc: Doc): Rect {
+  return unionRect(
+    doc.layers.flatMap((l) =>
+      l.kind === "raster" ? [placedBounds(l.image.width, l.image.height, l.transform)] : [],
+    ),
+  );
+}
+
+/** Below this, two positions or sizes count as equal (float noise). */
+const EPSILON = 1e-6;
+
+/**
+ * Sizing tool 1 (SPEC §6): fit the WHOLE image to a `box` x `box` square
+ * and pad the rest with transparency. "Whole image" means everything on the
+ * canvas treated as one layer (owner, 2026-11-20) — exactly like selecting
+ * every layer and resizing them together: `content` (the union of all
+ * layers' on-screen boxes) is scaled by ONE factor so its longest side is
+ * `box` (up or down), then centred; the canvas becomes the square.
+ * Non-destructive: only transforms change, so layers stay separate and text
+ * stays editable; pixels are resampled when merged or saved. Content that
+ * already fills the box, centred, returns the document unchanged (no step).
+ */
+export function fitToBox(doc: Doc, content: Rect, box: number = STICKER_SIDE): Doc {
+  const longest = Math.max(content.width, content.height);
+  if (!(longest > 0)) throw new Error("there is no content to fit");
+  const factor = box / longest;
+  const padX = (box - content.width * factor) / 2;
+  const padY = (box - content.height * factor) / 2;
+  const alreadyFits =
+    doc.width === box &&
+    doc.height === box &&
+    Math.abs(factor - 1) < EPSILON &&
+    Math.abs(content.x - padX) < EPSILON &&
+    Math.abs(content.y - padY) < EPSILON;
+  if (alreadyFits) return doc;
+  // Scaling the group about its top-left corner, then moving that corner
+  // to the padding offset: uniform scaling commutes with each rotation.
   const layers = doc.layers.map((layer) => ({
     ...layer,
     transform: {
       ...layer.transform,
-      x: layer.transform.x * factor + padX,
-      y: layer.transform.y * factor + padY,
+      x: (layer.transform.x - content.x) * factor + padX,
+      y: (layer.transform.y - content.y) * factor + padY,
       scaleX: layer.transform.scaleX * factor,
       scaleY: layer.transform.scaleY * factor,
     },

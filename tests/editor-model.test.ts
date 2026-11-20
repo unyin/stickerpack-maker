@@ -5,6 +5,7 @@ import type { RgbaImage } from "../src/editor/model/image";
 import {
   addRasterLayer,
   addTextLayer,
+  contentBounds,
   deleteLayers,
   fitToBox,
   IDENTITY,
@@ -13,6 +14,7 @@ import {
   moveLayer,
   newDocument,
   nextLayerId,
+  placedBounds,
   setLayerImage,
   setTransform,
   type Doc,
@@ -269,50 +271,81 @@ test("a deletion is one undo step and drops the deleted layers from the selectio
 });
 
 // ---- Sizing tool 1: fit to 512x512, pad with transparency (SPEC §6) ----
+// "Whole image" = everything on the canvas treated as ONE layer (owner,
+// 2026-11-20): the union of all layers' bounds is scaled as a group.
 
-test("fit scales the whole image so its longest side fills the box, centred", () => {
-  // 1000x500 canvas: factor 0.512, image becomes 512x256, centred -> 128 px padding.
-  let doc = newDocument(image(1000, 500), "base");
-  doc = addRasterLayer(doc, image(10, 10), "cutout", { x: 100, y: 50, scaleX: 2, scaleY: 2, rotation: 30 });
-  const fitted = fitToBox(doc, 512);
+test("placedBounds is the on-screen box of a placed layer, rotation included", () => {
+  expect(placedBounds(10, 4, { x: 5, y: 6, scaleX: 2, scaleY: 2, rotation: 0 })).toEqual({
+    x: 5, y: 6, width: 20, height: 8,
+  });
+  // 4x2 rotated 90 degrees clockwise about its top-left swings down-left.
+  const r = placedBounds(4, 2, { ...IDENTITY, rotation: 90 });
+  expect(r.x).toBeCloseTo(-2);
+  expect(r.y).toBeCloseTo(0);
+  expect(r.width).toBeCloseTo(2);
+  expect(r.height).toBeCloseTo(4);
+});
+
+test("contentBounds is the union of every raster layer, beyond the canvas too", () => {
+  let doc = newDocument(image(300, 200), "base");
+  doc = addRasterLayer(doc, image(2000, 1000), "big", { ...IDENTITY, x: -850, y: -400 });
+  expect(contentBounds(doc)).toEqual({ x: -850, y: -400, width: 2000, height: 1000 });
+});
+
+test("fit scales all layers as ONE group so the content's longest side is 512, centred", () => {
+  // A 300x200 photo with a 2000x1000 layer over it: the content is the
+  // 2000x1000 union, so everything shrinks by 512/2000 = 0.256 together.
+  let doc = newDocument(image(300, 200), "base");
+  doc = addRasterLayer(doc, image(2000, 1000), "big", { ...IDENTITY, x: -850, y: -400 });
+  const fitted = fitToBox(doc, contentBounds(doc), 512);
   expect([fitted.width, fitted.height]).toEqual([512, 512]);
-  const [base, cutout] = fitted.layers;
-  expect(base.transform.x).toBeCloseTo(0);
-  expect(base.transform.y).toBeCloseTo(128);
-  expect(base.transform.scaleX).toBeCloseTo(0.512);
-  expect(base.transform.scaleY).toBeCloseTo(0.512);
-  // Every layer keeps its place relative to the image: same factor, same rotation.
-  expect(cutout.transform.x).toBeCloseTo(100 * 0.512);
-  expect(cutout.transform.y).toBeCloseTo(50 * 0.512 + 128);
-  expect(cutout.transform.scaleX).toBeCloseTo(2 * 0.512);
-  expect(cutout.transform.rotation).toBe(30);
-  // Pixels are untouched (resampling happens at merge/save) and ids/names stay.
-  expect(cutout.kind === "raster" && cutout.image).toBe(doc.layers[1].kind === "raster" && doc.layers[1].image);
+  const [base, big] = fitted.layers;
+  // Same factor for every layer: the group keeps its proportions.
+  expect(base.transform.scaleX).toBeCloseTo(0.256);
+  expect(big.transform.scaleX).toBeCloseTo(0.256);
+  // The union fills the width and is centred vertically (512x256 + 128 padding).
+  expect(big.transform.x).toBeCloseTo(0);
+  expect(big.transform.y).toBeCloseTo(128);
+  // The base keeps its place inside the group.
+  expect(base.transform.x).toBeCloseTo(850 * 0.256);
+  expect(base.transform.y).toBeCloseTo(400 * 0.256 + 128);
+  expect(contentBounds(fitted).width).toBeCloseTo(512);
+  // Pixels, ids and names are untouched (resampling happens at merge/save).
   expect(fitted.layers.map((l) => l.id)).toEqual(doc.layers.map((l) => l.id));
+  expect(big.kind === "raster" && big.image).toBe(doc.layers[1].kind === "raster" && doc.layers[1].image);
 });
 
-test("fit pads tall images left and right, and scales small images up", () => {
-  const tall = fitToBox(newDocument(image(200, 400), "tall"), 512);
-  expect(tall.layers[0].transform.x).toBeCloseTo(128);
-  expect(tall.layers[0].transform.y).toBeCloseTo(0);
-  expect(tall.layers[0].transform.scaleX).toBeCloseTo(1.28);
-  // A sticker needs one side exactly 512, so small images grow.
-  const small = fitToBox(newDocument(image(300, 200), "small"), 512);
-  expect(small.layers[0].transform.scaleX).toBeCloseTo(512 / 300);
-  expect(small.layers[0].transform.y).toBeCloseTo((512 - 200 * (512 / 300)) / 2);
+test("fit keeps rotation and works up and down", () => {
+  // A single small image grows: a sticker needs one side exactly 512.
+  const small = newDocument(image(300, 200), "small");
+  const grown = fitToBox(small, contentBounds(small), 512);
+  expect(grown.layers[0].transform.scaleX).toBeCloseTo(512 / 300);
+  expect(grown.layers[0].transform.y).toBeCloseTo((512 - 200 * (512 / 300)) / 2);
+  // A rotated layer: the group is measured by its rotated box and rotation stays.
+  let doc = newDocument(image(100, 100), "base");
+  doc = addRasterLayer(doc, image(400, 100), "bar", { ...IDENTITY, x: 300, y: 0, rotation: 90 });
+  const fitted = fitToBox(doc, contentBounds(doc), 512);
+  expect(fitted.layers[1].transform.rotation).toBe(90);
+  const after = contentBounds(fitted);
+  expect(Math.max(after.width, after.height)).toBeCloseTo(512);
+  expect(after.x + after.width / 2).toBeCloseTo(256);
+  expect(after.y + after.height / 2).toBeCloseTo(256);
 });
 
-test("fitting a canvas that already is the box changes nothing (no undo step)", () => {
+test("fitting content that already fills the box changes nothing (no undo step)", () => {
   const doc = newDocument(image(512, 512), "done");
-  expect(fitToBox(doc, 512)).toBe(doc);
+  expect(fitToBox(doc, contentBounds(doc), 512)).toBe(doc);
   const s = new EditorSession(doc);
-  s.apply((d) => fitToBox(d, 512));
+  s.apply((d) => fitToBox(d, contentBounds(d), 512));
   expect(s.canUndo).toBe(false);
+  // Same canvas, but content smaller than the box: fit does work.
+  const shrunk = setTransform(doc, doc.layers[0].id, { ...IDENTITY, scaleX: 0.5, scaleY: 0.5 });
+  expect(fitToBox(shrunk, contentBounds(shrunk), 512)).not.toBe(shrunk);
 });
 
-test("fit is one undo step that restores the canvas size", () => {
+test("fit is one undo step that restores canvas and layers", () => {
   const s = new EditorSession(newDocument(image(1000, 500), "base"));
-  s.apply((d) => fitToBox(d, 512));
+  s.apply((d) => fitToBox(d, contentBounds(d), 512));
   expect([s.doc.width, s.doc.height]).toEqual([512, 512]);
   s.undo();
   expect([s.doc.width, s.doc.height]).toEqual([1000, 500]);

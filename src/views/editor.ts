@@ -48,7 +48,7 @@ function buildEditor(): HTMLElement {
   const addButton = button("Add image as layer", () => run(addImageAsLayer), "primary");
   const undoButton = button("Undo", () => session?.undo());
   const redoButton = button("Redo", () => session?.redo());
-  const fitButton = button("Fit to 512×512", () => session?.apply((doc) => fitToBox(doc, STICKER_SIDE)));
+  const fitButton = button("Fit to 512×512", () => fitWholeImage());
   const closeButton = button("Close", () => run(closeSession));
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
@@ -58,7 +58,8 @@ function buildEditor(): HTMLElement {
   undoButton.title = "Undo (Ctrl+Z)";
   redoButton.title = "Redo (Ctrl+Y)";
   fitButton.title =
-    "Scale the whole image so its longest side is 512 px and pad the rest with transparency (canvas becomes 512×512)";
+    "Scale everything on the canvas together, as one image, so its longest side is 512 px; " +
+    "the canvas becomes 512×512 with transparent padding";
 
   const empty = el(
     "div",
@@ -130,9 +131,11 @@ function buildEditor(): HTMLElement {
     const picked = await pickAndImport();
     if (!picked) return;
     session = new EditorSession(newDocument(picked.image, picked.name));
-    session.subscribe(refresh);
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
+    // Subscribe AFTER the stage: on every change the canvas redraws first,
+    // so refresh() measures current content (Fit's enabled state).
+    session.subscribe(refresh);
     stage.onViewChange((v) => (zoomLabel.textContent = `${Math.round(v.scale * 100)}%`));
   }
 
@@ -185,6 +188,17 @@ function buildEditor(): HTMLElement {
     stage?.destroy();
     stage = null;
     session = null;
+  }
+
+  /**
+   * Sizing tool 1 (SPEC §6): everything on the canvas, as one group, scaled
+   * so its longest side is 512 and centred on a 512×512 canvas.
+   */
+  function fitWholeImage(): void {
+    const current = session;
+    if (!current || !stage || busy) return;
+    const content = stage.contentBounds();
+    current.apply((doc) => fitToBox(doc, content, STICKER_SIDE));
   }
 
   /** Delete the selected layers as one undoable step (SPEC §6); one layer always stays. */
@@ -240,7 +254,8 @@ function buildEditor(): HTMLElement {
     const blocker = mergeBlocker(doc, current.selection);
     const deleteReason = deleteBlocker(doc, current.selection);
     addButton.disabled = busy;
-    fitButton.disabled = busy || (doc.width === STICKER_SIDE && doc.height === STICKER_SIDE);
+    // Disabled once the content already fills the 512 box, centred.
+    fitButton.disabled = busy || !stage || fitToBox(doc, stage.contentBounds(), STICKER_SIDE) === doc;
     closeButton.disabled = busy;
     undoButton.disabled = busy || !current.canUndo;
     redoButton.disabled = busy || !current.canRedo;

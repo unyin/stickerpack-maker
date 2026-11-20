@@ -3,7 +3,7 @@
 // lacks, so undo/redo and save never read from Konva.
 import Konva from "konva";
 import type { RgbaImage } from "../model/image";
-import { setTransform, type Doc, type Layer, type Transform } from "../model/document";
+import { setTransform, unionRect, type Doc, type Layer, type Rect, type Transform } from "../model/document";
 import type { EditorSession } from "../model/session";
 import { fitView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
 
@@ -141,6 +141,20 @@ export class EditorStage {
 
   view(): ViewTransform {
     return { scale: this.stage.scaleX(), x: this.stage.x(), y: this.stage.y() };
+  }
+
+  /**
+   * The whole image's bounds in document pixels: the union of every layer's
+   * on-screen box, measured the way the Transformer measures a selection
+   * (text included, rotation included). This is what "Fit to 512×512"
+   * scales as one group.
+   */
+  contentBounds(): Rect {
+    return unionRect(
+      [...this.nodes.values()].map((node) =>
+        node.getClientRect({ relativeTo: this.content, skipShadow: true, skipStroke: true }),
+      ),
+    );
   }
 
   /** Fit the whole document in view (never above 100%). */
