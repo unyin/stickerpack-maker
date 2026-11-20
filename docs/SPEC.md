@@ -1,7 +1,7 @@
 # Stickerpack Maker — v1 Specification
 
 Status: agreed in a grilling session on 2026-11-18. This document is the source of truth for v1 scope.
-Vocabulary: see `GLOSSARY.md`. Durable decisions: see `docs/adr/` (0001 stack, 0002 independent copies, 0003 order-encoded filenames).
+Vocabulary: see `GLOSSARY.md`. Durable decisions: see `docs/adr/` (0001 stack, 0002 independent copies, 0003 order-encoded filenames, 0004 crash-safe rename mechanics).
 
 ## 1. Overview
 
@@ -206,7 +206,8 @@ stickers, Missing stickers, and the thumbnail.
 
 - **UX**: decided — see the §5 command map (SPM-4, 2026-11-19).
 - **Engineering (each gets an ADR at implementation time)**: ONNX runtime placement
-  (Rust vs webview); canvas library choice; crash-safe rename mechanics.
+  (Rust vs webview); canvas library choice; crash-safe rename mechanics — decided,
+  see ADR-0004 (SPM-2).
 - Small UX defaults assumed unless preferences emerge: system fonts + size/color for text;
   color/width for outline; color/radius/softness for glow; strength/radius for warp.
 

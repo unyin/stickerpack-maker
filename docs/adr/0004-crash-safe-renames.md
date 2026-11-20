@@ -1,0 +1,37 @@
+# Crash-safe renames: commit the decision, journal the plan, roll forward
+
+ADR-0003 mandates two-phase renames and that the database and filenames never disagree after an operation, but defers the mechanics to this ADR (SPEC §9). The hard part is that SQLite transactions and filesystem renames cannot share one atomic commit: a crash between "DB updated" and "files renamed" must still leave a Library that the app can deterministically repair.
+
+## Decision
+
+**The database commit is the single decision point, and it comes first.** Every operation that changes a pack's files (reorder, insert, delete, duplicate/move via Send to pack, replace, thumbnail changes) runs through one rename engine:
+
+1. **Stage (optional, pre-commit).** New image files (Send-to-pack copies, imports, replacements) are copied into the pack folder under unique reserved temp names (`.spm-tmp-add-…`) and byte-verified against their sources. Nothing in the database references them yet; on any failure the staged temps are deleted and the operation aborts with no DB change.
+2. **Commit the decision.** One SQLite transaction writes (a) a `rename_journal` row for the pack holding the full plan as JSON — an ordered list of steps `{from, to}`, where `to: null` means delete — and (b) the final row state (positions, file names, inserted/deleted stickers). After this commit the operation **must** complete; everything below is roll-forward.
+3. **Phase 1 — vacate.** Every step's `from` file is renamed to a deterministic temp name `.spm-tmp-<step index>`. Files that keep their name are untouched. Absent `from` files (a Missing sticker's slot) are skipped. After phase 1 no original name that any step targets is occupied, so phase 2 can never collide — this is why two phases are needed even for a simple swap.
+4. **Phase 2 — place.** In plan order, each temp is renamed to its `to` name, or unlinked for delete steps. Delete steps are ordered before the placements that reuse their names.
+5. **Clear the journal.** A final small transaction deletes the journal row. The operation is complete.
+
+**Recovery runs on pack open and manual refresh, before desync detection** (never on app start, matching SPEC §4). It is idempotent roll-forward:
+
+- *Journal present:* pass A completes phase 1 for any step whose `from` still exists under its original name; pass B completes phase 2 for any remaining temp (place or unlink); then the journal row is deleted. A crash at any point — mid-phase-1, mid-phase-2, or after phase 2 but before journal cleanup — replays to the same final state, because the committed DB already describes the finals and the journal says exactly which file becomes which. If both a step's `from` and its temp exist, the folder was tampered with externally and recovery reports an error instead of guessing.
+- *No journal:* any stray `.spm-tmp-*` files are leftovers of a crash during staging (step 1, before any commit). No committed state references them, so they are deleted. Originals are untouched.
+
+**Send to pack across two packs** (SPEC §5) sequences two engine operations: copy+verify ALL selected stickers into the target (step 1), commit the target's append (steps 2–5), and only then — if "delete originals" was requested — run delete+renumber on the source pack. The packs are not jointly atomic, deliberately: a delete-phase failure leaves the copies safely committed and produces an explicit final-state report (what was copied, what was deleted, what remains); each pack's journal recovers independently on next open. Never silent loss.
+
+**Pack creation and deletion** use the same commit-first ordering. Creation: insert the pack row, create its `pack_<id>` folder, update the folder column, commit — a committed pack always has its folder; a pre-commit crash leaves at most an empty orphan folder, which is harmless and ignored (no reconstruction, SPEC §3). Deletion: delete the rows (cascading stickers and journal), commit, then remove the folder; a failure or crash after the commit leaves an orphan folder reported to the user, never a DB row pointing at nothing.
+
+## Rejected alternatives
+
+- **DB commit last (files first, then rows).** A crash after the renames but before the commit leaves the DB describing old names that no longer exist; every sticker reads as Missing and the true mapping is unrecoverable without a journal anyway. Commit-first makes the committed DB the truth that recovery rolls toward.
+- **Self-describing temp names, no journal** (temp encodes the original name; recovery matches temps back to DB rows). Ambiguous under permutations: in a 001↔002 swap, a crash mid-phase-2 leaves `002.png` holding sticker 1's bytes while the DB still says sticker 2 lives at `002.png` — matching by original name restores the wrong contents. The journal removes all guesswork.
+- **Roll-back recovery (undo to the pre-operation state).** Requires keeping the old row state as well as the plan, and contradicts the user's intent once the commit succeeded. Roll-forward needs only the plan, and the final state is what the user asked for.
+- **Filesystem transactions / renameat2 exchange tricks.** Platform-specific (Windows v1, macOS later), still not atomic across multiple files plus SQLite, and unnecessary once the journal exists.
+
+## Consequences
+
+- One journal row per pack (`pack_id` primary key) also serializes operations: a second operation on the same pack recovers the pending one first. The core assumes per-pack serialized calls; SPM-3's command wiring must not run concurrent operations on one pack.
+- The `.spm-tmp-` prefix is reserved: dot-prefixed temps never sort into the `001.png…` sequence the owner drags into @Stickers, and the app never treats them as stickers.
+- Recovery is part of opening a pack, so an interrupted operation is invisible to the user except as a brief repair on next open; desync detection then reports only genuine external desync (Missing), never false Missing from our own half-finished renames.
+- Orphan empty pack folders (crash before create-commit, or after delete-commit) are the accepted residue: they hold no stickers, are ignored by the app, and are not reconstructed into packs.
+- Crash safety is unit-tested by fault injection at the phase boundaries (after commit, after phase 1, mid phase 2, before journal cleanup): the test aborts the engine at each point, runs recovery, and asserts DB rows, filenames, and folder contents agree.
