@@ -159,8 +159,8 @@ function buildEditor(): HTMLElement {
   }
 
   /** Pick an image and decode it, asking first when it exceeds the import cap. */
-  async function pickAndImport(): Promise<{ image: RgbaImage; name: string } | null> {
-    const path = await pickImageFile();
+  async function pickAndImport(given?: string): Promise<{ image: RgbaImage; name: string } | null> {
+    const path = given ?? (await pickImageFile());
     if (!path) return null;
     const info = await probeImage(path);
     if (info.exceedsCap) {
@@ -175,9 +175,9 @@ function buildEditor(): HTMLElement {
     return { image: await importImage(path, info.exceedsCap), name: baseName(path) };
   }
 
-  async function openImage(): Promise<void> {
+  async function openImage(path?: string): Promise<void> {
     if (session) return; // one session at a time: Close first
-    const picked = await pickAndImport();
+    const picked = await pickAndImport(path);
     if (!picked) return;
     session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(constraints)));
     refresh(); // show the workspace so the stage measures its real size
@@ -370,8 +370,29 @@ function buildEditor(): HTMLElement {
     e.preventDefault();
   });
 
+  // Pack Manager hook (SPM-3), see openFileInEditor below.
+  openFileHook = (path) =>
+    run(async () => {
+      if (session) await closeSession(); // warns on unsaved changes
+      if (!session) await openImage(path);
+    });
+
   refresh();
   return view;
+}
+
+let openFileHook: ((path: string) => Promise<void>) | null = null;
+
+/**
+ * Open the image at `path` in the Editor, as Open image would (import cap
+ * dialog included): the Pack Manager's Edit and "open in editor" (SPM-3).
+ * One session at a time: an open session is closed first, which warns on
+ * unsaved changes; keeping it cancels the open. Show the Editor view first
+ * so the canvas can measure itself.
+ */
+export function openFileInEditor(path: string): Promise<void> {
+  renderEditor();
+  return openFileHook ? openFileHook(path) : Promise.resolve();
 }
 
 function button(label: string, onClick: () => void, variant?: "primary"): HTMLButtonElement {
