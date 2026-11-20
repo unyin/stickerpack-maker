@@ -13,6 +13,7 @@
 pub mod files;
 pub mod packs;
 pub mod schema;
+pub mod stickers;
 
 use std::fs;
 use std::path::{Path, PathBuf};
