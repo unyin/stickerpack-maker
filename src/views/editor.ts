@@ -24,7 +24,7 @@ import {
   type Rect,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
-import { STICKER } from "../editor/model/constraints";
+import { STICKER, startCanvas } from "../editor/model/constraints";
 import { EditorSession } from "../editor/model/session";
 import { deleteBlocker, mergeBlocker, selectModeFor, sizeToolBlocker, type SizeTool } from "../editor/view/geometry";
 import { EditorStage } from "../editor/view/stage";
@@ -179,7 +179,7 @@ function buildEditor(): HTMLElement {
     if (session) return; // one session at a time: Close first
     const picked = await pickAndImport();
     if (!picked) return;
-    session = new EditorSession(newDocument(picked.image, picked.name, { width: targetSide, height: targetSide }));
+    session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(constraints)));
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
     // Subscribe AFTER the stage: on every change the canvas redraws first,

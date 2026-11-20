@@ -2,7 +2,7 @@
 // no Konva, no DOM.
 import { expect, test } from "bun:test";
 import { IMPORT_MAX_SIDE, type RgbaImage } from "../src/editor/model/image";
-import { STICKER, THUMBNAIL } from "../src/editor/model/constraints";
+import { startCanvas, STICKER, THUMBNAIL } from "../src/editor/model/constraints";
 import limits from "../src/shared/limits.json";
 import {
   addRasterLayer,
@@ -45,6 +45,9 @@ function image(width: number, height: number, fill = 0): RgbaImage {
 
 const names = (doc: Doc) => doc.layers.map((l) => l.name);
 
+/** The canvas a Sticker-mode session starts with. */
+const STICKER_CANVAS = startCanvas(STICKER);
+
 /**
  * A document whose canvas matches its image (base layer at 0,0), as after
  * "Longest side 512": keeps the sizing arithmetic below readable.
@@ -57,6 +60,8 @@ function snug(width: number, height: number, name: string): Doc {
 
 test("the constraint sets come from the shared limits file", () => {
   expect(STICKER).toEqual({ mode: "sticker", side: limits.sticker.side, maxKilobytes: limits.sticker.maxKilobytes });
+  expect(startCanvas(STICKER)).toEqual({ width: STICKER.side, height: STICKER.side });
+  expect(startCanvas(THUMBNAIL)).toEqual({ width: THUMBNAIL.side, height: THUMBNAIL.side });
   expect(THUMBNAIL).toEqual({
     mode: "thumbnail",
     side: limits.thumbnail.side,
@@ -66,7 +71,7 @@ test("the constraint sets come from the shared limits file", () => {
 
 test("a new document starts at the sticker side, square, with the image at native size, centred", () => {
   const S = STICKER.side;
-  const doc = newDocument(image(30, 20), "cat.png");
+  const doc = newDocument(image(30, 20), "cat.png", STICKER_CANVAS);
   expect([doc.width, doc.height]).toEqual([S, S]);
   expect(doc.layers.length).toBe(1);
   const base = doc.layers[0];
@@ -74,11 +79,11 @@ test("a new document starts at the sticker side, square, with the image at nativ
   expect(base.name).toBe("cat.png");
   expect(base.transform).toEqual({ ...IDENTITY, x: Math.round((S - 30) / 2), y: Math.round((S - 20) / 2) });
   // A bigger image overflows the canvas evenly; nothing is scaled.
-  const big = newDocument(image(S * 2, S + 100), "big.png");
+  const big = newDocument(image(S * 2, S + 100), "big.png", STICKER_CANVAS);
   expect([big.width, big.height]).toEqual([S, S]);
   expect(big.layers[0].transform).toEqual({ ...IDENTITY, x: -S / 2, y: -50 });
   // Thumbnail mode will pass its own starting canvas.
-  const thumb = newDocument(image(30, 20), "t", { width: THUMBNAIL.side, height: THUMBNAIL.side });
+  const thumb = newDocument(image(30, 20), "t", startCanvas(THUMBNAIL));
   expect([thumb.width, thumb.height]).toEqual([THUMBNAIL.side, THUMBNAIL.side]);
 });
 
@@ -92,7 +97,7 @@ test("centeredPlacement centres an image on the canvas at its own size, on whole
 });
 
 test("only Fit and Longest side change the canvas size", () => {
-  let doc = newDocument(image(800, 300), "base");
+  let doc = newDocument(image(800, 300), "base", STICKER_CANVAS);
   doc = addRasterLayer(doc, image(40, 40), "cutout", centeredPlacement(doc, image(40, 40)));
   doc = addTextLayer(doc, { text: "hi", fontFamily: "Arial", fontSize: 12, color: "#000" });
   const [base, cutout, text] = doc.layers.map((l) => l.id);
@@ -113,7 +118,7 @@ test("only Fit and Longest side change the canvas size", () => {
 
 test("in Thumbnail mode Fit and Longest side target the thumbnail side", () => {
   const T = THUMBNAIL.side;
-  const doc = newDocument(image(800, 300), "base", { width: T, height: T });
+  const doc = newDocument(image(800, 300), "base", startCanvas(THUMBNAIL));
   const fitted = fitToBox(doc, contentBounds(doc), T);
   expect([fitted.width, fitted.height]).toEqual([T, T]);
   expect(Math.max(contentBounds(fitted).width, contentBounds(fitted).height)).toBeCloseTo(T);
@@ -122,7 +127,7 @@ test("in Thumbnail mode Fit and Longest side target the thumbnail side", () => {
 });
 
 test("operations are pure: the input document is never changed", () => {
-  const doc = newDocument(image(10, 10), "base");
+  const doc = newDocument(image(10, 10), "base", STICKER_CANVAS);
   const before = JSON.stringify(doc.layers.map((l) => [l.id, l.name, l.transform]));
   addRasterLayer(doc, image(5, 5), "cutout");
   setTransform(doc, doc.layers[0].id, { ...IDENTITY, x: 3 });
@@ -130,7 +135,7 @@ test("operations are pure: the input document is never changed", () => {
 });
 
 test("new layers go on top with unique ids; text layers carry their text", () => {
-  let doc = newDocument(image(10, 10), "base");
+  let doc = newDocument(image(10, 10), "base", STICKER_CANVAS);
   doc = addRasterLayer(doc, image(5, 5), "cutout", { ...IDENTITY, x: 2, y: 3 });
   doc = addTextLayer(doc, { text: "hi", fontFamily: "Arial", fontSize: 24, color: "#ff0000" });
   expect(names(doc)).toEqual(["base", "cutout", "hi"]);
@@ -143,7 +148,7 @@ test("new layers go on top with unique ids; text layers carry their text", () =>
 });
 
 test("the id an add or merge creates equals nextLayerId of the input doc", () => {
-  const base = newDocument(image(4, 4), "base");
+  const base = newDocument(image(4, 4), "base", STICKER_CANVAS);
   const raster = addRasterLayer(base, image(1, 1), "a");
   expect(raster.layers[1].id).toBe(nextLayerId(base));
   const text = addTextLayer(raster, { text: "hi", fontFamily: "sans-serif", fontSize: 24, color: "#000" });
@@ -154,7 +159,7 @@ test("the id an add or merge creates equals nextLayerId of the input doc", () =>
 });
 
 test("z-order moves clamp to the stack", () => {
-  let doc = newDocument(image(4, 4), "a");
+  let doc = newDocument(image(4, 4), "a", STICKER_CANVAS);
   doc = addRasterLayer(doc, image(1, 1), "b");
   doc = addRasterLayer(doc, image(1, 1), "c");
   const [a, , c] = doc.layers.map((l) => l.id);
@@ -169,7 +174,7 @@ test("z-order moves clamp to the stack", () => {
 });
 
 test("transform and image changes reuse untouched layers", () => {
-  let doc = newDocument(image(4, 4), "a");
+  let doc = newDocument(image(4, 4), "a", STICKER_CANVAS);
   doc = addRasterLayer(doc, image(2, 2), "b");
   const [a, b] = doc.layers;
   const moved = setTransform(doc, b.id, { ...IDENTITY, x: 1, rotation: 45 });
@@ -181,7 +186,7 @@ test("transform and image changes reuse untouched layers", () => {
 });
 
 test("merge replaces the chosen layers with one at the topmost chosen slot", () => {
-  let doc = newDocument(image(4, 4), "a");
+  let doc = newDocument(image(4, 4), "a", STICKER_CANVAS);
   doc = addRasterLayer(doc, image(1, 1), "b");
   doc = addRasterLayer(doc, image(1, 1), "c");
   doc = addRasterLayer(doc, image(1, 1), "d");
@@ -236,7 +241,7 @@ test("unsaved changes means the present is not the saved state", () => {
 test("the memory budget drops the oldest steps, counting shared buffers once", () => {
   const MB = 1024 * 1024;
   // Each step repaints the base layer with a fresh 1 MB buffer.
-  let doc = newDocument(image(512, 512), "base"); // 512*512*4 = 1 MB
+  let doc = newDocument(image(512, 512), "base", STICKER_CANVAS); // 512*512*4 = 1 MB
   const h = new History<Doc>(doc, { budgetBytes: 3 * MB, buffersOf: bytesOf });
   for (let i = 1; i <= 6; i++) {
     doc = setLayerImage(doc, doc.layers[0].id, image(512, 512, i));
@@ -268,7 +273,7 @@ test("the memory budget drops the oldest steps, counting shared buffers once", (
 // ---- Session (history + selection + change notifications) ----
 
 test("selection is not an undo step and is pruned after undo", () => {
-  const s = new EditorSession(newDocument(image(4, 4), "base"));
+  const s = new EditorSession(newDocument(image(4, 4), "base", STICKER_CANVAS));
   const base = s.doc.layers[0].id;
   s.apply((d) => addRasterLayer(d, image(1, 1), "cutout"));
   const cutout = s.doc.layers[1].id;
@@ -290,7 +295,7 @@ test("selection is not an undo step and is pruned after undo", () => {
 });
 
 test("listeners hear every change; unknown layers cannot be selected", () => {
-  const s = new EditorSession(newDocument(image(4, 4), "base"));
+  const s = new EditorSession(newDocument(image(4, 4), "base", STICKER_CANVAS));
   let heard = 0;
   const off = s.subscribe(() => heard++);
   s.apply((d) => addRasterLayer(d, image(1, 1), "a"));
@@ -305,7 +310,7 @@ test("listeners hear every change; unknown layers cannot be selected", () => {
 });
 
 test("a failing operation leaves the session unchanged", () => {
-  const s = new EditorSession(newDocument(image(4, 4), "base"));
+  const s = new EditorSession(newDocument(image(4, 4), "base", STICKER_CANVAS));
   const before = s.doc;
   expect(() =>
     s.apply((d) => setLayerImage(d, "nope", image(1, 1))),
@@ -316,7 +321,7 @@ test("a failing operation leaves the session unchanged", () => {
 });
 
 test("deleting layers removes them in one step and always keeps one", () => {
-  let doc = newDocument(image(4, 4), "a");
+  let doc = newDocument(image(4, 4), "a", STICKER_CANVAS);
   doc = addRasterLayer(doc, image(1, 1), "b");
   doc = addRasterLayer(doc, image(1, 1), "c");
   const [a, b, c] = doc.layers.map((l) => l.id);
@@ -334,7 +339,7 @@ test("deleting layers removes them in one step and always keeps one", () => {
 });
 
 test("a deletion is one undo step and drops the deleted layers from the selection", () => {
-  const s = new EditorSession(newDocument(image(4, 4), "base"));
+  const s = new EditorSession(newDocument(image(4, 4), "base", STICKER_CANVAS));
   s.apply((d) => addRasterLayer(d, image(1, 1), "x"));
   s.apply((d) => addRasterLayer(d, image(1, 1), "y"));
   const [, x, y] = s.doc.layers.map((l) => l.id);
@@ -505,7 +510,7 @@ test("contentBounds includes text layers via the supplied measurement", () => {
 
 test("free resize scales the whole image to the entered longest side and keeps the canvas", () => {
   // A 200x400 image centred on the 512x512 canvas (156, 56).
-  const tall = newDocument(image(200, 400), "tall");
+  const tall = newDocument(image(200, 400), "tall", STICKER_CANVAS);
   const grown = resizeLongestSide(tall, contentBounds(tall), 1000);
   expect([grown.width, grown.height]).toEqual([512, 512]);
   expect(grown.layers[0].transform.scaleX).toBeCloseTo(2.5);

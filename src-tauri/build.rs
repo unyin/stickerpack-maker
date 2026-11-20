@@ -18,6 +18,15 @@ fn limits() {
     let json: serde_json::Value = serde_json::from_str(&text)
         .unwrap_or_else(|e| panic!("{} is not valid JSON: {e}", path.display()));
     let get = |pointer: &str| positive(&path, &json, pointer);
+    // Free resize and the sizing tools accept sides up to the import cap, so
+    // a sticker or thumbnail side above it could never be reached.
+    for side in ["/sticker/side", "/thumbnail/side"] {
+        assert!(
+            get("/importMaxSide") >= get(side),
+            "{}: importMaxSide must be at least {side}",
+            path.display()
+        );
+    }
     let code = format!(
         "/// Largest side an imported image may have without scaling (SPEC §6).\n\
          pub const IMPORT_MAX_SIDE: u32 = {};\n\

@@ -151,8 +151,9 @@ stickers, Missing stickers, and the thumbnail.
 
 ### Import and canvas
 - Source formats: .jpg, .jpeg, .jfif, .png, .webp.
-- The canvas always starts at **512×512** (owner decision 2026-11-20); it never sizes itself
-  to the imported image. The opened image is placed at its native pixel size, centred on the
+- The canvas starts square at the active constraint set's side: **512×512** for stickers,
+  **100×100** for thumbnails (owner decision 2026-11-20); it never sizes itself to the
+  imported image. The opened image is placed at its native pixel size, centred on the
   canvas, and may overflow it.
 - Imports larger than **2000×2000** (the import cap) trigger a dialog: **OK** scales to fit
   within 2000×2000 preserving aspect ratio (longest side 2000); **Cancel** aborts the import.
@@ -175,13 +176,13 @@ stickers, Missing stickers, and the thumbnail.
   1. **Fit to 512×512**: scale the whole image so its longest side is 512, set the canvas to
      512×512 and centre the image; the user can then reposition it, and the rest is
      transparent padding.
-  2. **Scale longest side to 512**: scale the whole image so its longest side is 512, then set
+  2. **Longest side 512**: scale the whole image so its longest side is 512, then set
      the canvas to the scaled image's size in whole pixels (no padding).
   3. **Free resize**: scale the whole image so its longest side is the entered value, a whole
      number of pixels from 1 to 2000. The canvas size does not change; the image keeps its
      centre where it was.
 - Only sizing tools 1 and 2 change the canvas size (owner decision 2026-11-20). Nothing else
-  does: not opening an image (always 512×512), adding a layer, merging, deleting, Crop, free
+  does: not opening an image (the canvas starts at the constraint set's side), adding a layer, merging, deleting, Crop, free
   resize, or undo/redo of any of these.
 - The sizing tools change the canvas or the image, **never the view**: zoom and pan stay where
   the user left them (owner decision 2026-11-20). The canvas keeps its top-left corner where

@@ -1,7 +1,6 @@
 // The Editor document (ADR-0005): an immutable value. Every operation
 // returns a new Doc and reuses every layer (and pixel buffer) it did not
 // change, so history can keep whole states cheaply. No Konva, no DOM.
-import { STICKER } from "./constraints";
 import { IMPORT_MAX_SIDE, type RgbaImage } from "./image";
 
 /** Transform of a layer in document pixels; rotation in degrees (Konva's convention). */
@@ -61,16 +60,11 @@ export interface Size {
 }
 
 /**
- * A fresh document: the canvas starts at `canvas` (the constraint set's
- * side, square; Sticker mode by default, SPEC §6), never sized to the
- * image, and the image sits on it at its native size, centred, free to
- * overflow.
+ * A fresh document: the canvas starts at `canvas` (a session passes
+ * `startCanvas` of its constraint set, SPEC §6), never sized to the image,
+ * and the image sits on it at its native size, centred, free to overflow.
  */
-export function newDocument(
-  image: RgbaImage,
-  name: string,
-  canvas: Size = { width: STICKER.side, height: STICKER.side },
-): Doc {
+export function newDocument(image: RgbaImage, name: string, canvas: Size): Doc {
   return {
     width: canvas.width,
     height: canvas.height,

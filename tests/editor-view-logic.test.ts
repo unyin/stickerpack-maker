@@ -2,7 +2,7 @@
 // fitting, zooming, merge eligibility, click modifiers.
 import { expect, test } from "bun:test";
 import { IMPORT_MAX_SIDE, type RgbaImage } from "../src/editor/model/image";
-import { STICKER, THUMBNAIL } from "../src/editor/model/constraints";
+import { startCanvas, STICKER, THUMBNAIL } from "../src/editor/model/constraints";
 import { addRasterLayer, addTextLayer, fitToBox, newDocument, scaleLongestSide } from "../src/editor/model/document";
 import {
   deleteBlocker,
@@ -18,6 +18,9 @@ import {
 function image(width: number, height: number): RgbaImage {
   return { width, height, pixels: new Uint8ClampedArray(width * height * 4) };
 }
+
+/** The canvas a Sticker-mode session starts with. */
+const STICKER_CANVAS = startCanvas(STICKER);
 
 test("fitView centres the document and never upscales past 1:1", () => {
   // 1000x500 doc in an 800x600 view with 20 px margin: scale 760/1000.
@@ -48,7 +51,7 @@ test("zoomAround keeps the point under the pointer fixed and clamps", () => {
 });
 
 test("merge needs two or more selected raster layers, and says why not", () => {
-  let doc = newDocument(image(10, 10), "base");
+  let doc = newDocument(image(10, 10), "base", STICKER_CANVAS);
   doc = addRasterLayer(doc, image(2, 2), "cutout");
   doc = addTextLayer(doc, { text: "hi", fontFamily: "Arial", fontSize: 12, color: "#000" });
   const [base, cutout, text] = doc.layers.map((l) => l.id);
@@ -66,7 +69,7 @@ test("Ctrl, Cmd or Shift turn a click into a toggle", () => {
 });
 
 test("delete needs a selection and must leave at least one layer, and says why not", () => {
-  let doc = newDocument(image(10, 10), "base");
+  let doc = newDocument(image(10, 10), "base", STICKER_CANVAS);
   doc = addRasterLayer(doc, image(2, 2), "cutout");
   const [base, cutout] = doc.layers.map((l) => l.id);
   expect(deleteBlocker(doc, [])).toBe("Select the layers to delete.");
@@ -74,12 +77,12 @@ test("delete needs a selection and must leave at least one layer, and says why n
   expect(deleteBlocker(doc, [base, cutout])).toBe(
     "A session needs at least one layer; use Close to start over.",
   );
-  const single = newDocument(image(4, 4), "only");
+  const single = newDocument(image(4, 4), "only", STICKER_CANVAS);
   expect(deleteBlocker(single, [single.layers[0].id])).toContain("at least one layer");
 });
 
 test("sizeToolBlocker explains each disabled sizing tool, for the active constraint set", () => {
-  const doc = newDocument(image(300, 200), "b");
+  const doc = newDocument(image(300, 200), "b", STICKER_CANVAS);
   const content = { x: 0, y: 0, width: 300, height: 200 };
   expect(sizeToolBlocker("fit", doc, content, NaN, STICKER)).toBeNull();
   expect(sizeToolBlocker("longest", doc, content, NaN, STICKER)).toBeNull();
