@@ -11,6 +11,11 @@ export interface ConstraintSet {
   readonly side: number;
   /** Largest saved file, in KB of 1024 bytes. */
   readonly maxKilobytes: number;
+  /**
+   * The canvas must be exactly `side` square, so only Fit can satisfy it:
+   * "Longest side" is greyed out (SPEC §6).
+   */
+  readonly square: boolean;
 }
 
 /** Sticker mode, the default: longest side exactly the sticker side, file within the sticker cap. */
@@ -18,6 +23,7 @@ export const STICKER: ConstraintSet = {
   mode: "sticker",
   side: limits.sticker.side,
   maxKilobytes: limits.sticker.maxKilobytes,
+  square: false,
 };
 
 /** Thumbnail mode (not wired in the UI yet): exactly the thumbnail side square, file within its cap. */
@@ -25,6 +31,7 @@ export const THUMBNAIL: ConstraintSet = {
   mode: "thumbnail",
   side: limits.thumbnail.side,
   maxKilobytes: limits.thumbnail.maxKilobytes,
+  square: true,
 };
 
 /** The square canvas a session in this mode starts with (SPEC §6). */

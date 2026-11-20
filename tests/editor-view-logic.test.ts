@@ -99,8 +99,24 @@ test("sizeToolBlocker explains each disabled sizing tool, for the active constra
     const fitted = fitToBox(doc, content, S);
     const filled = { x: 0, y: Math.floor((S - short) / 2), width: S, height: short };
     expect(sizeToolBlocker("fit", fitted, filled, NaN, set)).toBe(`The image already fills ${S}×${S}.`);
-    const scaled = scaleLongestSide(doc, content, S);
-    const placed = { x: 0, y: 0, width: S, height: short };
-    expect(sizeToolBlocker("longest", scaled, placed, NaN, set)).toBe(`The image's longest side is already ${S} px.`);
   }
+  const S = STICKER.side;
+  const scaled = scaleLongestSide(doc, content, S);
+  const placed = { x: 0, y: 0, width: S, height: S * (200 / 300) };
+  expect(sizeToolBlocker("longest", scaled, placed, NaN, STICKER)).toBe(`The image's longest side is already ${S} px.`);
+});
+
+test("Longest side is greyed out with a reason when the set needs a square canvas", () => {
+  const content = { x: 0, y: 0, width: 300, height: 200 };
+  // Sticker mode: Longest side runs; Thumbnail mode: Fit runs, Longest side never does.
+  const sticker = newDocument(image(300, 200), "b", startCanvas(STICKER));
+  expect(sizeToolBlocker("longest", sticker, content, NaN, STICKER)).toBeNull();
+  const thumb = newDocument(image(300, 200), "b", startCanvas(THUMBNAIL));
+  const T = THUMBNAIL.side;
+  expect(sizeToolBlocker("fit", thumb, content, NaN, THUMBNAIL)).toBeNull();
+  const reason = `A thumbnail must be exactly ${T}×${T}, so use Fit to ${T}×${T}.`;
+  expect(sizeToolBlocker("longest", thumb, content, NaN, THUMBNAIL)).toBe(reason);
+  expect(sizeToolBlocker("longest", thumb, null, NaN, THUMBNAIL)).toBe(reason);
+  // Free resize is the same in both modes.
+  expect(sizeToolBlocker("free", thumb, content, 50, THUMBNAIL)).toBeNull();
 });

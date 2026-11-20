@@ -69,7 +69,7 @@ export class EditorStage {
   private readonly stage: Konva.Stage;
   private readonly content = new Konva.Layer();
   private readonly backdrop: Konva.Rect;
-  /** Non-interactive layer drawn above the content: document outline (and later the 512 box). */
+  /** Non-interactive layer drawn above the content: document outline (and later the crop box). */
   private readonly guides = new Konva.Layer({ listening: false });
   private readonly outline: Konva.Rect;
   // Konva never holds state the model lacks (ADR-0005): the model's Transform
@@ -110,7 +110,7 @@ export class EditorStage {
       listening: false,
     });
     // ...while guides sit ABOVE every layer, so covering layers never hide
-    // them (owner, 2026-11-20). SPM-6's 512 box belongs on this layer too.
+    // them (owner, 2026-11-20). SPM-6's crop box belongs on this layer too.
     this.outline = new Konva.Rect({
       stroke: token("--muted"),
       strokeWidth: 1,

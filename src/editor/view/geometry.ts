@@ -88,7 +88,8 @@ export type SizeTool = "fit" | "longest" | "free";
  * Why a sizing tool is disabled, or null when it can run: the entered value
  * is invalid (free resize only) or the tool would change nothing. `entered`
  * is the free-resize field as a number (NaN when empty); `content` is null
- * while nothing can be measured. Tools 1 and 2 target `constraints.side`.
+ * while nothing can be measured. Tools 1 and 2 target `constraints.side`;
+ * tool 2 is greyed out when the set needs a square canvas (SPEC §6).
  */
 export function sizeToolBlocker(
   tool: SizeTool,
@@ -97,12 +98,15 @@ export function sizeToolBlocker(
   entered: number,
   constraints: ConstraintSet,
 ): string | null {
+  const target = constraints.side;
+  if (tool === "longest" && constraints.square) {
+    return `A ${constraints.mode} must be exactly ${target}×${target}, so use Fit to ${target}×${target}.`;
+  }
   if (tool === "free") {
     const problem = resizeSideProblem(entered);
     if (problem) return problem;
   }
   if (!content) return "There is nothing to resize.";
-  const target = constraints.side;
   if (tool === "fit") {
     return fitToBox(doc, content, target) === doc ? `The image already fills ${target}×${target}.` : null;
   }

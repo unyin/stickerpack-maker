@@ -164,11 +164,13 @@ stickers, Missing stickers, and the thumbnail.
   rule). Starting over means **Close** first, which warns when there are unsaved changes.
 
 ### Crop and sizing
-- Togglable **512×512 box overlay**, fixed at canvas center; never draggable/resizable;
-  drawn **above all layers** so it stays visible when layers cover the canvas.
+- Togglable **box overlay** at the active constraint set's side (owner decision 2026-11-20):
+  a 512×512 box for stickers, 100×100 for thumbnails. Fixed at canvas center; never
+  draggable/resizable; drawn **above all layers** so it stays visible when layers cover the
+  canvas.
   Drag the image to choose what survives.
-- **Crop** is destructive: everything outside the 512×512 box is discarded; the canvas size
-  stays as it is (owner decision 2026-11-20).
+- **Crop** is destructive: everything outside the box (512×512 for stickers, 100×100 for
+  thumbnails) is discarded; the canvas size stays as it is (owner decision 2026-11-20).
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
   image" = everything on the canvas treated as one layer, exactly like selecting every layer
   and resizing them together (owner decision 2026-11-20). Sides below are Sticker mode's;
@@ -216,13 +218,18 @@ stickers, Missing stickers, and the thumbnail.
 - **Saving is blocked unless constraints are met** — no warn-and-proceed path:
   - Sticker mode: longest side exactly **512 px** and file ≤ **512 KB**.
   - Thumbnail mode: exactly **100×100 px** and file ≤ **128 KB**, PNG/WEBP.
-- The live readout shows by how much the image is off; sizing tools fix it in one click.
+- The live readout shows how far the canvas is off the constraint set. **Fit** fixes it in one
+  click in both modes; **Longest side** also does in Sticker mode.
+- In Thumbnail mode **Longest side** is greyed out (visible but disabled, with the reason in
+  its tooltip: a thumbnail must be exactly 100×100, so use Fit), so the toolbar looks the same
+  in both modes (owner decision 2026-11-20).
 - Closing the editor with unsaved changes warns first. Unfinished, non-conforming work
   cannot be parked — there is deliberately no scratch/draft save location.
 - Thumbnail mode is the same editor with a canvas that starts at 100×100 (instead of
   512×512) and the thumbnail constraint set. Sizing tools 1 and 2 take their side from the
   active constraint set: in Thumbnail mode they are **Fit to 100×100** and **Longest side
-  100** (owner decision 2026-11-20); free resize is the same in both modes.
+  100** (greyed out, see above) (owner decision 2026-11-20); free resize is the same in both
+  modes.
 
 ## 7. Constraints quick reference
 
@@ -275,7 +282,7 @@ stickers, Missing stickers, and the thumbnail.
 4. **Per-sticker command UX design pass** — completed 2026-11-19; command map in §5.
 5. **Editor foundation**: import pipeline + 2000 cap dialog, view fit, layers, undo/redo,
    drag/pan/zoom, merge selected layers, flatten-on-save plumbing.
-6. **Crop & sizing**: 512 box overlay, destructive crop, three sizing tools, live readout.
+6. **Crop & sizing**: box overlay, destructive crop, three sizing tools, live readout.
 7. **Background removal**: ONNX placement ADR, offline auto removal, refine brush.
 8. **Effects**: outline, fuzzy glow, warp/bulge (layer-targeted).
 9. **Cut/paste/resize + text tool**.

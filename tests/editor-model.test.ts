@@ -59,13 +59,19 @@ function snug(width: number, height: number, name: string): Doc {
 // ---- Document operations ----
 
 test("the constraint sets come from the shared limits file", () => {
-  expect(STICKER).toEqual({ mode: "sticker", side: limits.sticker.side, maxKilobytes: limits.sticker.maxKilobytes });
+  expect(STICKER).toEqual({
+    mode: "sticker",
+    side: limits.sticker.side,
+    maxKilobytes: limits.sticker.maxKilobytes,
+    square: false,
+  });
   expect(startCanvas(STICKER)).toEqual({ width: STICKER.side, height: STICKER.side });
   expect(startCanvas(THUMBNAIL)).toEqual({ width: THUMBNAIL.side, height: THUMBNAIL.side });
   expect(THUMBNAIL).toEqual({
     mode: "thumbnail",
     side: limits.thumbnail.side,
     maxKilobytes: limits.thumbnail.maxKilobytes,
+    square: true,
   });
 });
 
