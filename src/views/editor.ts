@@ -5,10 +5,12 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import "../editor/editor.css";
 import { baseName } from "../api";
-import { IMPORT_MAX_SIDE, importImage, mergeImages, pickImageFile, probeImage } from "../editor/api";
+import { cropImages, IMPORT_MAX_SIDE, importImage, mergeImages, pickImageFile, probeImage } from "../editor/api";
 import {
   addRasterLayer,
   centeredPlacement,
+  cropBox,
+  cropLayers,
   deleteLayers,
   fitToBox,
   IDENTITY,
@@ -19,14 +21,22 @@ import {
   moveLayer,
   newDocument,
   nextLayerId,
+  planCrop,
   scaleLongestSide,
   type Doc,
   type Rect,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
-import { STICKER, startCanvas } from "../editor/model/constraints";
+import { readoutText, STICKER, startCanvas, constraintStatus } from "../editor/model/constraints";
 import { EditorSession } from "../editor/model/session";
-import { deleteBlocker, mergeBlocker, selectModeFor, sizeToolBlocker, type SizeTool } from "../editor/view/geometry";
+import {
+  cropBlocker,
+  deleteBlocker,
+  mergeBlocker,
+  selectModeFor,
+  sizeToolBlocker,
+  type SizeTool,
+} from "../editor/view/geometry";
 import { EditorStage } from "../editor/view/stage";
 import { el, errorMessage, withMessage } from "../ui";
 
@@ -46,6 +56,8 @@ function buildEditor(): HTMLElement {
   let session: EditorSession | null = null;
   let stage: EditorStage | null = null;
   let busy = false;
+  // The crop box overlay is on by default (owner, 2026-11-20).
+  let showBox = true;
 
   const message = el("p", { class: "message editor-message", role: "alert" });
   const canvasHost = el("div", { class: "editor-canvas" }) as HTMLDivElement;
@@ -53,6 +65,8 @@ function buildEditor(): HTMLElement {
   const zoomLabel = el("span", { class: "editor-zoom muted" });
   const dirtyLabel = el("span", { class: "editor-dirty" }, "● Unsaved changes");
   const layerHint = el("p", { class: "editor-hint muted" });
+  // Live readout of the canvas against the constraint set (SPEC §6).
+  const readout = el("span", { class: "editor-readout", "aria-live": "polite" });
 
   const openButton = button("Open image", () => run(openImage), "primary");
   const addButton = button("Add image as layer", () => run(addImageAsLayer), "primary");
@@ -75,6 +89,8 @@ function buildEditor(): HTMLElement {
     "aria-label": "Longest side in pixels",
   }) as HTMLInputElement;
   const resizeButton = button("Resize", () => freeResize());
+  const boxButton = button("Crop box", () => toggleBox());
+  const cropButton = button(`Crop to ${targetSide}×${targetSide}`, () => run(cropToBox));
   const resetViewButton = button("Reset view", () => stage?.fit());
   const closeButton = button("Close", () => run(closeSession));
   const upButton = button("Move up", () => moveSelected(+1));
@@ -96,6 +112,10 @@ function buildEditor(): HTMLElement {
   longestButton.title = longestTitle;
   resizeButton.title = resizeTitle;
   resetViewButton.title = "Zoom and centre the canvas in view (changes the view only)";
+  boxButton.title = `Show or hide the ${targetSide}×${targetSide} crop box`;
+  const cropTitle =
+    `Discard everything outside the ${targetSide}×${targetSide} box; drag the image to choose what stays. ` +
+    "The canvas size stays";
   sideInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") freeResize();
   });
@@ -124,6 +144,13 @@ function buildEditor(): HTMLElement {
       el("label", { class: "editor-side" }, "Longest side ", sideInput, " px"),
       resizeButton,
     ),
+    el(
+      "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Crop" },
+      boxButton,
+      cropButton,
+    ),
+    readout,
     resetViewButton,
     zoomLabel,
     dirtyLabel,
@@ -181,7 +208,8 @@ function buildEditor(): HTMLElement {
     if (!picked) return;
     session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(constraints)));
     refresh(); // show the workspace so the stage measures its real size
-    stage = new EditorStage(canvasHost, session);
+    stage = new EditorStage(canvasHost, session, constraints);
+    stage.setCropBoxVisible(showBox);
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
     session.subscribe(refresh);
@@ -221,6 +249,36 @@ function buildEditor(): HTMLElement {
       ),
     );
     current.select(id);
+  }
+
+  /**
+   * Crop (SPEC §6): discard every layer's content outside the box as ONE
+   * undo step. Layers crossing the box edge are re-rendered in Rust; layers
+   * entirely outside it are removed. The canvas size and the view stay.
+   */
+  async function cropToBox(): Promise<void> {
+    const current = session;
+    if (!current) return;
+    const doc = current.doc;
+    const plan = planCrop(doc, cropBox(doc, targetSide));
+    if (cropBlocker(plan, constraints)) return;
+    const clips = plan.flatMap((action) => {
+      if (action.kind !== "clip") return [];
+      const layer = doc.layers.find((l) => l.id === action.id);
+      return layer?.kind === "raster" ? [{ id: action.id, image: layer.image, transform: layer.transform, clip: action.rect }] : [];
+    });
+    const images = clips.length > 0 ? await cropImages(clips) : [];
+    if (current.doc !== doc) {
+      message.textContent = "The layers changed while cropping; nothing was cropped. Try again.";
+      return;
+    }
+    current.apply((d) => cropLayers(d, plan, new Map(clips.map((c, i) => [c.id, images[i]]))));
+  }
+
+  function toggleBox(): void {
+    showBox = !showBox;
+    stage?.setCropBoxVisible(showBox);
+    refresh();
   }
 
   async function closeSession(): Promise<void> {
@@ -339,6 +397,12 @@ function buildEditor(): HTMLElement {
       button.title = reason ?? action;
     }
     sideInput.disabled = busy;
+    const cropReason = cropBlocker(planCrop(doc, cropBox(doc, targetSide)), constraints);
+    cropButton.disabled = busy || cropReason !== null;
+    cropButton.title = cropReason ?? cropTitle;
+    boxButton.setAttribute("aria-pressed", String(showBox));
+    readout.textContent = readoutText(doc, constraints);
+    readout.classList.toggle("off", !constraintStatus(doc, constraints).ok);
     resetViewButton.disabled = busy;
     closeButton.disabled = busy;
     undoButton.disabled = busy || !current.canUndo;

@@ -168,9 +168,22 @@ stickers, Missing stickers, and the thumbnail.
   a 512×512 box for stickers, 100×100 for thumbnails. Fixed at canvas center; never
   draggable/resizable; drawn **above all layers** so it stays visible when layers cover the
   canvas.
-  Drag the image to choose what survives.
+  Drag the image to choose what survives. The overlay is **on by default** and the **Crop
+  box** button shows or hides it (owner decision 2026-11-20). It follows the canvas size,
+  staying centred; when the canvas and box sides differ by an odd number, its top-left is
+  rounded down to a whole pixel, so it always covers whole pixels.
 - **Crop** is destructive: everything outside the box (512×512 for stickers, 100×100 for
   thumbnails) is discarded; the canvas size stays as it is (owner decision 2026-11-20).
+  - A layer inside the box is left exactly as it is. A layer crossing the box edge keeps
+    only the whole pixels it covers inside the box: it becomes an unrotated, unscaled layer
+    at that spot, with its rotation and scale baked into its pixels. It keeps its name and
+    its place in the stack.
+  - Layers **entirely outside** the box are discarded in the same single undo step (owner
+    decision 2026-11-20). If every layer is entirely outside, Crop is disabled ("Nothing is
+    inside the box"), because a session always keeps at least one layer.
+  - Crop is disabled, with the reason in its tooltip, when nothing lies outside the box.
+  - Crop never moves the view: the canvas origin does not move.
+  - Text layers on Crop are decided with the text tool (SPM-9).
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
   image" = everything on the canvas treated as one layer, exactly like selecting every layer
   and resizing them together (owner decision 2026-11-20). Sides below are Sticker mode's;
@@ -195,6 +208,9 @@ stickers, Missing stickers, and the thumbnail.
   only when an editing session opens.
 - **Live readout** of the canvas size against the active constraint set (owner decision
   2026-11-20): Sticker mode means longest side 512; Thumbnail mode means exactly 100×100.
+  It shows the canvas size and either that it meets the set or how many pixels each side is
+  over or under (e.g. "600×400 px · needs longest side 512: 88 px over"), and updates on
+  every change, undo and redo included.
 
 ### Layers and tools
 - Session layer model: base image, pasted cutouts, text objects. Undo/redo throughout.

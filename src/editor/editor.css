@@ -164,3 +164,20 @@
 .view.editor [hidden] {
   display: none !important;
 }
+
+/* Live readout (SPEC §6): plain text when the canvas meets the constraint
+   set, danger text when it is off. */
+.editor-readout {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-readout.off {
+  color: var(--danger-text);
+}
+
+/* The Crop box toggle shows its state. */
+.editor-toolbar button[aria-pressed="true"] {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}

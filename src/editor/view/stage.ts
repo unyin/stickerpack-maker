@@ -3,7 +3,8 @@
 // lacks, so undo/redo and save never read from Konva.
 import Konva from "konva";
 import type { RgbaImage } from "../model/image";
-import { contentBounds, setTransform, type Doc, type Layer, type Rect, type Transform } from "../model/document";
+import type { ConstraintSet } from "../model/constraints";
+import { contentBounds, cropBox, setTransform, type Doc, type Layer, type Rect, type Transform } from "../model/document";
 import type { EditorSession } from "../model/session";
 import { fitView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
 
@@ -68,9 +69,21 @@ export class EditorStage {
   private readonly stage: Konva.Stage;
   private readonly content = new Konva.Layer();
   private readonly backdrop: Konva.Rect;
-  /** Non-interactive layer drawn above the content: document outline (and later the crop box). */
+  /** Non-interactive layer drawn above the content: the canvas outline and the crop box. */
   private readonly guides = new Konva.Layer({ listening: false });
   private readonly outline: Konva.Rect;
+  /**
+   * The crop box overlay (SPEC §6): the constraint set's side, fixed at the
+   * canvas centre (`cropBox`, the rectangle Crop keeps). A solid halo under
+   * a dashed line keeps it visible over any image.
+   */
+  private readonly boxHalo = new Konva.Rect({ strokeWidth: 3, strokeScaleEnabled: false, listening: false });
+  private readonly box = new Konva.Rect({
+    strokeWidth: 1,
+    dash: [6, 4],
+    strokeScaleEnabled: false,
+    listening: false,
+  });
   // Konva never holds state the model lacks (ADR-0005): the model's Transform
   // has no skew and no flips, and SPEC §6 needs only aspect-preserving resize
   // plus rotate. So only the corner anchors exist, ratio is kept, flips off.
@@ -97,6 +110,7 @@ export class EditorStage {
   constructor(
     private readonly container: HTMLDivElement,
     private readonly session: EditorSession,
+    private readonly constraints: ConstraintSet,
   ) {
     this.stage = new Konva.Stage({
       container,
@@ -108,13 +122,13 @@ export class EditorStage {
     // Checkerboard under the layers shows transparency...
     this.backdrop = new Konva.Rect({ listening: false });
     // ...while guides sit ABOVE every layer, so covering layers never hide
-    // them (owner, 2026-11-20). SPM-6's crop box belongs on this layer too.
+    // them (owner, 2026-11-20): the canvas outline and the crop box.
     this.outline = new Konva.Rect({
       strokeWidth: 1,
       strokeScaleEnabled: false,
       listening: false,
     });
-    this.guides.add(this.outline);
+    this.guides.add(this.outline, this.boxHalo, this.box);
     this.content.add(this.backdrop);
     this.content.add(this.transformer);
     this.stage.add(this.content);
@@ -177,6 +191,13 @@ export class EditorStage {
     this.fitted = true;
   }
 
+  /** Show or hide the crop box overlay (it is on when the stage opens). */
+  setCropBoxVisible(visible: boolean): void {
+    this.boxHalo.visible(visible);
+    this.box.visible(visible);
+    this.guides.batchDraw();
+  }
+
   /**
    * Suspend or resume all pointer interaction (layers, selection, panning),
    * so nothing is edited while an async operation works from a snapshot.
@@ -198,6 +219,8 @@ export class EditorStage {
   private applyTheme(): void {
     this.backdrop.fillPatternImage(checkerTile(token("--panel"), token("--border")) as unknown as HTMLImageElement);
     this.outline.stroke(token("--muted"));
+    this.boxHalo.stroke(token("--panel"));
+    this.box.stroke(token("--accent-ink"));
     this.transformer.borderStroke(token("--accent-ink"));
     this.transformer.anchorStroke(token("--accent-ink"));
     this.transformer.anchorFill(token("--panel"));
@@ -231,6 +254,10 @@ export class EditorStage {
     const doc = this.session.doc;
     this.backdrop.size({ width: doc.width, height: doc.height });
     this.outline.size({ width: doc.width, height: doc.height });
+    // The box follows the canvas size, staying centred on it.
+    const box = cropBox(doc, this.constraints.side);
+    this.boxHalo.setAttrs(box);
+    this.box.setAttrs(box);
     const live = new Set(doc.layers.map((l) => l.id));
     for (const [id, node] of this.nodes) {
       if (!live.has(id)) {
@@ -263,7 +290,7 @@ export class EditorStage {
     this.transformer.moveToTop();
     this.content.batchDraw();
     this.guides.batchDraw();
-    // A new canvas size never moves the view (SPEC §6).
+    // A new canvas size, or a Crop, never moves the view (SPEC §6).
   }
 
   private nodeFor(layer: Layer): Konva.Shape {
