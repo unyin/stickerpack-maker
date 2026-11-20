@@ -1,7 +1,7 @@
 # Stickerpack Maker — v1 Specification
 
 Status: agreed in a grilling session on 2026-11-18. This document is the source of truth for v1 scope.
-Vocabulary: see `GLOSSARY.md`. Durable decisions: see `docs/adr/` (0001 stack, 0002 independent copies, 0003 order-encoded filenames, 0004 crash-safe rename mechanics).
+Vocabulary: see `GLOSSARY.md`. Durable decisions: see `docs/adr/` (0001 stack, 0002 independent copies, 0003 order-encoded filenames, 0004 crash-safe rename mechanics, 0005 editor hybrid split).
 
 ## 1. Overview
 
@@ -151,20 +151,50 @@ stickers, Missing stickers, and the thumbnail.
 
 ### Import and canvas
 - Source formats: .jpg, .jpeg, .jfif, .png, .webp.
-- Canvas sizes itself to the imported image. Imports larger than **2000×2000** trigger a
-  dialog: **OK** scales to fit within 2000×2000 preserving aspect ratio (longest side 2000);
-  **Cancel** aborts the import.
+- The canvas starts square at the active constraint set's side: **512×512** for stickers,
+  **100×100** for thumbnails (owner decision 2026-11-20); it is never set from the imported
+  image. The opened image is placed at its native pixel size, centred on the canvas, and may
+  overflow it.
+- Imports larger than **2000×2000** (the import cap) trigger a dialog: **OK** scales to fit
+  within 2000×2000 preserving aspect ratio (longest side 2000); **Cancel** aborts the import.
 - The image is draggable on the canvas (pan/zoom for editing comfort).
+- One session at a time (owner decision 2026-11-20): with no session open, **Open image**
+  starts one; while a session is open, another image can only be brought in with **Add image
+  as layer** (native pixel size, centred on the canvas, on top; may overflow; same 2000×2000
+  rule). Starting over means **Close** first, which warns when there are unsaved changes.
 
 ### Crop and sizing
-- Togglable **512×512 box overlay**, fixed at canvas center; never draggable/resizable.
+- Togglable **box overlay** at the active constraint set's side (owner decision 2026-11-20):
+  a 512×512 box for stickers, 100×100 for thumbnails. Fixed at canvas center; never
+  draggable/resizable; drawn **above all layers** so it stays visible when layers cover the
+  canvas.
   Drag the image to choose what survives.
-- **Crop** is destructive: everything outside the box is discarded; canvas becomes 512×512.
-- Sizing tools (whole image, aspect preserved, transparency padding where relevant):
-  1. Fit to 512×512 and pad the rest with transparency.
-  2. Scale longest side to 512 px.
-  3. Free resize: entered value = longest side.
-- Live readout of current dimensions vs the active constraint set.
+- **Crop** is destructive: everything outside the box (512×512 for stickers, 100×100 for
+  thumbnails) is discarded; the canvas size stays as it is (owner decision 2026-11-20).
+- Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
+  image" = everything on the canvas treated as one layer, exactly like selecting every layer
+  and resizing them together (owner decision 2026-11-20). Sides below are Sticker mode's;
+  Thumbnail mode uses 100 for tools 1 and 2 (see Save):
+  1. **Fit to 512×512**: scale the whole image so its longest side is 512, set the canvas to
+     512×512 and centre the image; the user can then reposition it, and the rest is
+     transparent padding.
+  2. **Longest side 512**: scale the whole image so its longest side is 512, then set
+     the canvas to the scaled image's size in whole pixels (no padding).
+  3. **Free resize**: scale the whole image so its longest side is the entered value, a whole
+     number of pixels from 1 to 2000. The canvas size does not change; the image keeps its
+     centre where it was.
+- Only sizing tools 1 and 2 change the canvas size (owner decision 2026-11-20). Nothing else
+  does: not opening an image (the canvas starts at the constraint set's side), adding a
+  layer, merging, deleting, Crop, free resize, or undo/redo of any of these.
+- The sizing tools change the canvas or the image, **never the view**: zoom and pan stay where
+  the user left them (owner decision 2026-11-20). The canvas keeps its top-left corner where
+  it was on screen, so the outline grows or shrinks by the same factor as the canvas.
+  Undo/redo of a sizing tool behaves the same.
+- **Reset view** is the only way to re-fit: it re-centres the canvas and zooms to fit it in
+  the view (never above 100%), without changing the image. The view is fitted automatically
+  only when an editing session opens.
+- **Live readout** of the canvas size against the active constraint set (owner decision
+  2026-11-20): Sticker mode means longest side 512; Thumbnail mode means exactly 100×100.
 
 ### Layers and tools
 - Session layer model: base image, pasted cutouts, text objects. Undo/redo throughout.
@@ -176,17 +206,30 @@ stickers, Missing stickers, and the thumbnail.
 - **Text**: own layer, movable/resizable until save (system fonts, size, color).
 - **Merge selected layers**: flatten chosen layers together mid-session so effects can be
   applied to the merged result before the final save flatten.
+- **Delete selected layers** (button or Delete key; undoable; owner decision 2026-11-20). A
+  session always keeps at least one layer: deleting every layer is refused — use Close to
+  start over.
 
 ### Save (hard-blocked)
 - No project files: saved output is flattened and final. Re-editing opens the flattened image.
+- Saving flattens what is **inside the canvas**; anything outside the canvas is clipped
+  (discarded) (owner decision 2026-11-20).
 - Save dialog: pick target pack (create-new inline); choose **PNG or WEBP** per save.
 - **Saving is blocked unless constraints are met** — no warn-and-proceed path:
   - Sticker mode: longest side exactly **512 px** and file ≤ **512 KB**.
   - Thumbnail mode: exactly **100×100 px** and file ≤ **128 KB**, PNG/WEBP.
-- The live readout shows by how much the image is off; sizing tools fix it in one click.
+- The live readout shows how far the canvas is off the constraint set. **Fit** fixes it in one
+  click in both modes; **Longest side** also does in Sticker mode.
+- In Thumbnail mode **Longest side** is greyed out (visible but disabled, with the reason in
+  its tooltip: a thumbnail must be exactly 100×100, so use Fit), so the toolbar looks the same
+  in both modes (owner decision 2026-11-20).
 - Closing the editor with unsaved changes warns first. Unfinished, non-conforming work
   cannot be parked — there is deliberately no scratch/draft save location.
-- Thumbnail mode is the same editor with a 100×100 canvas and the thumbnail constraint set.
+- Thumbnail mode is the same editor with a canvas that starts at 100×100 (instead of
+  512×512) and the thumbnail constraint set. Sizing tools 1 and 2 take their side from the
+  active constraint set: in Thumbnail mode they are **Fit to 100×100** and **Longest side
+  100** (greyed out, see above) (owner decision 2026-11-20); free resize is the same in both
+  modes.
 
 ## 7. Constraints quick reference
 
@@ -212,7 +255,9 @@ stickers, Missing stickers, and the thumbnail.
 
 - **UX**: decided — see the §5 command map (SPM-4, 2026-11-19).
 - **Engineering (each gets an ADR at implementation time)**: ONNX runtime placement
-  (Rust vs webview); canvas library choice; crash-safe rename mechanics — decided,
+  (Rust vs webview) — ADR-0006 (SPM-7), leaning Rust `ort` per ADR-0005; canvas library
+  choice — decided, see ADR-0005 (SPM-5: Konva in the webview for interaction, Rust
+  crates for one-shot pixel work and encoding); crash-safe rename mechanics — decided,
   see ADR-0004 (SPM-2).
 - Small UX defaults assumed unless preferences emerge: system fonts + size/color for text;
   color/width for outline; color/radius/softness for glow; strength/radius for warp.
@@ -224,6 +269,11 @@ stickers, Missing stickers, and the thumbnail.
 - Group-drag reorder (moving several stickers at once).
 - Trash/recovery area for deleted stickers.
 - Bulk emoji-set: rejected as unnecessary — not planned.
+- Editor: middle-mouse click-and-drag pans the view without moving the image.
+- Editor: every edge of the selection box is grabbable for resizing, not just the corners.
+- Editor: custom canvas resizing (in v1 only Fit and Longest side change the canvas).
+- Drag and drop an image file to open it in the Editor. (v3 idea: drag and drop onto an
+  open session to add it as a layer.)
 
 ## 10. Draft work packages (for review — not yet filed as issues)
 
@@ -235,9 +285,9 @@ stickers, Missing stickers, and the thumbnail.
    (Normal/Reorder modes, detail + aggregate panels, thumbnail slot), emoji edit/copy,
    explorer reveal, delete semantics, 120 warning, bulk import with validation.
 4. **Per-sticker command UX design pass** — completed 2026-11-19; command map in §5.
-5. **Editor foundation**: import pipeline + 2000 cap dialog, canvas fit, layers, undo/redo,
+5. **Editor foundation**: import pipeline + 2000 cap dialog, view fit, layers, undo/redo,
    drag/pan/zoom, merge selected layers, flatten-on-save plumbing.
-6. **Crop & sizing**: 512 box overlay, destructive crop, three sizing tools, live readout.
+6. **Crop & sizing**: box overlay, destructive crop, three sizing tools, live readout.
 7. **Background removal**: ONNX placement ADR, offline auto removal, refine brush.
 8. **Effects**: outline, fuzzy glow, warp/bulge (layer-targeted).
 9. **Cut/paste/resize + text tool**.

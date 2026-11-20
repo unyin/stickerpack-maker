@@ -1,0 +1,159 @@
+/* Editor layout. Kept out of src/styles.css so the SPM-14 theming work stays
+   file-disjoint; colours come from the shared tokens defined there. */
+
+.view.editor {
+  max-width: none;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.editor-tool-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+.editor-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.editor-side-input {
+  width: 72px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.editor-spacer {
+  flex: 1;
+}
+
+.editor-zoom {
+  min-width: 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-dirty {
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.editor-message:empty {
+  display: none;
+}
+
+.editor-empty {
+  margin: auto;
+  padding: 32px 40px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.editor-workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+}
+
+.editor-canvas {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.editor-layers {
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.editor-layers h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.editor-layers-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  flex: 1;
+}
+
+.editor-layers-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.editor-layers-list li:hover {
+  background: var(--bg);
+}
+
+.editor-layers-list li.selected {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.editor-layer-kind {
+  font-size: 11px;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.editor-layer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-layer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.editor-layer-actions button {
+  padding: 6px 10px;
+}
+
+.editor-hint {
+  margin: 0;
+  font-size: 13px;
+}
+
+.view.editor [hidden] {
+  display: none !important;
+}

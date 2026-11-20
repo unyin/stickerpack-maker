@@ -82,8 +82,8 @@ pub fn stage_copy(pack_dir: &Path, source: &Path) -> Result<String, String> {
     Ok(name)
 }
 
-/// Copy a file and verify the copy byte-for-byte (sticker files are
-/// ≤512 KB, so a full comparison is cheap). Removes the failed copy.
+/// Copy a file and verify the copy byte-for-byte (sticker files are at
+/// most `limits::STICKER_MAX_KB`, so a full comparison is cheap). Removes the failed copy.
 pub fn copy_verified(source: &Path, dest: &Path) -> Result<(), String> {
     fs::copy(source, dest)
         .map_err(|e| format!("cannot copy {} to {}: {e}", source.display(), dest.display()))?;

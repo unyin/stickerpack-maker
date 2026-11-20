@@ -6,6 +6,12 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    watch: {
+      // The Rust side is rebuilt by `tauri dev`, not Vite. Watching
+      // src-tauri/target crashes Vite on Windows (EBUSY) because Cargo
+      // locks the build-script .exe files it is writing there.
+      ignored: ["**/src-tauri/**"],
+    },
   },
   build: {
     target: "es2022",
