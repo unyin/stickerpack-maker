@@ -30,19 +30,6 @@ export interface FileInfo {
   height: number | null;
 }
 
-export interface StickerView {
-  id: number;
-  packId: number;
-  position: number;
-  fileName: string;
-  format: StickerFormat;
-  emojiString: string;
-  missing: boolean;
-  emojiWarning: Warning | null;
-  /** null when Missing. */
-  file: FileInfo | null;
-}
-
 export interface Sticker {
   id: number;
   packId: number;
@@ -50,6 +37,13 @@ export interface Sticker {
   fileName: string;
   format: StickerFormat;
   emojiString: string;
+}
+
+export interface StickerView extends Sticker {
+  missing: boolean;
+  emojiWarning: Warning | null;
+  /** null when Missing. */
+  file: FileInfo | null;
 }
 
 export interface PackView {
@@ -102,6 +96,8 @@ export const createPack = (title: string, shortName: string | null) =>
 export const deletePack = (packId: number) => invoke<LeftoverFolder | null>("delete_pack", { packId });
 /** Open or refresh: runs recovery and desync detection (SPEC §4). */
 export const openPack = (packId: number) => invoke<PackView>("open_pack", { packId });
+/** The pack view after an operation: recovery, but no Missing scan (SPEC §4). */
+export const loadPackView = (packId: number) => invoke<PackView>("load_pack_view", { packId });
 export const setPackTitle = (packId: number, title: string) => invoke<Pack>("set_pack_title", { packId, title });
 export const setPackShortName = (packId: number, shortName: string) =>
   invoke<Pack>("set_pack_short_name", { packId, shortName });

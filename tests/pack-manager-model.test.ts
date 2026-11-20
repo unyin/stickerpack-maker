@@ -2,7 +2,10 @@
 // hit-testing, the Emoji String warning, and user-facing wording.
 import { expect, test } from "bun:test";
 import limits from "../src/shared/limits.json";
+import { editorCanImport } from "../src/shared/import-extensions";
+import { KB } from "../src/shared/units";
 import type { StickerView } from "../src/pack-manager/api";
+import { charCount, rustTrim, shortNameProblem, titleProblem } from "../src/pack-manager/model/names";
 import { EMOJI_MAX, emojiCount, emojiCountWarning, emojiWarning } from "../src/pack-manager/model/emoji";
 import {
   combinedSize,
@@ -15,6 +18,7 @@ import {
   packSizeText,
   sendBlocker,
   sendReportText,
+  thumbnailFormat,
 } from "../src/pack-manager/model/messages";
 import { dropPosition, escapeAction, selectionActive, slotAt, toggleMode } from "../src/pack-manager/model/modes";
 import {
@@ -194,4 +198,55 @@ test("send dialog search matches Title or Short Name", () => {
   expect(matchesSearch(pack, "CATS")).toBe(true);
   expect(matchesSearch(pack, "y_c")).toBe(true);
   expect(matchesSearch(pack, "dogs")).toBe(false);
+});
+
+test("Open in editor is offered only for files the Editor can import", () => {
+  for (const ok of ["C:\\a\\cat.JPG", "x.jpeg", "x.jfif", "/p/x.PNG", "x.webp"]) expect(editorCanImport(ok)).toBe(true);
+  for (const no of ["notes.txt", "x.gif", "x.png.bak", "noextension", "dir.png/file"]) expect(editorCanImport(no)).toBe(false);
+});
+
+test("the target pack over the cap is worded for the target; the thumbnail format follows its name", () => {
+  const cap = limits.pack.maxStickers;
+  expect(packSizeText(cap + 1, "The target pack")).toStartWith(`The target pack has ${cap + 1} stickers`);
+  expect(packSizeText(cap + 1)).toStartWith("This pack has");
+  expect(thumbnailFormat("thumbnail.webp")).toBe("webp");
+  expect(thumbnailFormat("thumbnail.png")).toBe("png");
+  expect(thumbnailFormat(null)).toBe("png");
+  expect(formatBytes(KB)).toBe("1.0 KB");
+  expect(limits.pack.titleMaxChars).toBeGreaterThan(0);
+});
+
+test("Title and Short Name limits count characters like the core, not UTF-16 units", () => {
+  const t = limits.pack.titleMaxChars;
+  const s = limits.pack.shortNameMaxChars;
+  expect(charCount("😀")).toBe(1);
+  expect("😀".length).toBe(2);
+  expect(titleProblem("😀".repeat(t))).toBeNull();
+  expect(titleProblem("😀".repeat(t + 1))).not.toBeNull();
+  expect(titleProblem("x".repeat(t))).toBeNull();
+  expect(titleProblem("x".repeat(t + 1))).not.toBeNull();
+  expect(titleProblem("   ")).not.toBeNull();
+  expect(titleProblem(` ${"x".repeat(t)} `)).toBeNull(); // trimmed first, like the core
+  expect(shortNameProblem("")).toBeNull(); // empty = auto-derive
+  expect(shortNameProblem("x".repeat(s))).toBeNull();
+  expect(shortNameProblem("x".repeat(s + 1))).not.toBeNull();
+  expect(shortNameProblem("😀".repeat(s))).toBeNull(); // the core rejects it as a slug, not as too long
+});
+
+test("an empty Short Name is fine when creating (auto-derive) but invalid in the pack header", () => {
+  expect(shortNameProblem("")).toBeNull();
+  expect(shortNameProblem("   ")).toBeNull();
+  expect(shortNameProblem("", { allowEmpty: true })).toBeNull();
+  expect(shortNameProblem("", { allowEmpty: false })).not.toBeNull();
+  expect(shortNameProblem("  \u0085 ", { allowEmpty: false })).not.toBeNull();
+  expect(shortNameProblem("abc", { allowEmpty: false })).toBeNull();
+});
+
+test("names trim like Rust str::trim, not like JS trim", () => {
+  expect(titleProblem("\uFEFF")).toBeNull(); // Rust keeps U+FEFF, so the core accepts it
+  expect(titleProblem("\u0085")).not.toBeNull(); // Rust strips U+0085
+  expect(titleProblem("   ")).not.toBeNull();
+  expect(rustTrim("  a b \t\n")).toBe("a b");
+  expect(rustTrim("\u0085a\u0085")).toBe("a");
+  expect(rustTrim("\uFEFFa")).toBe("\uFEFFa");
 });

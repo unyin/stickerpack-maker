@@ -52,7 +52,11 @@ fn limits() {
          /// Fewest emoji an Emoji String should hold; fewer warns (SPEC §3).\n\
          pub const EMOJI_MIN: usize = {};\n\
          /// Most emoji an Emoji String may hold; more warns (SPEC §3).\n\
-         pub const EMOJI_MAX: usize = {};\n",
+         pub const EMOJI_MAX: usize = {};\n\
+         /// Longest pack Title, in characters (SPEC §7).\n\
+         pub const TITLE_MAX_CHARS: usize = {};\n\
+         /// Longest Short Name, in characters (SPEC §7).\n\
+         pub const SHORT_NAME_MAX_CHARS: usize = {};\n",
         get("/importMaxSide"),
         get("/sticker/side"),
         get("/sticker/maxKilobytes"),
@@ -61,6 +65,8 @@ fn limits() {
         get("/pack/maxStickers"),
         get("/emojiString/minEmoji"),
         get("/emojiString/maxEmoji"),
+        get("/pack/titleMaxChars"),
+        get("/pack/shortNameMaxChars"),
     );
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("limits.rs");
     fs::write(&out, code).unwrap_or_else(|e| panic!("cannot write {}: {e}", out.display()));

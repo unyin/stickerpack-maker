@@ -12,6 +12,7 @@ import {
   MISSING_REASON,
   sendBlocker,
   stickerCountText,
+  thumbnailFormat,
 } from "../model/messages";
 import { previewImage, type Previews } from "./previews";
 
@@ -155,7 +156,7 @@ const THUMBNAIL_SEAM = "Thumbnails are made in the Editor's Thumbnail mode, whic
 export function thumbnailPanel(view: PackView, previews: Previews, actions: PanelActions): HTMLElement {
   const name = view.pack.thumbnail;
   const file = view.thumbnailFile;
-  const format = name?.endsWith(".webp") ? "webp" : "png";
+  const format = thumbnailFormat(name);
   const body: HTMLElement[] = [el("h2", {}, "Thumbnail")];
   if (view.thumbnailMissing) {
     body.push(
@@ -177,7 +178,7 @@ export function thumbnailPanel(view: PackView, previews: Previews, actions: Pane
       ]),
     );
   } else if (!name) {
-    body.push(el("p", { class: "muted" }, "This pack has no thumbnail. Telegram then uses the first sticker."));
+    body.push(el("p", { class: "muted" }, "This pack has no thumbnail."));
   }
   body.push(
     el(

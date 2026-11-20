@@ -61,6 +61,7 @@ pub fn run() {
             pack_commands::create_pack,
             pack_commands::delete_pack,
             pack_commands::open_pack,
+            pack_commands::load_pack_view,
             pack_commands::set_pack_title,
             pack_commands::set_pack_short_name,
             pack_commands::set_pack_status,

@@ -6,7 +6,12 @@ import { packDeleteMessage, stickerCountText } from "../model/messages";
 import { confirmDialog } from "./dialog";
 import { createPackDialog, statusBadge } from "./dialogs";
 
-export function buildPackList(onOpen: (packId: number) => void): { element: HTMLElement; reload(): Promise<void> } {
+export function buildPackList(onOpen: (packId: number) => void): {
+  element: HTMLElement;
+  reload(): Promise<void>;
+  /** Show an error in the list's message line. */
+  showError(text: string): void;
+} {
   const message = el("p", { class: "message", role: "alert" });
   const notice = el("p", { class: "pm-notice", role: "status" });
   const list = el("ul", { class: "pm-pack-list" });
@@ -78,5 +83,5 @@ export function buildPackList(onOpen: (packId: number) => void): { element: HTML
     }
   }
 
-  return { element, reload };
+  return { element, reload, showError: (text) => void (message.textContent = text) };
 }

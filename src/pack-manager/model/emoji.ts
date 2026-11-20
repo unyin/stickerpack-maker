@@ -1,7 +1,8 @@
-// Emoji String count and its live warning (SPEC §3: 1-20 emoji, warn only).
+// Emoji String count and its live warning (SPEC §3: warn only).
 // Counts like the Rust core (stickers::emoji_count): grapheme clusters, so a
 // ZWJ family, a flag or a skin-toned emoji counts once; whitespace never.
 import limits from "../../shared/limits.json";
+import type { Warning } from "../api";
 
 export const EMOJI_MIN = limits.emojiString.minEmoji;
 export const EMOJI_MAX = limits.emojiString.maxEmoji;
@@ -16,20 +17,19 @@ export function emojiCount(emojiString: string): number {
   return count;
 }
 
-/** The warning for an Emoji String, or null when it holds 1-20 emoji. */
-export function emojiWarning(emojiString: string): string | null {
-  const count = emojiCount(emojiString);
-  if (count < EMOJI_MIN) {
-    return count === 0
-      ? `No emoji yet: Telegram needs ${EMOJI_MIN}–${EMOJI_MAX}.`
-      : `${count} emoji: Telegram needs at least ${EMOJI_MIN}.`;
-  }
-  if (count > EMOJI_MAX) return `${count} emoji: Telegram allows at most ${EMOJI_MAX}.`;
-  return null;
-}
-
-/** The core's warning shape for an Emoji String (stickers::emoji_warning). */
-export function emojiCountWarning(emojiString: string): { kind: "emojiCount"; count: number } | null {
+/** The core's warning for an Emoji String (stickers::emoji_warning), or null when its count is in range. */
+export function emojiCountWarning(emojiString: string): Warning | null {
   const count = emojiCount(emojiString);
   return count < EMOJI_MIN || count > EMOJI_MAX ? { kind: "emojiCount", count } : null;
+}
+
+/** The wording of that warning, or null when the Emoji String is fine. */
+export function emojiWarning(emojiString: string): string | null {
+  const warning = emojiCountWarning(emojiString);
+  if (!warning) return null;
+  const { count } = warning;
+  if (count > EMOJI_MAX) return `${count} emoji: Telegram allows at most ${EMOJI_MAX}.`;
+  return count === 0
+    ? `No emoji yet: Telegram needs ${EMOJI_MIN}–${EMOJI_MAX}.`
+    : `${count} emoji: Telegram needs at least ${EMOJI_MIN}.`;
 }

@@ -2,16 +2,21 @@
 // pure so it is testable without a webview.
 import limits from "../../shared/limits.json";
 import { STICKER } from "../../editor/model/constraints";
-import type { FileInfo, PackStatus, SendReport, StickerView, Warning } from "../api";
+import { KB } from "../../shared/units";
+import type { FileInfo, PackStatus, SendReport, StickerFormat, StickerView, Warning } from "../api";
 
 export const PACK_MAX_STICKERS = limits.pack.maxStickers;
-const KB = 1024;
 
 /** File size as people read it (KB of 1024 bytes, like the limits). */
 export function formatBytes(bytes: number): string {
   if (bytes < KB) return `${bytes} bytes`;
   if (bytes < KB * KB) return `${(bytes / KB).toFixed(1)} KB`;
   return `${(bytes / KB / KB).toFixed(1)} MB`;
+}
+
+/** A thumbnail file's format, from its name. */
+export function thumbnailFormat(name: string | null): StickerFormat {
+  return name?.endsWith(".webp") ? "webp" : "png";
 }
 
 export function dimensionsText(file: FileInfo | null): string {
@@ -44,16 +49,16 @@ export const LIVE_TO_DRAFT_WARNING =
 
 export const SHORT_NAME_LOCKED = "Locked: a Live pack's Short Name cannot change (Telegram short names are permanent).";
 
-/** The 120-sticker banner (warn only, SPEC §3), or null under the cap. */
-export function packSizeText(count: number): string | null {
+/** The over-the-pack-cap banner (warn only, SPEC §3), or null under the cap. */
+export function packSizeText(count: number, subject = "This pack"): string | null {
   return count > PACK_MAX_STICKERS
-    ? `This pack has ${count} stickers; Telegram allows at most ${PACK_MAX_STICKERS}. Remove ${count - PACK_MAX_STICKERS} before uploading.`
+    ? `${subject} has ${count} stickers; Telegram allows at most ${PACK_MAX_STICKERS}. Remove ${count - PACK_MAX_STICKERS} before uploading.`
     : null;
 }
 
-export function warningText(warning: Warning | null): string | null {
+export function warningText(warning: Warning | null, subject?: string): string | null {
   if (!warning) return null;
-  return warning.kind === "packSize" ? packSizeText(warning.count) : null;
+  return warning.kind === "packSize" ? packSizeText(warning.count, subject) : null;
 }
 
 /** The pack-level Missing banner, or null when nothing is Missing. */
@@ -103,8 +108,8 @@ export function sendReportText(report: SendReport, targetTitle: string): string 
   const verb = report.originalsDeleted ? "Moved" : "Copied";
   const parts = [`${verb} ${n} to “${targetTitle}”.`];
   if (report.unfinished) parts.push(`Not finished: ${report.unfinished}.`);
-  const size = warningText(report.targetSizeWarning);
-  if (size) parts.push(size.replace("This pack", "The target pack"));
+  const size = warningText(report.targetSizeWarning, "The target pack");
+  if (size) parts.push(size);
   return parts.join(" ");
 }
 

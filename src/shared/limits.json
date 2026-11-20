@@ -2,6 +2,6 @@
   "importMaxSide": 2000,
   "sticker": { "side": 512, "maxKilobytes": 512 },
   "thumbnail": { "side": 100, "maxKilobytes": 128 },
-  "pack": { "maxStickers": 120 },
+  "pack": { "maxStickers": 120, "titleMaxChars": 64, "shortNameMaxChars": 64 },
   "emojiString": { "minEmoji": 1, "maxEmoji": 20 }
 }

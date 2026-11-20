@@ -40,7 +40,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
       root.replaceChildren(handle.element);
     } catch (err) {
       showList();
-      list.element.querySelector(".message")!.textContent = `Cannot open the pack: ${errorMessage(err)}`;
+      list.showError(`Cannot open the pack: ${errorMessage(err)}`);
     }
   }
 

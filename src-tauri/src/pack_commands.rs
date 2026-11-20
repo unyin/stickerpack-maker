@@ -14,7 +14,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 use tauri::State;
 
-use crate::library::desync::{self, PackView};
+use crate::library::desync::{self, PackView, PresenceMemo};
 use crate::library::packs::{self, LeftoverFolder, PackSummary};
 use crate::library::schema::{Pack, PackStatus, Sticker};
 use crate::library::stickers::{self, FileError, NewSticker, SendFailure, SendReport};
@@ -22,7 +22,25 @@ use crate::{library, SharedConfig};
 
 /// Serializes Library operations across command threads.
 #[derive(Default)]
-pub struct LibraryLock(Mutex<()>);
+pub struct LibraryLock {
+    serial: Mutex<()>,
+    memo: PresenceMemo,
+}
+
+impl LibraryLock {
+    /// What the last explicit desync check found (used under the lock).
+    fn memo(&self) -> &PresenceMemo {
+        &self.memo
+    }
+
+    /// The active Library changed (create / re-point): wait out any running
+    /// operation, then forget the presence memo, which is keyed by pack id
+    /// and would otherwise describe the previous Library's packs.
+    pub fn reset(&self) {
+        let _serial = self.serial.lock().unwrap_or_else(|e| e.into_inner());
+        self.memo.clear();
+    }
+}
 
 /// The configured Library folder, or why there is none.
 fn library_dir(config: &State<'_, SharedConfig>) -> Result<PathBuf, String> {
@@ -34,19 +52,28 @@ fn library_dir(config: &State<'_, SharedConfig>) -> Result<PathBuf, String> {
 }
 
 /// Run `op` on the configured Library under the Library lock.
-fn with_library<T>(
+/// Generic over the error so commands with a richer one (Send to pack's
+/// `SendFailure`) share the lock/open steps.
+fn with_library<T, E: From<String>>(
     config: &State<'_, SharedConfig>,
     lock: &State<'_, LibraryLock>,
-    op: impl FnOnce(&mut Connection, &Path) -> Result<T, String>,
-) -> Result<T, String> {
+    op: impl FnOnce(&mut Connection, &Path) -> Result<T, E>,
+) -> Result<T, E> {
+    // Lock order: `serial` first, then the config lock (taken and released
+    // inside `library_dir`). The config lock is never held while waiting for
+    // `serial` (see `set_library_path`), so there is no inversion. The Library
+    // is read AFTER taking `serial`, so an operation queued during a re-point
+    // runs against the Library that is current when it actually runs, never
+    // refilling the memo with the old Library's pack ids after `reset()`.
+    let _serial = lock.serial.lock().map_err(|_| "library lock poisoned".to_string())?;
     let dir = library_dir(config)?;
-    let _serial = lock.0.lock().map_err(|_| "library lock poisoned".to_string())?;
     let mut conn = library::open(&dir)?;
     op(&mut conn, &dir)
 }
 
 /// Result of a bulk import (SPEC §5): the refreshed pack, the new stickers'
-/// ids in drop order, and the files rejected with their reasons.
+/// ids in drop order, and the files rejected with their reasons. The view
+/// is not presence-scanned.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportResult {
@@ -58,26 +85,39 @@ pub struct ImportResult {
 /// Bulk import: every file is checked like a drop-in; the valid ones are
 /// appended in the given (drop) order with an empty Emoji String, the
 /// invalid ones rejected per file (SPEC §5).
-pub fn import_files(conn: &mut Connection, dir: &Path, pack_id: i64, paths: &[String]) -> Result<ImportResult, String> {
+pub fn import_files(
+    conn: &mut Connection,
+    dir: &Path,
+    memo: &PresenceMemo,
+    pack_id: i64,
+    paths: &[String],
+) -> Result<ImportResult, String> {
     let new: Vec<NewSticker> = paths
         .iter()
         .map(|p| NewSticker { path: PathBuf::from(p), emoji_string: String::new() })
         .collect();
     let outcome = stickers::add_stickers(conn, dir, pack_id, &new, None)?;
     Ok(ImportResult {
-        view: desync::open_pack(conn, dir, pack_id)?,
+        view: desync::load_pack_view(conn, dir, pack_id, memo)?,
         added_ids: outcome.added.iter().map(|s| s.id).collect(),
         rejected: outcome.rejected,
     })
 }
 
-/// Reorder mode's one-sticker move, then the refreshed pack (SPEC §5).
-pub fn reorder(conn: &mut Connection, dir: &Path, sticker_id: i64, new_position: i64) -> Result<PackView, String> {
+/// Reorder mode's one-sticker move, then the pack view without a presence
+/// scan (SPEC §4/§5: Missing is checked on open and Refresh only).
+pub fn reorder(
+    conn: &mut Connection,
+    dir: &Path,
+    memo: &PresenceMemo,
+    sticker_id: i64,
+    new_position: i64,
+) -> Result<PackView, String> {
     let pack_id = stickers::reorder_sticker(conn, dir, sticker_id, new_position)?
         .first()
         .map(|s| s.pack_id)
         .ok_or_else(|| "internal error: reordered pack is empty".to_string())?;
-    desync::open_pack(conn, dir, pack_id)
+    desync::load_pack_view(conn, dir, pack_id, memo)
 }
 
 /// The pack of `sticker_id`.
@@ -130,7 +170,14 @@ pub fn delete_pack(
 /// (SPEC §4: pack open and refresh only, never app start).
 #[tauri::command(async)]
 pub fn open_pack(pack_id: i64, config: State<'_, SharedConfig>, lock: State<'_, LibraryLock>) -> Result<PackView, String> {
-    with_library(&config, &lock, |conn, dir| desync::open_pack(conn, dir, pack_id))
+    with_library(&config, &lock, |conn, dir| desync::open_pack(conn, dir, pack_id, lock.memo()))
+}
+
+/// The pack view after an operation elsewhere (Send to pack's Move): rows
+/// and recovery only, keeping the last check's Missing flags.
+#[tauri::command(async)]
+pub fn load_pack_view(pack_id: i64, config: State<'_, SharedConfig>, lock: State<'_, LibraryLock>) -> Result<PackView, String> {
+    with_library(&config, &lock, |conn, dir| desync::load_pack_view(conn, dir, pack_id, lock.memo()))
 }
 
 #[tauri::command(async)]
@@ -171,7 +218,7 @@ pub fn reorder_sticker(
     config: State<'_, SharedConfig>,
     lock: State<'_, LibraryLock>,
 ) -> Result<PackView, String> {
-    with_library(&config, &lock, |conn, dir| reorder(conn, dir, sticker_id, new_position))
+    with_library(&config, &lock, |conn, dir| reorder(conn, dir, lock.memo(), sticker_id, new_position))
 }
 
 /// Delete stickers (Missing ones included) and renumber the pack.
@@ -184,7 +231,7 @@ pub fn delete_stickers(
 ) -> Result<PackView, String> {
     with_library(&config, &lock, |conn, dir| {
         stickers::delete_stickers(conn, dir, pack_id, &sticker_ids)?;
-        desync::open_pack(conn, dir, pack_id)
+        desync::load_pack_view(conn, dir, pack_id, lock.memo())
     })
 }
 
@@ -206,10 +253,10 @@ pub fn import_stickers(
     config: State<'_, SharedConfig>,
     lock: State<'_, LibraryLock>,
 ) -> Result<ImportResult, String> {
-    with_library(&config, &lock, |conn, dir| import_files(conn, dir, pack_id, &paths))
+    with_library(&config, &lock, |conn, dir| import_files(conn, dir, lock.memo(), pack_id, &paths))
 }
 
-/// The drop-in check alone (PNG/WEBP, one side exactly 512 px, ≤512 KB),
+/// The drop-in check alone (the sticker file rules, SPEC §7),
 /// so the UI can hard-block a bad file with "open in editor / cancel".
 #[tauri::command(async)]
 pub fn check_sticker_file(path: String) -> Result<(), String> {
@@ -228,7 +275,9 @@ pub fn replace_sticker(
     with_library(&config, &lock, |conn, dir| {
         let pack_id = pack_of(conn, sticker_id)?;
         stickers::replace_sticker_file(conn, dir, sticker_id, Path::new(&path))?;
-        desync::open_pack(conn, dir, pack_id)
+        // The file is new: read it once instead of trusting the last check.
+        lock.memo().forget_sticker(pack_id, sticker_id);
+        desync::load_pack_view(conn, dir, pack_id, lock.memo())
     })
 }
 
@@ -241,10 +290,9 @@ pub fn send_to_pack(
     config: State<'_, SharedConfig>,
     lock: State<'_, LibraryLock>,
 ) -> Result<SendReport, SendFailure> {
-    let dir = library_dir(&config)?;
-    let _serial = lock.0.lock().map_err(|_| "library lock poisoned".to_string())?;
-    let mut conn = library::open(&dir)?;
-    stickers::send_to_pack(&mut conn, &dir, &sticker_ids, target_pack_id, delete_originals)
+    with_library(&config, &lock, |conn, dir| {
+        stickers::send_to_pack(conn, dir, &sticker_ids, target_pack_id, delete_originals)
+    })
 }
 
 // ---- Files ----
@@ -317,6 +365,7 @@ mod tests {
         dir: tempfile::TempDir,
         sources: tempfile::TempDir,
         conn: Connection,
+        memo: PresenceMemo,
     }
 
     impl Lib {
@@ -324,7 +373,7 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             library::create_fresh(dir.path()).unwrap();
             let conn = library::open(dir.path()).unwrap();
-            Lib { dir, sources: tempfile::tempdir().unwrap(), conn }
+            Lib { dir, sources: tempfile::tempdir().unwrap(), conn, memo: PresenceMemo::default() }
         }
 
         fn source(&self, name: &str, bytes: Vec<u8>) -> String {
@@ -344,7 +393,7 @@ mod tests {
             lib.source("a.png", png(10, STICKER_SIDE, "A")),
             lib.source("notes.txt", b"hello".to_vec()),
         ];
-        let result = import_files(&mut lib.conn, lib.dir.path(), pack.id, &paths).unwrap();
+        let result = import_files(&mut lib.conn, lib.dir.path(), &lib.memo, pack.id, &paths).unwrap();
         let files: Vec<_> = result.view.stickers.iter().map(|s| s.sticker.file_name.clone()).collect();
         assert_eq!(files, ["001.png", "002.png"]);
         assert_eq!(result.added_ids, result.view.stickers.iter().map(|s| s.sticker.id).collect::<Vec<_>>());
@@ -367,12 +416,41 @@ mod tests {
             .iter()
             .map(|t| lib.source(&format!("{t}.png"), png(STICKER_SIDE, 1, t)))
             .collect();
-        import_files(&mut lib.conn, lib.dir.path(), pack.id, &paths).unwrap();
+        import_files(&mut lib.conn, lib.dir.path(), &lib.memo, pack.id, &paths).unwrap();
         let first = load_stickers(&lib.conn, pack.id).unwrap()[0].id;
-        let view = reorder(&mut lib.conn, lib.dir.path(), first, 3).unwrap();
+        let view = reorder(&mut lib.conn, lib.dir.path(), &lib.memo, first, 3).unwrap();
         assert_eq!(view.stickers[2].sticker.id, first);
         let tag = |name: &str| crate::library::test_images::tag_of(&fs::read(lib.dir.path().join("p").join(name)).unwrap());
         assert_eq!([tag("001.png"), tag("002.png"), tag("003.png")], ["B", "C", "A"]);
+    }
+
+    #[test]
+    fn operations_do_not_rescan_for_missing_but_open_does() {
+        let mut lib = Lib::new();
+        let pack = create_pack(&mut lib.conn, lib.dir.path(), "P", None).unwrap();
+        let paths: Vec<String> = ["A", "B", "C"]
+            .iter()
+            .map(|t| lib.source(&format!("{t}.png"), png(STICKER_SIDE, 1, t)))
+            .collect();
+        import_files(&mut lib.conn, lib.dir.path(), &lib.memo, pack.id, &paths).unwrap();
+        desync::open_pack(&lib.conn, lib.dir.path(), pack.id, &lib.memo).unwrap();
+        let ids: Vec<i64> = load_stickers(&lib.conn, pack.id).unwrap().iter().map(|s| s.id).collect();
+        // C (position 3) is deleted outside the app; an unrelated reorder
+        // of A and B runs.
+        fs::remove_file(lib.dir.path().join("p").join("003.png")).unwrap();
+        let view = reorder(&mut lib.conn, lib.dir.path(), &lib.memo, ids[0], 2).unwrap();
+        assert!(view.stickers.iter().all(|s| !s.missing), "reorder must not run the Missing scan");
+        // An import and a delete do not scan either.
+        let extra = lib.source("D.png", png(STICKER_SIDE, 1, "D"));
+        let view = import_files(&mut lib.conn, lib.dir.path(), &lib.memo, pack.id, &[extra]).unwrap().view;
+        assert!(view.stickers.iter().all(|s| !s.missing));
+        // Refresh (an explicit check) finds it.
+        let view = desync::open_pack(&lib.conn, lib.dir.path(), pack.id, &lib.memo).unwrap();
+        let flags: Vec<bool> = view.stickers.iter().map(|s| s.missing).collect();
+        assert_eq!(flags, [false, false, true, false]);
+        // ...and a later operation keeps that result.
+        let view = reorder(&mut lib.conn, lib.dir.path(), &lib.memo, ids[1], 1).unwrap();
+        assert_eq!(view.stickers.iter().filter(|s| s.missing).count(), 1);
     }
 
     #[test]
@@ -380,7 +458,7 @@ mod tests {
         let mut lib = Lib::new();
         let pack = create_pack(&mut lib.conn, lib.dir.path(), "P", None).unwrap();
         let bad = lib.source("bad.png", png(1, 1, ""));
-        let result = import_files(&mut lib.conn, lib.dir.path(), pack.id, &[bad]).unwrap();
+        let result = import_files(&mut lib.conn, lib.dir.path(), &lib.memo, pack.id, &[bad]).unwrap();
         let json = serde_json::to_value(&result).unwrap();
         assert!(json["addedIds"].as_array().unwrap().is_empty());
         assert!(json["rejected"][0]["reason"].as_str().unwrap().contains("px"));

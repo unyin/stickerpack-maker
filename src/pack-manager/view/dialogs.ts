@@ -1,7 +1,7 @@
 // The Pack Manager's dialogs (SPEC §5): create pack, sticker delete
 // confirmations with previews, Send to pack, and the hard block for files
 // that are not valid stickers.
-import { el, errorMessage } from "../../ui";
+import { el, errorMessage, onActivate } from "../../ui";
 import {
   createPack,
   isSendFailure,
@@ -13,6 +13,7 @@ import {
   type SendReport,
   type StickerView,
 } from "../api";
+import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { fileNameOf, matchesSearch, sendReportText, STICKER_RULE, statusLabel, stickerCountText } from "../model/messages";
 import { confirmDialog, openDialog, type DialogHandle } from "./dialog";
 import { previewImage, type Previews } from "./previews";
@@ -24,18 +25,19 @@ export function statusBadge(status: Pack["status"]): HTMLElement {
 /**
  * Title and Short Name fields for a new pack: the Short Name previews the
  * auto-derived one until the user edits it (SPEC §5). `read()` gives the
- * Title and the Short Name to send (null = auto-derive).
+ * Title and the Short Name to send (null = auto-derive). `problem()` is why
+ * the form cannot be submitted (null = fine); `onChange` fires on every edit.
  */
-export function newPackFields(onEnter: () => void): {
+export function newPackFields(onEnter: () => void, onChange: () => void = () => {}): {
   fields: HTMLElement;
   title: HTMLInputElement;
+  problem(): string | null;
   read(): { title: string; shortName: string | null };
 } {
-  const title = el("input", { class: "pm-input", type: "text", maxlength: "64", "aria-label": "Title" }) as HTMLInputElement;
+  const title = el("input", { class: "pm-input", type: "text", "aria-label": "Title" }) as HTMLInputElement;
   const shortName = el("input", {
     class: "pm-input pm-mono",
     type: "text",
-    maxlength: "64",
     spellcheck: "false",
     "aria-label": "Short Name",
   }) as HTMLInputElement;
@@ -52,8 +54,10 @@ export function newPackFields(onEnter: () => void): {
       .catch(() => {});
   };
   title.addEventListener("input", preview);
+  title.addEventListener("input", onChange);
+  shortName.addEventListener("input", onChange);
   shortName.addEventListener("input", () => {
-    edited = shortName.value.trim() !== "";
+    edited = rustTrim(shortName.value) !== "";
     hint.textContent = edited
       ? "Your Short Name: letters, digits and single underscores, starting with a letter. Clear it to derive it from the Title again."
       : "Derived from the Title; you can edit it while the pack is Draft.";
@@ -72,7 +76,8 @@ export function newPackFields(onEnter: () => void): {
     el("label", { class: "field-label" }, "Short Name", shortName),
     hint,
   );
-  return { fields, title, read: () => ({ title: title.value, shortName: edited ? shortName.value.trim() : null }) };
+  const problem = () => titleProblem(title.value) ?? shortNameProblem(shortName.value);
+  return { fields, title, problem, read: () => ({ title: title.value, shortName: edited ? rustTrim(shortName.value) : null }) };
 }
 
 /** Create a Draft pack (SPEC §5). Resolves with it, or null when cancelled. */
@@ -80,7 +85,15 @@ export async function createPackDialog(): Promise<Pack | null> {
   const message = el("p", { class: "message", role: "alert" });
   let created: Pack | null = null;
   let handle: DialogHandle<"create" | "cancel"> | null = null;
-  const form = newPackFields(() => handle?.buttons.get("create")?.click());
+  const syncCreate = () => {
+    const create = handle?.buttons.get("create");
+    if (!create) return;
+    const why = form.problem();
+    create.disabled = why !== null;
+    create.title = why ?? "";
+    message.textContent = rustTrim(form.title.value) === "" ? "" : (why ?? "");
+  };
+  const form = newPackFields(() => handle?.buttons.get("create")?.click(), syncCreate);
   handle = openDialog<"create" | "cancel">(
     "New pack",
     [form.fields, el("p", { class: "muted" }, "New packs start as Draft."), message],
@@ -104,6 +117,7 @@ export async function createPackDialog(): Promise<Pack | null> {
     ],
     "cancel",
   );
+  syncCreate();
   form.title.focus();
   return (await handle.result) === "create" ? created : null;
 }
@@ -184,9 +198,15 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
   const newPackButton = el("button", { class: "secondary", type: "button" }, "New pack…") as HTMLButtonElement;
   newPackButton.addEventListener("click", () => {
     newPackButton.hidden = true;
-    const form = newPackFields(() => void createInline());
+    const sync = () => {
+      const why = form.problem();
+      create.disabled = why !== null;
+      create.title = why ?? "";
+    };
+    const form = newPackFields(() => void createInline(), sync);
     const create = el("button", { class: "primary", type: "button" }, "Create and select") as HTMLButtonElement;
     const createInline = async () => {
+      if (form.problem()) return;
       try {
         const { title, shortName } = form.read();
         const pack = await createPack(title, shortName);
@@ -202,6 +222,7 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
     };
     create.addEventListener("click", () => void createInline());
     newPackArea.replaceChildren(form.fields, el("div", { class: "actions" }, create));
+    sync();
     form.title.focus();
   });
   newPackArea.append(newPackButton);
@@ -223,12 +244,7 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
           renderList();
         };
         item.addEventListener("click", choose);
-        item.addEventListener("keydown", (e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            choose();
-          }
-        });
+        onActivate(item, choose);
         return item;
       }),
     );

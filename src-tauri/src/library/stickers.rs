@@ -19,20 +19,16 @@ use super::packs::open_pack_files;
 use super::schema::{load_pack, load_sticker, load_stickers, Format, Sticker};
 use crate::limits::{EMOJI_MAX, EMOJI_MIN, KB, PACK_MAX_STICKERS, STICKER_MAX_KB, STICKER_SIDE};
 
-/// Telegram's per-pack sticker cap: exceeding it warns, never blocks.
-pub const MAX_PACK_SIZE: usize = PACK_MAX_STICKERS;
 /// Largest sticker file Telegram accepts (SPEC §7).
 pub const MAX_STICKER_BYTES: u64 = STICKER_MAX_KB * KB;
-/// Most emoji an Emoji String may hold (SPEC §3).
-pub const MAX_EMOJI: usize = EMOJI_MAX;
 
 /// A warn-only condition (SPEC §3: drafts may be incomplete).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Warning {
-    /// Emoji String outside 1-20 emoji.
+    /// Emoji String outside the allowed emoji count.
     EmojiCount { count: usize },
-    /// Pack above the 120-sticker cap.
+    /// Pack above the pack sticker cap.
     PackSize { count: usize },
 }
 
@@ -91,15 +87,15 @@ pub fn emoji_count(emoji_string: &str) -> usize {
         .count()
 }
 
-/// Warn when an Emoji String is outside 1-20 emoji (warn only, SPEC §3).
+/// Warn when an Emoji String is outside the allowed emoji count (warn only, SPEC §3).
 pub fn emoji_warning(emoji_string: &str) -> Option<Warning> {
     let count = emoji_count(emoji_string);
-    (!(EMOJI_MIN..=MAX_EMOJI).contains(&count)).then_some(Warning::EmojiCount { count })
+    (!(EMOJI_MIN..=EMOJI_MAX).contains(&count)).then_some(Warning::EmojiCount { count })
 }
 
-/// Warn when a pack holds more than 120 stickers (warn only, SPEC §3).
+/// Warn when a pack holds more than the pack sticker cap (warn only, SPEC §3).
 pub fn pack_size_warning(count: usize) -> Option<Warning> {
-    (count > MAX_PACK_SIZE).then_some(Warning::PackSize { count })
+    (count > PACK_MAX_STICKERS).then_some(Warning::PackSize { count })
 }
 
 /// Validate a file entering a pack as a sticker (drop-in, bulk import,
@@ -397,7 +393,7 @@ pub fn delete_stickers(
 }
 
 /// Set a sticker's Emoji String exactly as given (one-click copy must
-/// reproduce it). Never blocks: check `emoji_warning` for the 1-20 rule.
+/// reproduce it). Never blocks: check `emoji_warning` for the emoji count rule.
 pub fn set_emoji_string(conn: &Connection, sticker_id: i64, emoji_string: &str) -> Result<Sticker, String> {
     let changed = conn
         .execute(

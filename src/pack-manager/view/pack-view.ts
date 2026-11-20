@@ -4,11 +4,13 @@
 // ../model; this file wires them to the DOM and the commands.
 import { ask } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { el, errorMessage } from "../../ui";
+import { editorCanImport } from "../../shared/import-extensions";
+import { el, errorMessage, onActivate, withMessage } from "../../ui";
 import {
   checkStickerFile,
   deleteStickers,
   importStickers,
+  loadPackView,
   openPack,
   pickStickerFiles,
   reorderSticker,
@@ -31,9 +33,10 @@ import {
   missingSummary,
   SHORT_NAME_LOCKED,
   stickerCountText,
+  thumbnailFormat,
   warningText,
 } from "../model/messages";
-import { dropPosition, escapeAction, selectionActive, slotAt, toggleMode, type Mode } from "../model/modes";
+import { escapeAction, selectionActive, toggleMode, type Mode } from "../model/modes";
 import {
   clickSticker,
   clickThumbnail,
@@ -44,10 +47,12 @@ import {
   type SelectionState,
 } from "../model/selection";
 import { emojiCountWarning, emojiWarning } from "../model/emoji";
+import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { dialogOpen } from "./dialog";
 import { confirmStickerDelete, invalidFileDialog, sendDialog, statusBadge } from "./dialogs";
 import { aggregatePanel, detailPanel, emptyPanel, thumbnailPanel, type PanelActions } from "./panels";
 import { previewImage, Previews } from "./previews";
+import { startReorderDrag, type ReorderDragHost } from "./reorder-drag";
 
 export interface PackViewHost {
   /** Back to the pack list. */
@@ -72,11 +77,10 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   const previews = new Previews();
 
   const message = el("p", { class: "message", role: "alert" });
-  const titleInput = el("input", { class: "pm-input pm-title-input", type: "text", maxlength: "64", "aria-label": "Title" }) as HTMLInputElement;
+  const titleInput = el("input", { class: "pm-input pm-title-input", type: "text", "aria-label": "Title" }) as HTMLInputElement;
   const shortInput = el("input", {
     class: "pm-input pm-mono",
     type: "text",
-    maxlength: "64",
     spellcheck: "false",
     "aria-label": "Short Name",
   }) as HTMLInputElement;
@@ -108,12 +112,9 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   async function run(action: () => Promise<void>): Promise<void> {
     if (busy) return;
     busy = true;
-    message.textContent = "";
     root.classList.add("busy");
     try {
-      await action();
-    } catch (err) {
-      message.textContent = errorMessage(err);
+      await withMessage(message, action);
     } finally {
       busy = false;
       root.classList.remove("busy");
@@ -136,25 +137,42 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
 
   // ---- Header ----
 
+  // No `maxlength`: it counts UTF-16 units; the limit counts characters like the core.
+  const markField = (input: HTMLInputElement, problem: string | null): void => {
+    input.setAttribute("aria-invalid", String(problem !== null));
+  };
+  const checkField = (input: HTMLInputElement, problem: string | null): void => {
+    markField(input, problem);
+    message.textContent = problem ?? "";
+  };
+  titleInput.addEventListener("input", () => checkField(titleInput, titleProblem(titleInput.value)));
+  shortInput.addEventListener("input", () => checkField(shortInput, shortNameProblem(shortInput.value, { allowEmpty: false })));
+
   titleInput.addEventListener("change", () =>
     void run(async () => {
       try {
+        const why = titleProblem(titleInput.value);
+        if (why) throw new Error(why); // blocked, reason shown in the message line
         view = { ...view, pack: await setPackTitle(packId, titleInput.value) };
       } finally {
         titleInput.value = view.pack.title;
+        markField(titleInput, null);
       }
     }),
   );
   shortInput.addEventListener("change", () =>
     void run(async () => {
       try {
-        view = { ...view, pack: await setPackShortName(packId, shortInput.value.trim()) };
+        const why = shortNameProblem(shortInput.value, { allowEmpty: false });
+        if (why) throw new Error(why);
+        view = { ...view, pack: await setPackShortName(packId, rustTrim(shortInput.value)) };
         previews.clear(); // the folder moved
         if (view.pack.folderRenameFrom) {
           notice = "The Short Name changed, but the folder could not be renamed yet (it may be open in Explorer). Close it and press Refresh.";
         }
       } finally {
         shortInput.value = view.pack.shortName;
+        markField(shortInput, null);
       }
     }),
   );
@@ -257,8 +275,9 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
         const sent = await sendDialog(packId, stickers);
         if (!sent) return;
         if (sent.report.originalsDeleted) {
+          // Moved stickers left this pack: reload the rows, no Missing scan.
           previews.clear();
-          setView(await openPack(packId));
+          setView(await loadPackView(packId));
         }
         notice = sent.text;
       }),
@@ -321,20 +340,18 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       selection = clickSticker(selection, order(), sticker.id, modifiersOf(e));
       render();
     });
-    item.addEventListener("keydown", (e) => {
-      if ((e.key === "Enter" || e.key === " ") && selectionActive(mode)) {
-        e.preventDefault();
-        selection = clickSticker(selection, order(), sticker.id, modifiersOf(e));
-        render();
-      }
+    onActivate(item, (e) => {
+      if (!selectionActive(mode)) return;
+      selection = clickSticker(selection, order(), sticker.id, modifiersOf(e));
+      render();
     });
-    item.addEventListener("pointerdown", (e) => startDrag(e, sticker));
+    item.addEventListener("pointerdown", (e) => startReorderDrag(e, sticker.id, reorderHost));
     return item;
   }
 
   function thumbnailTile(): HTMLElement {
     const name = view.pack.thumbnail;
-    const format = name?.endsWith(".webp") ? "webp" : "png";
+    const format = thumbnailFormat(name);
     const art =
       name && view.thumbnailFile
         ? previewImage(previews.thumbnailOf(packId, format), "Thumbnail", "pm-tile-img")
@@ -357,60 +374,22 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       render();
     };
     item.addEventListener("click", choose);
-    item.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        choose();
-      }
-    });
+    onActivate(item, choose);
     return item;
   }
 
-  // ---- Reorder drag (pointer events: HTML5 drag and drop is unavailable
-  // in the Windows webview while Tauri's file drop is enabled) ----
+  // ---- Reorder drag (pointer events, see ./reorder-drag) ----
 
-  function stickerTiles(): HTMLElement[] {
-    return Array.from(grid.querySelectorAll<HTMLElement>(".pm-tile[data-id]"));
-  }
-
-  function clearDropMarks(): void {
-    for (const t of stickerTiles()) t.classList.remove("drop-before", "drop-after", "dragging");
-  }
-
-  function startDrag(e: PointerEvent, sticker: StickerView): void {
-    if (mode !== "reorder" || busy || e.button !== 0) return;
-    e.preventDefault();
-    const from = view.stickers.findIndex((s) => s.id === sticker.id);
-    const tiles = stickerTiles();
-    tiles[from]?.classList.add("dragging");
-    let slot: number | null = null;
-    grid.setPointerCapture(e.pointerId);
-    const move = (m: PointerEvent) => {
-      const current = stickerTiles();
-      slot = slotAt(current.map((t) => t.getBoundingClientRect()), m.clientX, m.clientY);
-      for (const t of current) t.classList.remove("drop-before", "drop-after");
-      if (dropPosition(from, slot) === null) return;
-      if (slot < current.length) current[slot].classList.add("drop-before");
-      else current[current.length - 1]?.classList.add("drop-after");
-    };
-    const end = (u: PointerEvent) => {
-      grid.removeEventListener("pointermove", move);
-      grid.removeEventListener("pointerup", end);
-      grid.removeEventListener("pointercancel", end);
-      if (grid.hasPointerCapture(u.pointerId)) grid.releasePointerCapture(u.pointerId);
-      clearDropMarks();
-      const position = u.type === "pointerup" && slot !== null ? dropPosition(from, slot) : null;
-      if (position !== null) {
-        void run(async () => {
-          setView(await reorderSticker(sticker.id, position));
-          notice = `Moved sticker #${from + 1} to #${position}; files renamed to match.`;
-        });
-      }
-    };
-    grid.addEventListener("pointermove", move);
-    grid.addEventListener("pointerup", end);
-    grid.addEventListener("pointercancel", end);
-  }
+  const reorderHost: ReorderDragHost = {
+    grid,
+    enabled: () => mode === "reorder" && !busy,
+    indexOf: (id: number) => view.stickers.findIndex((s) => s.id === id),
+    drop: (id: number, from: number, position: number) =>
+      void run(async () => {
+        setView(await reorderSticker(id, position));
+        notice = `Moved sticker #${from + 1} to #${position}; files renamed to match.`;
+      }),
+  };
 
   // ---- Keyboard: Esc and Delete (SPEC §5) ----
 
@@ -433,6 +412,16 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
 
   // ---- Render ----
 
+  /** A banner's Dismiss button: `clear` resets its state, then re-render. */
+  function dismissButton(clear: () => void): HTMLElement {
+    const close = el("button", { class: "pm-link", type: "button" }, "Dismiss");
+    close.addEventListener("click", () => {
+      clear();
+      render();
+    });
+    return close;
+  }
+
   function renderBanners(): void {
     const items: HTMLElement[] = [];
     const size = warningText(view.packSizeWarning);
@@ -440,19 +429,11 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     const missing = missingSummary(view.stickers.filter((s) => s.missing).length);
     if (missing) items.push(el("div", { class: "pm-banner pm-banner-warn", role: "status" }, missing));
     if (notice) {
-      const close = el("button", { class: "pm-link", type: "button" }, "Dismiss");
-      close.addEventListener("click", () => {
-        notice = "";
-        render();
-      });
-      items.push(el("div", { class: "pm-banner pm-banner-info", role: "status" }, el("span", {}, notice), close));
+      items.push(
+        el("div", { class: "pm-banner pm-banner-info", role: "status" }, el("span", {}, notice), dismissButton(() => (notice = ""))),
+      );
     }
     if (rejected.length) {
-      const close = el("button", { class: "pm-link", type: "button" }, "Dismiss");
-      close.addEventListener("click", () => {
-        rejected = [];
-        render();
-      });
       items.push(
         el(
           "div",
@@ -462,12 +443,17 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
             "ul",
             {},
             ...rejected.map((r) => {
-              const open = el("button", { class: "pm-link", type: "button" }, "Open in editor");
-              open.addEventListener("click", () => host.openInEditor(r.path));
-              return el("li", {}, el("span", { class: "pm-mono" }, fileNameOf(r.path)), ` ${r.reason}. `, open);
+              const row = el("li", {}, el("span", { class: "pm-mono" }, fileNameOf(r.path)), ` ${r.reason}. `);
+              // Only files the Editor can import get the button.
+              if (editorCanImport(r.path)) {
+                const open = el("button", { class: "pm-link", type: "button" }, "Open in editor");
+                open.addEventListener("click", () => host.openInEditor(r.path));
+                row.append(open);
+              }
+              return row;
             }),
           ),
-          close,
+          dismissButton(() => (rejected = [])),
         ),
       );
     }

@@ -17,11 +17,7 @@ use serde::Serialize;
 
 use super::files;
 use super::schema::{load_pack, load_packs, Pack, PackStatus};
-
-/// Longest Title, in characters (SPEC §7).
-pub const MAX_TITLE_CHARS: usize = 64;
-/// Longest Short Name, in characters (SPEC §7).
-pub const MAX_SHORT_NAME_CHARS: usize = 64;
+use crate::limits::{SHORT_NAME_MAX_CHARS, TITLE_MAX_CHARS};
 
 /// Folder of `pack` inside the Library: named after its Short Name. While a
 /// folder rename is pending, the folder may still sit under the old name;
@@ -76,7 +72,7 @@ fn folder_occupied(dir: &Path) -> String {
 /// within the Short Name limit without a trailing or doubled underscore.
 fn with_suffix(base: &str, n: u32) -> String {
     let suffix = format!("_{n}");
-    let keep: String = base.chars().take(MAX_SHORT_NAME_CHARS - suffix.len()).collect();
+    let keep: String = base.chars().take(SHORT_NAME_MAX_CHARS - suffix.len()).collect();
     format!("{}{suffix}", keep.trim_end_matches('_'))
 }
 
@@ -110,17 +106,20 @@ pub struct PackSummary {
     pub sticker_count: i64,
 }
 
-/// Every pack in creation order, with its sticker count.
+/// Every pack in creation order, with its sticker count (one grouped query).
 pub fn pack_summaries(conn: &Connection) -> Result<Vec<PackSummary>, String> {
-    load_packs(conn)?
+    let mut stmt = conn
+        .prepare("SELECT pack_id, COUNT(*) FROM stickers GROUP BY pack_id")
+        .map_err(|e| format!("cannot count stickers: {e}"))?;
+    let counts: std::collections::HashMap<i64, i64> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(|e| format!("cannot count stickers: {e}"))?
+        .collect::<rusqlite::Result<_>>()
+        .map_err(|e| format!("cannot count stickers: {e}"))?;
+    Ok(load_packs(conn)?
         .into_iter()
-        .map(|pack| {
-            let sticker_count = conn
-                .query_row("SELECT COUNT(*) FROM stickers WHERE pack_id = ?1", params![pack.id], |r| r.get(0))
-                .map_err(|e| format!("cannot count stickers of pack {}: {e}", pack.id))?;
-            Ok(PackSummary { pack, sticker_count })
-        })
-        .collect()
+        .map(|pack| PackSummary { sticker_count: counts.get(&pack.id).copied().unwrap_or(0), pack })
+        .collect())
 }
 
 /// Create a pack (Draft, SPEC §3). A given `short_name` is validated and
@@ -374,14 +373,14 @@ pub fn delete_pack(
     Ok(leftover)
 }
 
-/// Validate a Title: free text, 1–`MAX_TITLE_CHARS` characters after trimming (SPEC §7).
+/// Validate a Title: free text, 1–`TITLE_MAX_CHARS` characters after trimming (SPEC §7).
 /// Returns the trimmed Title to store.
 pub fn validate_title(title: &str) -> Result<String, String> {
     let trimmed = title.trim();
     let len = trimmed.chars().count();
-    if len == 0 || len > MAX_TITLE_CHARS {
+    if len == 0 || len > TITLE_MAX_CHARS {
         return Err(format!(
-            "Title must be 1–{MAX_TITLE_CHARS} characters (got {len}); a Title is always required"
+            "Title must be 1–{TITLE_MAX_CHARS} characters (got {len}); a Title is always required"
         ));
     }
     Ok(trimmed.to_string())
@@ -389,13 +388,13 @@ pub fn validate_title(title: &str) -> Result<String, String> {
 
 /// Validate a Short Name against Telegram's slug rules (SPEC §3/§7):
 /// letters/digits/underscores, begins with a letter, no consecutive
-/// underscores, at most 64 characters. Enforced in the core, not just the UI.
+/// underscores, at most `SHORT_NAME_MAX_CHARS` characters. Enforced in the core, not just the UI.
 pub fn validate_short_name(short_name: &str) -> Result<(), String> {
     if short_name.is_empty() {
         return Err("Short Name must not be empty".to_string());
     }
-    if short_name.chars().count() > MAX_SHORT_NAME_CHARS {
-        return Err(format!("Short Name must be at most {MAX_SHORT_NAME_CHARS} characters"));
+    if short_name.chars().count() > SHORT_NAME_MAX_CHARS {
+        return Err(format!("Short Name must be at most {SHORT_NAME_MAX_CHARS} characters"));
     }
     if !short_name.chars().next().unwrap().is_ascii_alphabetic() {
         return Err("Short Name must begin with a letter".to_string());
@@ -435,7 +434,7 @@ fn is_windows_reserved(name: &str) -> bool {
 /// Auto-derive a Short Name from a Title (SPEC §3): lowercase, runs of
 /// non-alphanumeric characters collapse to a single underscore, no leading
 /// or trailing underscore. Titles without letters get a `pack` prefix so the
-/// result always begins with a letter; the result is truncated to 64
+/// result always begins with a letter; the result is truncated to `SHORT_NAME_MAX_CHARS`
 /// characters and always passes `validate_short_name` (a Windows reserved
 /// result gets a `_pack` suffix). Uniqueness is `create_pack`'s job.
 pub fn auto_short_name(title: &str) -> String {
@@ -459,7 +458,7 @@ pub fn auto_short_name(title: &str) -> String {
     }
     // Truncate to the limit; a trailing underscore from the cut is trimmed.
     // The construction never produces consecutive underscores.
-    let truncated: String = out.chars().take(MAX_SHORT_NAME_CHARS).collect();
+    let truncated: String = out.chars().take(SHORT_NAME_MAX_CHARS).collect();
     let short = truncated.trim_end_matches('_').to_string();
     if is_windows_reserved(&short) {
         format!("{short}_pack")
@@ -474,7 +473,7 @@ mod tests {
 
     #[test]
     fn short_name_accepts_telegram_slugs() {
-        for good in ["a", "abc", "A_1", "My_Pack_2", &"x".repeat(64)] {
+        for good in ["a", "abc", "A_1", "My_Pack_2", &"x".repeat(SHORT_NAME_MAX_CHARS)] {
             assert!(validate_short_name(good).is_ok(), "rejected {good:?}");
         }
     }
@@ -489,7 +488,7 @@ mod tests {
             "a b",         // space
             "a-b",         // hyphen
             "héllo",       // non-ASCII letter
-            &"x".repeat(65), // too long
+            &"x".repeat(SHORT_NAME_MAX_CHARS + 1), // too long
         ] {
             assert!(validate_short_name(bad).is_err(), "accepted {bad:?}");
         }
@@ -500,8 +499,8 @@ mod tests {
         assert_eq!(validate_title("  My Pack  ").unwrap(), "My Pack");
         assert!(validate_title("").is_err());
         assert!(validate_title("   ").is_err());
-        assert!(validate_title(&"x".repeat(64)).is_ok());
-        assert!(validate_title(&"x".repeat(65)).is_err());
+        assert!(validate_title(&"x".repeat(TITLE_MAX_CHARS)).is_ok());
+        assert!(validate_title(&"x".repeat(TITLE_MAX_CHARS + 1)).is_err());
     }
 
     #[test]
@@ -534,7 +533,7 @@ mod tests {
                 validate_short_name(&short).is_ok(),
                 "auto_short_name({title:?}) = {short:?} is invalid"
             );
-            assert!(short.chars().count() <= 64);
+            assert!(short.chars().count() <= SHORT_NAME_MAX_CHARS);
         }
     }
 
@@ -560,12 +559,12 @@ mod tests {
     #[test]
     fn numeric_suffix_respects_the_length_limit() {
         assert_eq!(with_suffix("cats", 2), "cats_2");
-        let long = "x".repeat(64);
+        let long = "x".repeat(SHORT_NAME_MAX_CHARS);
         let suffixed = with_suffix(&long, 12);
-        assert_eq!(suffixed.chars().count(), 64);
+        assert_eq!(suffixed.chars().count(), SHORT_NAME_MAX_CHARS);
         assert!(suffixed.ends_with("_12"));
         // A cut that lands on an underscore never yields "__".
-        let underscored = format!("{}_y", "x".repeat(61));
+        let underscored = format!("{}_y", "x".repeat(SHORT_NAME_MAX_CHARS - 3));
         assert!(validate_short_name(&with_suffix(&underscored, 2)).is_ok());
     }
 
@@ -674,7 +673,7 @@ mod tests {
     fn create_pack_rejects_invalid_input_without_leaving_a_trace() {
         let mut lib = Lib::new();
         assert!(lib.create("   ", None).is_err());
-        assert!(lib.create(&"x".repeat(65), None).is_err());
+        assert!(lib.create(&"x".repeat(TITLE_MAX_CHARS + 1), None).is_err());
         assert!(lib.create("Fine", Some("1bad")).is_err());
         assert!(lib.create("Fine", Some("a__b")).is_err());
         assert!(lib.create("Fine", Some("nul")).is_err());
