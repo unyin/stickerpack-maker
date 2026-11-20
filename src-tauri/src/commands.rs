@@ -141,6 +141,31 @@ pub fn editor_import_image(path: String, scale_to_fit: bool) -> Result<tauri::ip
     Ok(tauri::ipc::Response::new(image.to_frame()))
 }
 
+/// Header carrying the merge request's per-layer sizes and transforms
+/// (JSON array of `LayerMeta`); the pixels travel as the raw body.
+pub const MERGE_LAYERS_HEADER: &str = "x-merge-layers";
+
+/// Merge selected raster layers (SPEC §6). Request: raw body = the layers'
+/// RGBA bytes concatenated bottom to top, header `x-merge-layers` = their
+/// sizes and transforms. Response: `Placed::to_frame` (origin + image).
+#[tauri::command(async)]
+pub fn editor_merge_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
+        return Err("merge request must carry raw pixel bytes".to_string());
+    };
+    let meta_json = request
+        .headers()
+        .get(MERGE_LAYERS_HEADER)
+        .ok_or_else(|| format!("merge request is missing the {MERGE_LAYERS_HEADER} header"))?
+        .to_str()
+        .map_err(|e| format!("merge layer header is not text: {e}"))?;
+    let meta: Vec<editor::merge::LayerMeta> =
+        serde_json::from_str(meta_json).map_err(|e| format!("merge layer header is invalid: {e}"))?;
+    let layers = editor::merge::split_layers(&meta, body)?;
+    let merged = editor::merge::merge(&layers)?;
+    Ok(tauri::ipc::Response::new(merged.to_frame()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

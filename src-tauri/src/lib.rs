@@ -49,6 +49,7 @@ pub fn run() {
             commands::repoint_library,
             commands::editor_probe_image,
             commands::editor_import_image,
+            commands::editor_merge_layers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

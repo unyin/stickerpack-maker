@@ -4,6 +4,7 @@
 //! interactive model, history and live brushes live in the webview.
 
 pub mod import;
+pub mod merge;
 
 /// A straight (non-premultiplied) RGBA8 image, row-major, 4 bytes per pixel.
 #[derive(Debug, Clone, PartialEq, Eq)]
