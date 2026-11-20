@@ -15,7 +15,13 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
+use super::files;
 use super::schema::{load_pack, Pack, PackStatus};
+
+/// Longest Title, in characters (SPEC §7).
+pub const MAX_TITLE_CHARS: usize = 64;
+/// Longest Short Name, in characters (SPEC §7).
+pub const MAX_SHORT_NAME_CHARS: usize = 64;
 
 /// Folder of `pack` inside the Library: named after its Short Name. While a
 /// folder rename is pending, the folder may still sit under the old name;
@@ -25,10 +31,15 @@ pub fn pack_dir(library_dir: &Path, pack: &Pack) -> PathBuf {
 }
 
 /// True when the Library already holds a pack with this Short Name,
-/// case-insensitively (the column is COLLATE NOCASE), other than `except`.
+/// other than `except`. Both the Short Name and a pending rename's old name
+/// compare case-insensitively (`COLLATE NOCASE`), because folder names are
+/// case-insensitive on NTFS. A pending folder rename's old
+/// name counts as taken too: its folder still holds that pack's files, and a
+/// new pack adopting it would be wiped by the other pack's deletion.
 fn short_name_taken(conn: &Connection, short_name: &str, except: Option<i64>) -> Result<bool, String> {
     conn.query_row(
-        "SELECT 1 FROM packs WHERE short_name = ?1 AND id IS NOT ?2",
+        "SELECT 1 FROM packs
+             WHERE (short_name = ?1 COLLATE NOCASE OR folder_rename_from = ?1 COLLATE NOCASE) AND id IS NOT ?2",
         params![short_name, except],
         |_| Ok(()),
     )
@@ -62,10 +73,10 @@ fn folder_occupied(dir: &Path) -> String {
 }
 
 /// `base` with a numeric suffix (`cats_2`), shortened so the result stays
-/// within 64 characters without a trailing or doubled underscore.
+/// within the Short Name limit without a trailing or doubled underscore.
 fn with_suffix(base: &str, n: u32) -> String {
     let suffix = format!("_{n}");
-    let keep: String = base.chars().take(64 - suffix.len()).collect();
+    let keep: String = base.chars().take(MAX_SHORT_NAME_CHARS - suffix.len()).collect();
     format!("{}{suffix}", keep.trim_end_matches('_'))
 }
 
@@ -257,6 +268,21 @@ pub fn settle_pack_folder(conn: &Connection, library_dir: &Path, pack_id: i64) -
     load_pack(conn, pack_id)
 }
 
+/// Bring a pack's folder up to date before touching its files: finish a
+/// pending folder rename, recreate the folder if it was deleted outside the
+/// app (its stickers then read as Missing and can be replaced), then roll
+/// forward a pending rename plan and sweep stray pre-commit temps. Shared by
+/// the sticker operations and desync detection.
+pub(super) fn open_pack_files(conn: &Connection, library_dir: &Path, pack_id: i64) -> Result<(Pack, PathBuf), String> {
+    let pack = settle_pack_folder(conn, library_dir, pack_id)?;
+    let dir = pack_dir(library_dir, &pack);
+    if !dir.exists() {
+        fs::create_dir(&dir).map_err(|e| format!("cannot recreate pack folder {}: {e}", dir.display()))?;
+    }
+    files::recover(conn, &dir, pack_id)?;
+    Ok((pack, dir))
+}
+
 /// Toggle Draft/Live, both ways (SPEC §3). The Live→Draft warning is UI
 /// (SPM-3); in v1 status changes only the badge and the Short Name lock.
 pub fn set_status(conn: &Connection, pack_id: i64, status: PackStatus) -> Result<Pack, String> {
@@ -317,14 +343,14 @@ pub fn delete_pack(
     Ok(leftover)
 }
 
-/// Validate a Title: free text, 1–64 characters after trimming (SPEC §7).
+/// Validate a Title: free text, 1–`MAX_TITLE_CHARS` characters after trimming (SPEC §7).
 /// Returns the trimmed Title to store.
 pub fn validate_title(title: &str) -> Result<String, String> {
     let trimmed = title.trim();
     let len = trimmed.chars().count();
-    if len == 0 || len > 64 {
+    if len == 0 || len > MAX_TITLE_CHARS {
         return Err(format!(
-            "Title must be 1–64 characters (got {len}); a Title is always required"
+            "Title must be 1–{MAX_TITLE_CHARS} characters (got {len}); a Title is always required"
         ));
     }
     Ok(trimmed.to_string())
@@ -337,8 +363,8 @@ pub fn validate_short_name(short_name: &str) -> Result<(), String> {
     if short_name.is_empty() {
         return Err("Short Name must not be empty".to_string());
     }
-    if short_name.chars().count() > 64 {
-        return Err("Short Name must be at most 64 characters".to_string());
+    if short_name.chars().count() > MAX_SHORT_NAME_CHARS {
+        return Err(format!("Short Name must be at most {MAX_SHORT_NAME_CHARS} characters"));
     }
     if !short_name.chars().next().unwrap().is_ascii_alphabetic() {
         return Err("Short Name must begin with a letter".to_string());
@@ -400,9 +426,9 @@ pub fn auto_short_name(title: &str) -> String {
     } else if !out.starts_with(|c: char| c.is_ascii_alphabetic()) {
         out = format!("pack_{out}");
     }
-    // Truncate to 64 chars; a trailing underscore from the cut is trimmed.
+    // Truncate to the limit; a trailing underscore from the cut is trimmed.
     // The construction never produces consecutive underscores.
-    let truncated: String = out.chars().take(64).collect();
+    let truncated: String = out.chars().take(MAX_SHORT_NAME_CHARS).collect();
     let short = truncated.trim_end_matches('_').to_string();
     if is_windows_reserved(&short) {
         format!("{short}_pack")
@@ -735,6 +761,22 @@ mod tests {
                 params![new, old, pack_id],
             )
             .unwrap();
+    }
+
+    #[test]
+    fn a_pending_renames_old_name_counts_as_taken() {
+        let mut lib = Lib::new();
+        let a = lib.create("Pack", Some("cats")).unwrap();
+        commit_rename_without_moving(&lib, a.id, "cats", "dogs");
+        // Explicit create is refused; the folder still holds A's files.
+        assert!(lib.create("Other", Some("cats")).unwrap_err().contains("already used"));
+        assert!(lib.create("Other", Some("CATS")).is_err());
+        // Auto-derivation skips past the old name.
+        assert_eq!(lib.create("Cats", None).unwrap().short_name, "cats_2");
+        // Renaming another pack onto it is refused too.
+        let b = lib.create("B", Some("bee")).unwrap();
+        assert!(lib.rename(b.id, "CATS").unwrap_err().contains("already used"));
+        assert_eq!(lib.pack_count(), 3);
     }
 
     #[test]

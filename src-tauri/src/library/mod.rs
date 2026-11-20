@@ -1,9 +1,15 @@
-//! Library lifecycle: fresh creation and intact-library validation.
+//! The Library core: lifecycle (fresh creation, intact-library validation)
+//! here, and the pack and sticker operations in the submodules.
 //!
 //! A Library is an app-managed folder containing the SQLite database
-//! (`library.db`) and one folder per pack (SPEC §3). Pack folders are created
-//! when packs are created (SPM-2/SPM-3); a fresh Library contains only the
-//! database.
+//! (`library.db`) and one folder per pack, named after the pack's Short Name
+//! (SPEC §3).
+//!
+//! - `schema`: domain row types and loaders.
+//! - `packs`: pack lifecycle, Title / Short Name rules, folder renames.
+//! - `stickers`: sticker operations, warnings, and Send to pack.
+//! - `files`: order-encoded names and the crash-safe rename engine.
+//! - `desync`: opening a pack and detecting Missing stickers.
 //!
 //! v1 rules (SPEC §3): re-pointing expects an INTACT Library (database
 //! included); a fresh Library can be created in a new or empty folder; there
@@ -60,7 +66,7 @@ pub fn validate_intact(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Create a fresh Library: folder + database + bootstrap migrations.
+/// Create a fresh Library: folder + database + all migrations.
 /// `dir` must not exist yet, or be an existing EMPTY folder.
 pub fn create_fresh(dir: &Path) -> Result<(), String> {
     if dir.exists() {

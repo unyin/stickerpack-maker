@@ -34,7 +34,8 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
   Short Names are **unique within the Library** (case-insensitive) because each pack's folder
   is named after its Short Name; an auto-derived name that is taken gets a numeric suffix
   (`cats_2`), a typed one is refused. Windows reserved names (`con`, `prn`, `aux`, `nul`,
-  `com0`–`com9`, `lpt0`–`lpt9`) are refused.
+  `com0`–`com9`, `lpt0`–`lpt9`) are refused; an auto-derived name that would be reserved
+  gets a `_pack` suffix (e.g. `con_pack`).
 - **Status**: **Draft** (default for new packs; not yet on Telegram) or **Live** (exists on
   Telegram). v1: manual toggle both ways; Live→Draft shows a warning. Live status otherwise
   changes nothing in v1 beyond the badge and the short-name lock.

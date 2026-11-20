@@ -15,8 +15,8 @@ use serde::Serialize;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::files::{self, has_pending_plan, remove_names, stage_copy, sticker_file_name, Step};
-use super::packs::{pack_dir, settle_pack_folder};
-use super::schema::{load_pack, load_sticker, load_stickers, Format, Pack, Sticker};
+use super::packs::open_pack_files;
+use super::schema::{load_pack, load_sticker, load_stickers, Format, Sticker};
 
 /// Telegram's per-pack sticker cap: exceeding it warns, never blocks.
 pub const MAX_PACK_SIZE: usize = 120;
@@ -47,7 +47,7 @@ pub struct FileError {
 #[derive(Debug, Clone)]
 pub struct NewSticker {
     pub path: PathBuf,
-    pub emoji: String,
+    pub emoji_string: String,
 }
 
 /// Result of `add_stickers`: valid files are added, invalid ones rejected
@@ -66,7 +66,8 @@ pub struct AddOutcome {
 pub struct SendReport {
     pub copied: Vec<Sticker>,
     pub originals_deleted: bool,
-    pub delete_error: Option<String>,
+    /// What did not complete — None when everything finished.
+    pub unfinished: Option<String>,
     pub target_size_warning: Option<Warning>,
 }
 
@@ -82,16 +83,16 @@ pub struct SendFailure {
 /// Number of emoji in an Emoji String, counted as grapheme clusters so a
 /// ZWJ family, a flag, or a skin-toned emoji counts once. Whitespace is not
 /// an emoji and is not counted.
-pub fn emoji_count(emoji: &str) -> usize {
-    emoji
+pub fn emoji_count(emoji_string: &str) -> usize {
+    emoji_string
         .graphemes(true)
         .filter(|g| !g.chars().all(char::is_whitespace))
         .count()
 }
 
 /// Warn when an Emoji String is outside 1-20 emoji (warn only, SPEC §3).
-pub fn emoji_warning(emoji: &str) -> Option<Warning> {
-    let count = emoji_count(emoji);
+pub fn emoji_warning(emoji_string: &str) -> Option<Warning> {
+    let count = emoji_count(emoji_string);
     (count == 0 || count > MAX_EMOJI).then_some(Warning::EmojiCount { count })
 }
 
@@ -151,7 +152,7 @@ struct Slot {
     sticker_id: Option<i64>,
     file: SlotFile,
     format: Format,
-    emoji: String,
+    emoji_string: String,
 }
 
 impl Slot {
@@ -160,7 +161,7 @@ impl Slot {
             sticker_id: Some(sticker.id),
             file: SlotFile::Current(sticker.file_name.clone()),
             format: sticker.format,
-            emoji: sticker.emoji_string.clone(),
+            emoji_string: sticker.emoji_string.clone(),
         }
     }
 }
@@ -227,7 +228,7 @@ fn write_rows(tx: &Transaction, pack_id: i64, slots: &[Slot], deleted: &[Sticker
                 tx.execute(
                     "INSERT INTO stickers (pack_id, position, file_name, format, emoji_string)
                          VALUES (?1, ?2, ?3, ?4, ?5)",
-                    params![pack_id, position, file_name, slot.format.as_str(), slot.emoji],
+                    params![pack_id, position, file_name, slot.format.as_str(), slot.emoji_string],
                 )
                 .map_err(db)?;
             }
@@ -247,25 +248,12 @@ fn write_rows(tx: &Transaction, pack_id: i64, slots: &[Slot], deleted: &[Sticker
     Ok(())
 }
 
-/// Bring a pack's folder up to date before touching its files: finish a
-/// pending folder rename, recreate the folder if it was deleted outside the
-/// app (its stickers then read as Missing and can be replaced), then roll
-/// forward a pending rename plan and sweep stray pre-commit temps. Shared
-/// with desync detection.
-pub(super) fn open_pack_files(conn: &Connection, library_dir: &Path, pack_id: i64) -> Result<(Pack, PathBuf), String> {
-    let pack = settle_pack_folder(conn, library_dir, pack_id)?;
-    let dir = pack_dir(library_dir, &pack);
-    if !dir.exists() {
-        fs::create_dir(&dir).map_err(|e| format!("cannot recreate pack folder {}: {e}", dir.display()))?;
-    }
-    files::recover(conn, &dir, pack_id)?;
-    Ok((pack, dir))
-}
-
 /// Remove staged copies after a failed operation — only when nothing was
 /// committed. After a commit the journal owns them and recovery places
 /// them, so they must stay.
 fn discard_staged(conn: &Connection, dir: &Path, pack_id: i64, staged: &[String]) {
+    // Err means the commit state is unknown. Only a definite "not committed" may delete; when unknown the staged
+    // copies stay, and the next open's recover rolls forward or sweeps them.
     if let Ok(false) = has_pending_plan(conn, pack_id) {
         let _ = remove_names(dir, staged);
     }
@@ -292,16 +280,20 @@ pub fn add_stickers(
 
     let mut rejected = Vec::new();
     let mut staged = Vec::new();
+    let mut staged_names = Vec::new();
     for item in new {
         let copied = validate_sticker_file(&item.path)
             .and_then(|format| stage_copy(&dir, &item.path).map(|temp| (temp, format)));
         match copied {
-            Ok((temp, format)) => staged.push(Slot {
-                sticker_id: None,
-                file: SlotFile::Staged(temp),
-                format,
-                emoji: item.emoji.clone(),
-            }),
+            Ok((temp, format)) => {
+                staged_names.push(temp.clone());
+                staged.push(Slot {
+                    sticker_id: None,
+                    file: SlotFile::Staged(temp),
+                    format,
+                    emoji_string: item.emoji_string.clone(),
+                });
+            }
             Err(reason) => rejected.push(FileError { path: item.path.clone(), reason }),
         }
     }
@@ -309,13 +301,6 @@ pub fn add_stickers(
     if added_count == 0 {
         return Ok(AddOutcome { added: Vec::new(), rejected, pack_size_warning: None });
     }
-    let staged_names: Vec<String> = staged
-        .iter()
-        .filter_map(|slot| match &slot.file {
-            SlotFile::Staged(name) => Some(name.clone()),
-            SlotFile::Current(_) => None,
-        })
-        .collect();
 
     let insert_index = (at - 1) as usize;
     let mut slots: Vec<Slot> = existing.iter().map(Slot::keep).collect();
@@ -391,11 +376,11 @@ pub fn delete_stickers(
 
 /// Set a sticker's Emoji String exactly as given (one-click copy must
 /// reproduce it). Never blocks: check `emoji_warning` for the 1-20 rule.
-pub fn set_emoji(conn: &Connection, sticker_id: i64, emoji: &str) -> Result<Sticker, String> {
+pub fn set_emoji_string(conn: &Connection, sticker_id: i64, emoji_string: &str) -> Result<Sticker, String> {
     let changed = conn
         .execute(
             "UPDATE stickers SET emoji_string = ?1 WHERE id = ?2",
-            params![emoji, sticker_id],
+            params![emoji_string, sticker_id],
         )
         .map_err(|e| format!("cannot update sticker {sticker_id}: {e}"))?;
     if changed == 0 {
@@ -427,7 +412,7 @@ pub fn replace_sticker_file(
         .iter()
         .map(|s| {
             if s.id == sticker_id {
-                Slot { sticker_id: Some(s.id), file: SlotFile::Staged(temp.clone()), format, emoji: s.emoji_string.clone() }
+                Slot { sticker_id: Some(s.id), file: SlotFile::Staged(temp.clone()), format, emoji_string: s.emoji_string.clone() }
             } else {
                 Slot::keep(s)
             }
@@ -446,13 +431,34 @@ impl From<String> for SendFailure {
     }
 }
 
+/// Final-state report when the copies are committed but listing them failed
+/// (SPEC §5, ADR-0004): originals are kept, nothing more is attempted.
+fn saved_but_unlisted(read_err: &str) -> SendReport {
+    SendReport {
+        copied: vec![],
+        originals_deleted: false,
+        target_size_warning: None,
+        unfinished: Some(format!(
+            "the copies are saved but could not be listed ({read_err}); reopen the target pack to see them; originals were kept"
+        )),
+    }
+}
+
+/// The stickers a pack gained after its first `before`, plus its size warning.
+fn copied_since(conn: &Connection, pack_id: i64, before: usize) -> Result<(Vec<Sticker>, Option<Warning>), String> {
+    let all = load_stickers(conn, pack_id)?;
+    let warning = pack_size_warning(all.len());
+    Ok((all[before..].to_vec(), warning))
+}
+
 /// Send stickers to another pack (SPEC §5): the unified Duplicate/Move.
 /// Two-phase: (1) copy and byte-verify EVERY selected sticker into the
 /// target — any failure rolls back all copies and changes nothing; (2)
 /// append the copies at the target's end in source order with their Emoji
 /// Strings, then — only if `delete_originals` — delete the originals and
 /// renumber the source. Missing stickers block the send. A delete-phase
-/// failure is reported in the `SendReport` (copies are safe), never silent.
+/// failure, or a target append that committed but did not finish, is
+/// reported in the `SendReport` (copies are safe), never silent.
 pub fn send_to_pack(
     conn: &mut Connection,
     library_dir: &Path,
@@ -506,32 +512,59 @@ pub fn send_to_pack(
         sticker_id: None,
         file: SlotFile::Staged(temp.clone()),
         format: s.format,
-        emoji: s.emoji_string.clone(),
+        emoji_string: s.emoji_string.clone(),
     }));
     if let Err(e) = apply_new_order(conn, &target_dir, target_pack_id, &slots, &[], &[]) {
-        let committed = has_pending_plan(conn, target_pack_id).unwrap_or(false);
-        discard_staged(conn, &target_dir, target_pack_id, &staged);
-        let message = if committed {
-            format!("{e}; the copies are saved and finish the next time the target pack is opened; originals were kept")
-        } else {
-            format!("{e}; nothing was changed")
+        let unfinished = match has_pending_plan(conn, target_pack_id) {
+            Ok(false) => {
+                let _ = remove_names(&target_dir, &staged);
+                return Err(format!("{e}; nothing was changed").into());
+            }
+            // Committed: the copies stand and finish the next time the target
+            // pack is opened (ADR-0004), so this is a report, not a failure.
+            Ok(true) => format!(
+                "{e}; the copies are saved and finish the next time the target pack is opened; originals were kept"
+            ),
+            // Unknown: staged copies are kept; reopening the target recovers.
+            Err(_) => format!(
+                "{e}; could not confirm whether the change was saved - reopen the target pack to check; originals were kept"
+            ),
         };
-        return Err(message.into());
+        return Ok(match copied_since(conn, target_pack_id, target_existing.len()) {
+            Ok((copied, target_size_warning)) => {
+                SendReport { copied, originals_deleted: false, unfinished: Some(unfinished), target_size_warning }
+            }
+            Err(read_err) => SendReport {
+                copied: vec![],
+                originals_deleted: false,
+                target_size_warning: None,
+                unfinished: Some(format!("{unfinished}; the copies could not be listed ({read_err})")),
+            },
+        });
     }
-    let target_all = load_stickers(conn, target_pack_id)?;
-    let copied = target_all[target_existing.len()..].to_vec();
-    let target_size_warning = pack_size_warning(target_all.len());
+    let (copied, target_size_warning) = match copied_since(conn, target_pack_id, target_existing.len()) {
+        Ok(listed) => listed,
+        // Committed but unreportable: skip the delete phase (SPEC §5, ADR-0004).
+        Err(read_err) => return Ok(saved_but_unlisted(&read_err)),
+    };
 
     // Phase 2b: delete originals and renumber the source.
-    let (originals_deleted, delete_error) = if delete_originals {
+    let (originals_deleted, unfinished) = if delete_originals {
         let slots: Vec<Slot> = kept.iter().map(Slot::keep).collect();
         match apply_new_order(conn, &source_dir, source_pack_id, &slots, &selected, &[]) {
             Ok(()) => (true, None),
             Err(e) => {
-                if has_pending_plan(conn, source_pack_id).unwrap_or(false) {
-                    (true, Some(format!("{e}; the deletion is saved and finishes the next time the pack is opened")))
-                } else {
-                    (false, Some(format!("{e}; the originals were kept")))
+                match has_pending_plan(conn, source_pack_id) {
+                    Ok(true) => {
+                        (true, Some(format!("{e}; the deletion is saved and finishes the next time the pack is opened")))
+                    }
+                    Ok(false) => (false, Some(format!("{e}; the originals were kept"))),
+                    Err(_) => (
+                        false,
+                        Some(format!(
+                            "{e}; could not confirm whether the change was saved - reopen the pack to check"
+                        )),
+                    ),
                 }
             }
         }
@@ -539,7 +572,7 @@ pub fn send_to_pack(
         (false, None)
     };
 
-    Ok(SendReport { copied, originals_deleted, delete_error, target_size_warning })
+    Ok(SendReport { copied, originals_deleted, unfinished, target_size_warning })
 }
 
 #[cfg(test)]
@@ -599,7 +632,7 @@ mod tests {
         }
 
         fn new_sticker(&self, name: &str, tag: &str, emoji: &str) -> NewSticker {
-            NewSticker { path: self.source(name, tag), emoji: emoji.to_string() }
+            NewSticker { path: self.source(name, tag), emoji_string: emoji.to_string() }
         }
 
         fn add(&mut self, pack_id: i64, items: &[NewSticker], at: Option<i64>) -> Result<AddOutcome, String> {
@@ -779,7 +812,7 @@ mod tests {
         fs::write(&gif, b"GIF89a").unwrap();
         let items = [
             lib.new_sticker("one.png", "1", ""),
-            NewSticker { path: gif.clone(), emoji: String::new() },
+            NewSticker { path: gif.clone(), emoji_string: String::new() },
             lib.new_sticker("two.png", "2", ""),
         ];
         let outcome = lib.add(pack.id, &items, None).unwrap();
@@ -814,6 +847,41 @@ mod tests {
         let outcome = lib.add(pack.id, &[lib.new_sticker("x.png", "X", "")], None).unwrap();
         assert_eq!(outcome.pack_size_warning, Some(Warning::PackSize { count: 121 }));
         assert_eq!(outcome.added[0].file_name, "121.png");
+        lib.assert_consistent(pack.id);
+    }
+
+    #[test]
+    fn add_refuses_when_a_foreign_file_sits_on_the_new_name() {
+        // 002.png was renamed to 004.png outside the app; appending would
+        // commit 004.png over it and wedge every later recovery.
+        let mut lib = Lib::new();
+        let pack = lib.pack("p");
+        lib.seed(pack.id, &["A", "B", "C"]);
+        let dir = lib.dir_of(pack.id);
+        fs::rename(dir.join("002.png"), dir.join("004.png")).unwrap();
+        let snapshot = |lib: &Lib| -> Vec<(i64, i64, String)> {
+            load_stickers(&lib.conn, pack.id)
+                .unwrap()
+                .into_iter()
+                .map(|s| (s.id, s.position, s.file_name))
+                .collect()
+        };
+        let before = snapshot(&lib);
+        let err = lib.add(pack.id, &[lib.new_sticker("n.png", "N", "")], None).unwrap_err();
+        assert!(err.contains("004.png") && err.contains("outside the app"), "unexpected error: {err}");
+        assert!(!crate::library::files::has_pending_plan(&lib.conn, pack.id).unwrap());
+        assert_eq!(snapshot(&lib), before);
+        let mut names: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["001.png", "003.png", "004.png"], "staged temps must be gone");
+        assert_eq!(tag_of(&fs::read(dir.join("004.png")).unwrap()), "B", "foreign file untouched");
+        // Once the owner moves the file away, the add goes through.
+        fs::remove_file(dir.join("004.png")).unwrap();
+        lib.add(pack.id, &[lib.new_sticker("n.png", "N", "")], None).unwrap();
+        assert_eq!(lib.tags(pack.id), vec![Some("A".into()), None, Some("C".into()), Some("N".into())]);
         lib.assert_consistent(pack.id);
     }
 
@@ -901,11 +969,11 @@ mod tests {
         let mut lib = Lib::new();
         let pack = lib.pack("p");
         let s = lib.seed(pack.id, &["A"]);
-        let edited = set_emoji(&lib.conn, s[0].id, "👨‍👩‍👧🎉").unwrap();
+        let edited = set_emoji_string(&lib.conn, s[0].id, "👨‍👩‍👧🎉").unwrap();
         assert_eq!(edited.emoji_string, "👨‍👩‍👧🎉");
         assert_eq!(emoji_warning(&edited.emoji_string), None);
-        assert_eq!(set_emoji(&lib.conn, s[0].id, "").unwrap().emoji_string, "");
-        assert!(set_emoji(&lib.conn, 999, "😀").is_err());
+        assert_eq!(set_emoji_string(&lib.conn, s[0].id, "").unwrap().emoji_string, "");
+        assert!(set_emoji_string(&lib.conn, 999, "😀").is_err());
     }
 
     // ---- Replace ----
@@ -967,13 +1035,13 @@ mod tests {
         // Selection order does not matter: copies follow source order.
         let report = send_to_pack(&mut lib.conn, lib.dir.path(), &[s[2].id, s[0].id], dst.id, false).unwrap();
         assert!(!report.originals_deleted);
-        assert_eq!(report.delete_error, None);
+        assert_eq!(report.unfinished, None);
         assert_eq!(report.copied.len(), 2);
         assert_eq!(lib.tags(dst.id), some(&["X", "A", "C"]));
         assert_eq!(lib.emojis(dst.id), ["X", "A", "C"]);
         assert_eq!(lib.tags(src.id), some(&["A", "B", "C"]));
         // Independent copies (ADR-0002): editing one leaves the other alone.
-        set_emoji(&lib.conn, report.copied[0].id, "✏️").unwrap();
+        set_emoji_string(&lib.conn, report.copied[0].id, "✏️").unwrap();
         assert_eq!(load_sticker(&lib.conn, s[0].id).unwrap().emoji_string, "A");
         lib.assert_consistent(src.id);
         lib.assert_consistent(dst.id);
@@ -987,7 +1055,7 @@ mod tests {
         let s = lib.seed(src.id, &["A", "B", "C", "D"]);
         let report = send_to_pack(&mut lib.conn, lib.dir.path(), &[s[0].id, s[2].id], dst.id, true).unwrap();
         assert!(report.originals_deleted);
-        assert_eq!(report.delete_error, None);
+        assert_eq!(report.unfinished, None);
         assert_eq!(lib.tags(dst.id), some(&["A", "C"]));
         // No gaps and no false Missing in the source afterwards.
         assert_eq!(lib.tags(src.id), some(&["B", "D"]));
@@ -1063,13 +1131,50 @@ mod tests {
         let report = result.unwrap();
         assert_eq!(report.copied.len(), 1);
         assert_eq!(lib.tags(dst.id), some(&["A"]));
-        let error = report.delete_error.expect("delete failure must be reported");
+        let error = report.unfinished.expect("delete failure must be reported");
         // The deletion committed before the files moved: it stands and
         // completes on the next pack open (ADR-0004 roll-forward).
         assert!(report.originals_deleted, "{error}");
         crate::library::files::recover(&lib.conn, &src_dir, src.id).unwrap();
         assert_eq!(lib.tags(src.id), some(&["B", "C"]));
         lib.assert_consistent(src.id);
+    }
+
+    #[test]
+    fn a_delete_phase_refused_before_commit_keeps_the_originals() {
+        let mut lib = Lib::new();
+        let src = lib.pack("src");
+        let dst = lib.pack("dst");
+        let items = [
+            lib.new_sticker("a.png", "A", "A"),
+            lib.new_sticker("b.webp", "B", "B"),
+            lib.new_sticker("c.png", "C", "C"),
+        ];
+        let s = lib.add(src.id, &items, None).unwrap().added;
+        // Deleting 001.png renumbers 002.webp to 001.webp, which a foreign
+        // file occupies: the pre-commit guard refuses the whole plan.
+        let src_dir = lib.dir_of(src.id);
+        let foreign = src_dir.join("001.webp");
+        fs::write(&foreign, b"foreign").unwrap();
+
+        let report = send_to_pack(&mut lib.conn, lib.dir.path(), &[s[0].id], dst.id, true).unwrap();
+        assert_eq!(report.copied.len(), 1);
+        assert!(!report.originals_deleted);
+        let unfinished = report.unfinished.expect("refusal must be reported");
+        assert!(unfinished.contains("originals were kept"), "{unfinished}");
+        assert_eq!(lib.tags(dst.id), some(&["A"]));
+        lib.assert_consistent(dst.id);
+
+        let names: Vec<String> =
+            load_stickers(&lib.conn, src.id).unwrap().into_iter().map(|s| s.file_name).collect();
+        assert_eq!(names, ["001.png", "002.webp", "003.png"]);
+        assert!(!crate::library::files::has_pending_plan(&lib.conn, src.id).unwrap());
+        assert_eq!(fs::read(&foreign).unwrap(), b"foreign");
+        for entry in fs::read_dir(&src_dir).unwrap() {
+            let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+            assert!(!is_temp(&name), "leftover temp {name}");
+        }
+        assert_eq!(fs::read_dir(&src_dir).unwrap().count(), 4);
     }
 
     // ---- Pending folder renames ----

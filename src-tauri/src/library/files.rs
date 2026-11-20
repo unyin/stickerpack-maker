@@ -119,7 +119,9 @@ pub fn remove_names(pack_dir: &Path, names: &[String]) -> Result<(), String> {
     }
 }
 
-fn load_journal(conn: &Connection, pack_id: i64) -> Result<Option<(Vec<Step>, i64)>, String> {
+/// A pending journal: its plan, and whether phase 1 (vacate) is confirmed
+/// complete (the `phase` column is 1).
+fn load_journal(conn: &Connection, pack_id: i64) -> Result<Option<(Vec<Step>, bool)>, String> {
     let row: Option<(String, i64)> = conn
         .query_row(
             "SELECT plan, phase FROM rename_journal WHERE pack_id = ?1",
@@ -131,7 +133,7 @@ fn load_journal(conn: &Connection, pack_id: i64) -> Result<Option<(Vec<Step>, i6
     match row {
         None => Ok(None),
         Some((json, phase)) => serde_json::from_str(&json)
-            .map(|steps| Some((steps, phase)))
+            .map(|steps| Some((steps, phase != 0)))
             .map_err(|e| format!("rename journal of pack {pack_id} is corrupt: {e}")),
     }
 }
@@ -179,7 +181,7 @@ fn tampered(path: &Path) -> String {
 
 /// Phase boundaries where a crash can be simulated in tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FaultPoint {
+pub(crate) enum FaultPoint {
     AfterCommit,
     AfterPhase1,
     AfterPhase1Marked,
@@ -206,7 +208,7 @@ pub fn apply_plan(
 /// Crash-simulation seam (tests only in spirit): `fault` is invoked at each
 /// phase boundary and may abort the engine, leaving the committed journal
 /// for `recover` to roll forward — exactly what a process death would do.
-pub fn apply_plan_with_fault(
+pub(crate) fn apply_plan_with_fault(
     conn: &mut Connection,
     pack_dir: &Path,
     pack_id: i64,
@@ -223,6 +225,23 @@ pub fn apply_plan_with_fault(
         mutate(&tx)?;
         tx.commit().map_err(|e| format!("cannot commit: {e}"))?;
         return Ok(());
+    }
+
+    // Pre-commit guard: a target name the plan does not vacate must be free.
+    // A file the owner put there would make phase 2 fail as `tampered` after
+    // the commit, on every later recovery too, wedging the pack.
+    for step in steps {
+        let Some(to) = &step.to else { continue };
+        let vacated = steps.iter().any(|other| other.from == *to);
+        let target = pack_dir.join(to);
+        if !vacated && target.exists() {
+            return Err(format!(
+                "{} is in the way: a file was put or renamed there outside the app (it may \
+                 be one of this pack's Missing stickers). Rename it back or move it out of \
+                 the pack folder, then try again.",
+                target.display()
+            ));
+        }
     }
 
     // The decision point: journal + final row state commit together.
@@ -246,17 +265,7 @@ pub fn apply_plan_with_fault(
     // Phase 1 — vacate: every source moves to its deterministic temp, so no
     // final name is occupied when phase 2 places files (collision-free even
     // for swaps). Absent sources (Missing slots) are skipped.
-    for (i, step) in steps.iter().enumerate() {
-        let from = pack_dir.join(&step.from);
-        let temp = pack_dir.join(temp_name(i));
-        if from.exists() {
-            if temp.exists() {
-                return Err(tampered(&temp));
-            }
-            fs::rename(&from, &temp)
-                .map_err(|e| format!("cannot rename {} to temp: {e}", from.display()))?;
-        }
-    }
+    vacate(pack_dir, steps)?;
     fault(FaultPoint::AfterPhase1)?;
 
     // Mark phase 1 complete BEFORE any placement: from here on, an original
@@ -271,6 +280,38 @@ pub fn apply_plan_with_fault(
 
     // Phase 2 — place: temps become finals (or are unlinked), in plan order
     // so delete steps vacate names before placements that reuse them.
+    place(pack_dir, steps, |i| fault(FaultPoint::Phase2Step(i)))?;
+
+    fault(FaultPoint::BeforeJournalCleanup)?;
+    clear_journal(conn, pack_id)?;
+    Ok(())
+}
+
+/// Phase 1: move every step's source (if present) to its deterministic
+/// temp. Absent sources are skipped; an existing temp is tampering.
+fn vacate(pack_dir: &Path, steps: &[Step]) -> Result<(), String> {
+    for (i, step) in steps.iter().enumerate() {
+        let from = pack_dir.join(&step.from);
+        let temp = pack_dir.join(temp_name(i));
+        if from.exists() {
+            if temp.exists() {
+                return Err(tampered(&temp));
+            }
+            fs::rename(&from, &temp)
+                .map_err(|e| format!("cannot rename {} to temp: {e}", from.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Phase 2: turn each remaining temp into its final name, or unlink it for
+/// a delete, in plan order. An absent temp means the step already finished
+/// (or its source was Missing). `after_each(i)` runs after step `i`.
+fn place(
+    pack_dir: &Path,
+    steps: &[Step],
+    mut after_each: impl FnMut(usize) -> Result<(), String>,
+) -> Result<(), String> {
     for (i, step) in steps.iter().enumerate() {
         let temp = pack_dir.join(temp_name(i));
         if temp.exists() {
@@ -289,11 +330,8 @@ pub fn apply_plan_with_fault(
                 }
             }
         }
-        fault(FaultPoint::Phase2Step(i))?;
+        after_each(i)?;
     }
-
-    fault(FaultPoint::BeforeJournalCleanup)?;
-    clear_journal(conn, pack_id)?;
     Ok(())
 }
 
@@ -311,47 +349,17 @@ pub fn recover(conn: &Connection, pack_dir: &Path, pack_id: i64) -> Result<(), S
 /// `apply_plan` runs it after the caller has staged copies for this very
 /// plan, and those staged temps must survive until the plan adopts them.
 fn roll_forward(conn: &Connection, pack_dir: &Path, pack_id: i64) -> Result<(), String> {
-    if let Some((steps, phase)) = load_journal(conn, pack_id)? {
-        // Pass A: complete phase 1 for any source still under its old name —
-        // only while phase 1 is unconfirmed. Once phase 2 has placed files,
-        // an original name can be legitimately occupied again, and every
+    if let Some((steps, phase1_done)) = load_journal(conn, pack_id)? {
+        // Complete phase 1 for any source still under its old name — only
+        // while phase 1 is unconfirmed. Once phase 2 has placed files, an
+        // original name can be legitimately occupied again, and every
         // original was already vacated (phase 1 runs to completion first).
-        if phase == 0 {
-            for (i, step) in steps.iter().enumerate() {
-                let from = pack_dir.join(&step.from);
-                let temp = pack_dir.join(temp_name(i));
-                if from.exists() {
-                    if temp.exists() {
-                        return Err(tampered(&temp));
-                    }
-                    fs::rename(&from, &temp)
-                        .map_err(|e| format!("cannot rename {} to temp: {e}", from.display()))?;
-                }
-            }
+        if !phase1_done {
+            vacate(pack_dir, &steps)?;
         }
-        // Pass B: complete phase 2 for any remaining temp. An absent temp
-        // means the step already finished — or its source was Missing, in
-        // which case the slot stays file-less (genuine Missing, not an error).
-        for (i, step) in steps.iter().enumerate() {
-            let temp = pack_dir.join(temp_name(i));
-            if !temp.exists() {
-                continue;
-            }
-            match &step.to {
-                Some(to) => {
-                    let dest = pack_dir.join(to);
-                    if dest.exists() {
-                        return Err(tampered(&dest));
-                    }
-                    fs::rename(&temp, &dest)
-                        .map_err(|e| format!("cannot rename temp to {}: {e}", dest.display()))?;
-                }
-                None => {
-                    fs::remove_file(&temp)
-                        .map_err(|e| format!("cannot delete {}: {e}", temp.display()))?;
-                }
-            }
-        }
+        // Complete phase 2 for any remaining temp (absent = already done, or
+        // a Missing source whose slot stays file-less).
+        place(pack_dir, &steps, |_| Ok(()))?;
         clear_journal(conn, pack_id)?;
     }
     Ok(())
@@ -677,6 +685,39 @@ mod tests {
         assert_eq!(h.read("003.png").as_deref(), Some("B"));
         assert_eq!(h.journal_count(), 0);
         assert!(h.names().iter().all(|n| !is_temp(n)));
+    }
+
+    #[test]
+    fn plan_refuses_a_target_name_occupied_by_a_foreign_file() {
+        // Pack has 001-002; a file the plan does not vacate sits on 003.png.
+        let mut h = Harness::new(&[("001.png", "A"), ("002.png", "B")]);
+        fs::write(h.path().join("003.png"), "foreign").unwrap();
+        let src = h.dir.path().join("source.png");
+        fs::write(&src, "N").unwrap();
+        let staged = stage_copy(h.path(), &src).unwrap();
+        let Harness { dir, conn } = &mut h;
+        let err = apply_plan(conn, dir.path(), 1, &[Step::rename(staged.clone(), "003.png")], |tx| {
+            exec(
+                tx,
+                "INSERT INTO stickers (id, pack_id, position, file_name, format)
+                     VALUES (3, 1, 3, '003.png', 'png')",
+            )
+        })
+        .unwrap_err();
+        assert!(err.contains("003.png") && err.contains("outside the app"), "unexpected error: {err}");
+        assert_eq!(h.journal_count(), 0);
+        assert_eq!(h.rows().len(), 2);
+        assert_eq!(h.read("003.png").as_deref(), Some("foreign"));
+        assert_eq!(h.read(&staged).as_deref(), Some("N"), "staged copy is the caller's to discard");
+    }
+
+    #[test]
+    fn plan_may_target_a_name_it_vacates() {
+        // The rotation targets only names that are also sources: allowed.
+        let mut h = four_files();
+        let Harness { dir, conn } = &mut h;
+        apply_plan(conn, dir.path(), 1, &rotation_plan(), rotation_mutate).unwrap();
+        assert_rotation_final(&h);
     }
 
     #[test]

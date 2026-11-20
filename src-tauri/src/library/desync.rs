@@ -6,8 +6,9 @@ use std::path::Path;
 use rusqlite::Connection;
 use serde::Serialize;
 
+use super::packs::open_pack_files;
 use super::schema::{load_stickers, Pack, Sticker};
-use super::stickers::{emoji_warning, open_pack_files, pack_size_warning, Warning};
+use super::stickers::{emoji_warning, pack_size_warning, Warning};
 
 /// A sticker as the pack view shows it.
 #[derive(Debug, Clone, Serialize)]
@@ -94,7 +95,7 @@ mod tests {
                 .map(|t| {
                     let path = self.sources.path().join(format!("{t}.png"));
                     fs::write(&path, [b"\x89PNG\r\n\x1a\n".as_slice(), t.as_bytes()].concat()).unwrap();
-                    NewSticker { path, emoji: t.to_string() }
+                    NewSticker { path, emoji_string: t.to_string() }
                 })
                 .collect();
             add_stickers(&mut self.conn, self.dir.path(), pack.id, &items, None).unwrap();
