@@ -126,7 +126,7 @@ pub fn repoint_library(
 // ---- Editor (ADR-0005: one-shot pixel work in Rust) ----
 
 /// Header-only probe of an import candidate: displayed size and whether it
-/// exceeds the 2000x2000 cap (the UI then asks to scale or cancel).
+/// exceeds the import cap (the UI then asks to scale or cancel).
 #[tauri::command(async)]
 pub fn editor_probe_image(path: String) -> Result<editor::import::ImageInfo, String> {
     editor::import::probe(&PathBuf::from(path))
@@ -134,7 +134,7 @@ pub fn editor_probe_image(path: String) -> Result<editor::import::ImageInfo, Str
 
 /// Decode an image for the Editor and return it as a binary frame (u32 LE
 /// width, u32 LE height, straight RGBA8) — raw bytes, never JSON.
-/// `scale_to_fit` is the owner's OK in the 2000x2000 cap dialog.
+/// `scale_to_fit` is the owner's OK in the import cap dialog.
 #[tauri::command(async)]
 pub fn editor_import_image(path: String, scale_to_fit: bool) -> Result<tauri::ipc::Response, String> {
     let image = editor::import::import(&PathBuf::from(path), scale_to_fit)?;

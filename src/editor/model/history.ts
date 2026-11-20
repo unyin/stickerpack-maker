@@ -9,7 +9,7 @@ export interface HistoryOptions<S> {
   buffersOf: (state: S) => Iterable<ArrayBufferLike>;
 }
 
-/** Default budget: room for ~32 full repaints of a 2000x2000 layer. */
+/** Default budget: room for ~32 full repaints of a layer at the import cap (IMPORT_MAX_SIDE square). */
 export const DEFAULT_HISTORY_BUDGET = 512 * 1024 * 1024;
 
 export class History<S> {

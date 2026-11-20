@@ -8,11 +8,13 @@ import { baseName } from "../api";
 import { IMPORT_MAX_SIDE, importImage, mergeImages, pickImageFile, probeImage } from "../editor/api";
 import {
   addRasterLayer,
+  centeredPlacement,
   deleteLayers,
   fitToBox,
   IDENTITY,
-  resizeSideProblem,
   layerIndex,
+  resizeLongestSide,
+  resizeSideProblem,
   mergeLayers,
   moveLayer,
   newDocument,
@@ -22,9 +24,9 @@ import {
   type Doc,
   type Rect,
 } from "../editor/model/document";
-import { MAX_SIDE, type RgbaImage } from "../editor/model/image";
+import type { RgbaImage } from "../editor/model/image";
 import { EditorSession } from "../editor/model/session";
-import { centeredPlacement, deleteBlocker, mergeBlocker, selectModeFor, sizeToolBlocker, type SizeTool } from "../editor/view/geometry";
+import { deleteBlocker, mergeBlocker, selectModeFor, sizeToolBlocker, type SizeTool } from "../editor/view/geometry";
 import { EditorStage } from "../editor/view/stage";
 import { el, errorMessage, withMessage } from "../ui";
 
@@ -61,7 +63,7 @@ function buildEditor(): HTMLElement {
     class: "editor-side-input",
     type: "number",
     min: "1",
-    max: String(MAX_SIDE),
+    max: String(IMPORT_MAX_SIDE),
     step: "1",
     placeholder: "px",
     "aria-label": "Longest side in pixels",
@@ -81,7 +83,9 @@ function buildEditor(): HTMLElement {
     "the canvas becomes 512×512 with transparent padding";
   const longestTitle =
     "Scale everything on the canvas together so its longest side is 512 px; the canvas becomes the image (no padding)";
-  const resizeTitle = `Scale everything on the canvas together so its longest side is the entered size (1–${MAX_SIDE} px)`;
+  const resizeTitle =
+    `Scale everything on the canvas together so its longest side is the entered size (1–${IMPORT_MAX_SIDE} px); ` +
+    "the canvas size stays";
   fitButton.title = fitTitle;
   longestButton.title = longestTitle;
   resizeButton.title = resizeTitle;
@@ -148,7 +152,7 @@ function buildEditor(): HTMLElement {
     }
   }
 
-  /** Pick an image and decode it, asking first when it exceeds 2000×2000. */
+  /** Pick an image and decode it, asking first when it exceeds the import cap. */
   async function pickAndImport(): Promise<{ image: RgbaImage; name: string } | null> {
     const path = await pickImageFile();
     if (!path) return null;
@@ -250,7 +254,7 @@ function buildEditor(): HTMLElement {
     return sideInput.value.trim() === "" ? NaN : Number(sideInput.value);
   }
 
-  /** Sizing tool 3 (SPEC §6): free resize, the entered value is the longest side. */
+  /** Sizing tool 3 (SPEC §6): free resize, the entered value is the longest side; the canvas stays. */
   function freeResize(): void {
     const side = enteredSide();
     const problem = resizeSideProblem(side);
@@ -258,7 +262,7 @@ function buildEditor(): HTMLElement {
       message.textContent = problem;
       return;
     }
-    resizeWholeImage((doc, content) => scaleLongestSide(doc, content, side));
+    resizeWholeImage((doc, content) => resizeLongestSide(doc, content, side));
   }
 
   /** Delete the selected layers as one undoable step (SPEC §6); one layer always stays. */

@@ -1,10 +1,9 @@
 // Pure decisions behind the Editor view (src/editor/view/geometry.ts):
 // fitting, zooming, placement, merge eligibility, click modifiers.
 import { expect, test } from "bun:test";
-import type { RgbaImage } from "../src/editor/model/image";
+import { IMPORT_MAX_SIDE, type RgbaImage } from "../src/editor/model/image";
 import { addRasterLayer, addTextLayer, fitToBox, newDocument, scaleLongestSide } from "../src/editor/model/document";
 import {
-  centeredPlacement,
   deleteBlocker,
   fitView,
   MAX_ZOOM,
@@ -47,21 +46,6 @@ test("zoomAround keeps the point under the pointer fixed and clamps", () => {
   expect(zoomAround({ scale: MIN_ZOOM, x: 0, y: 0 }, pointer, 1).scale).toBe(MIN_ZOOM);
 });
 
-test("an added image is centred on the document at its own size", () => {
-  const doc = newDocument(image(100, 80), "base");
-  expect(centeredPlacement(doc, image(20, 10))).toEqual({
-    x: 40,
-    y: 35,
-    scaleX: 1,
-    scaleY: 1,
-    rotation: 0,
-  });
-  // Larger than the document: still centred (it overhangs evenly).
-  expect(centeredPlacement(doc, image(200, 80)).x).toBe(-50);
-  // Odd differences land on whole pixels.
-  expect(centeredPlacement(doc, image(21, 11))).toMatchObject({ x: 40, y: 35 });
-});
-
 test("merge needs two or more selected raster layers, and says why not", () => {
   let doc = newDocument(image(10, 10), "base");
   doc = addRasterLayer(doc, image(2, 2), "cutout");
@@ -100,7 +84,7 @@ test("sizeToolBlocker explains each disabled sizing tool", () => {
   expect(sizeToolBlocker("longest", doc, content, NaN)).toBeNull();
   expect(sizeToolBlocker("free", doc, content, 400)).toBeNull();
   expect(sizeToolBlocker("free", doc, content, NaN)).toBe(
-    "The longest side must be a whole number of pixels from 1 to 2000.",
+    `The longest side must be a whole number of pixels from 1 to ${IMPORT_MAX_SIDE}.`,
   );
   expect(sizeToolBlocker("free", doc, content, 300)).toBe("The image's longest side is already 300 px.");
   const fitted = fitToBox(doc, content, 512);

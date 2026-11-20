@@ -1,7 +1,7 @@
 // The Editor document (ADR-0005): an immutable value. Every operation
 // returns a new Doc and reuses every layer (and pixel buffer) it did not
 // change, so history can keep whole states cheaply. No Konva, no DOM.
-import { MAX_SIDE, type RgbaImage } from "./image";
+import { IMPORT_MAX_SIDE, type RgbaImage } from "./image";
 
 /** Transform of a layer in document pixels; rotation in degrees (Konva's convention). */
 export interface Transform {
@@ -53,13 +53,36 @@ export interface Doc {
   readonly nextId: number;
 }
 
-/** A fresh document sized to the imported image (SPEC §6: canvas fits image). */
-export function newDocument(image: RgbaImage, name: string): Doc {
+/** A canvas size in document pixels. */
+export interface Size {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * A fresh document: the canvas starts at `canvas` (512×512 for stickers,
+ * SPEC §6), never sized to the image, and the image sits on it at its
+ * native size, centred, free to overflow.
+ */
+export function newDocument(
+  image: RgbaImage,
+  name: string,
+  canvas: Size = { width: STICKER_SIDE, height: STICKER_SIDE },
+): Doc {
   return {
-    width: image.width,
-    height: image.height,
-    layers: [{ kind: "raster", id: "layer-1", name, transform: IDENTITY, image }],
+    width: canvas.width,
+    height: canvas.height,
+    layers: [{ kind: "raster", id: "layer-1", name, transform: centeredPlacement(canvas, image), image }],
     nextId: 2,
+  };
+}
+
+/** Where an opened or added image goes: native size, centred on the canvas, on whole pixels. */
+export function centeredPlacement(canvas: Size, image: RgbaImage): Transform {
+  return {
+    ...IDENTITY,
+    x: Math.round((canvas.width - image.width) / 2),
+    y: Math.round((canvas.height - image.height) / 2),
   };
 }
 
@@ -207,9 +230,9 @@ const PIXEL_SNAP = 1e-3;
 
 /** Why `value` is not a valid free-resize longest side, or null when it is (SPEC §6). */
 export function resizeSideProblem(value: number): string | null {
-  return Number.isInteger(value) && value >= 1 && value <= MAX_SIDE
+  return Number.isInteger(value) && value >= 1 && value <= IMPORT_MAX_SIDE
     ? null
-    : `The longest side must be a whole number of pixels from 1 to ${MAX_SIDE}.`;
+    : `The longest side must be a whole number of pixels from 1 to ${IMPORT_MAX_SIDE}.`;
 }
 
 /**
@@ -232,19 +255,26 @@ function scaleGroup(doc: Doc, content: Rect, factor: number, width: number, heig
     Math.abs(content.x - padX) < EPSILON &&
     Math.abs(content.y - padY) < EPSILON;
   if (alreadyThere) return doc;
-  // Scale about the group's top-left corner, then move that corner to the
-  // padding offset: uniform scaling commutes with each layer's rotation.
+  return { ...scaleGroupTo(doc, content, factor, padX, padY), width, height };
+}
+
+/**
+ * Scale every layer by `factor` about the group's top-left corner, then move
+ * that corner to (`x`, `y`); the canvas is untouched. Uniform scaling
+ * commutes with each layer's rotation.
+ */
+function scaleGroupTo(doc: Doc, content: Rect, factor: number, x: number, y: number): Doc {
   const layers = doc.layers.map((layer) => ({
     ...layer,
     transform: {
       ...layer.transform,
-      x: (layer.transform.x - content.x) * factor + padX,
-      y: (layer.transform.y - content.y) * factor + padY,
+      x: (layer.transform.x - content.x) * factor + x,
+      y: (layer.transform.y - content.y) * factor + y,
       scaleX: layer.transform.scaleX * factor,
       scaleY: layer.transform.scaleY * factor,
     },
   }));
-  return { ...doc, width, height, layers };
+  return withLayers(doc, layers);
 }
 
 function longestSideOf(content: Rect): number {
@@ -264,13 +294,12 @@ export function fitToBox(doc: Doc, content: Rect, box: number = STICKER_SIDE): D
 }
 
 /**
- * Sizing tools 2 and 3 (SPEC §6): scale the whole image so its longest side
- * is `side` px — 512 for tool 2, the owner's entered value for tool 3 (free
- * resize). No padding: the canvas becomes the scaled content, in whole
- * pixels. The short side rounds UP (never above `side`), so nothing is
- * clipped; the longest side is exactly `side`.
+ * Sizing tool 2 (SPEC §6): scale the whole image so its longest side is
+ * `side` px (512 for the tool). No padding: the canvas becomes the scaled
+ * content, in whole pixels. The short side rounds UP (never above `side`),
+ * so nothing is clipped; the longest side is exactly `side`.
  */
-export function scaleLongestSide(doc: Doc, content: Rect, side: number): Doc {
+export function scaleLongestSide(doc: Doc, content: Rect, side: number = STICKER_SIDE): Doc {
   const problem = resizeSideProblem(side);
   if (problem) throw new Error(problem);
   const factor = side / longestSideOf(content);
@@ -278,6 +307,22 @@ export function scaleLongestSide(doc: Doc, content: Rect, side: number): Doc {
   const width = fit(content.width);
   const height = fit(content.height);
   return scaleGroup(doc, content, factor, width, height);
+}
+
+/**
+ * Sizing tool 3, free resize (SPEC §6): scale the whole image as one group
+ * so its longest side is `side` px; the canvas size does not change. The
+ * group keeps its centre, with its top-left rounded to whole pixels. Already
+ * that size: the document is returned as is (no undo step).
+ */
+export function resizeLongestSide(doc: Doc, content: Rect, side: number): Doc {
+  const problem = resizeSideProblem(side);
+  if (problem) throw new Error(problem);
+  const factor = side / longestSideOf(content);
+  if (Math.abs(factor - 1) < EPSILON) return doc;
+  const x = Math.round(content.x + (content.width - content.width * factor) / 2);
+  const y = Math.round(content.y + (content.height - content.height * factor) / 2);
+  return scaleGroupTo(doc, content, factor, x, y);
 }
 
 /** Why deleting would leave a session without layers (SPEC §6). */

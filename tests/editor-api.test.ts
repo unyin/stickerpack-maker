@@ -1,6 +1,7 @@
 // Editor command wiring and binary frame parsing, without a running Tauri
 // app: names and argument keys must match src-tauri/src/commands.rs.
 import { expect, mock, test } from "bun:test";
+import limits from "../src/editor/limits.json";
 
 const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
 
@@ -85,7 +86,8 @@ test("the import picker offers exactly the five Editor formats", async () => {
   expect(dialogCalls[0].filters).toEqual([
     { name: "Images", extensions: ["jpg", "jpeg", "jfif", "png", "webp"] },
   ]);
-  expect(api.IMPORT_MAX_SIDE).toBe(2000);
+  // The one definition of the import cap, which Rust's build.rs reads too.
+  expect(api.IMPORT_MAX_SIDE).toBe(limits.importMaxSide);
 });
 
 test("merge sends one raw body plus a size/transform header", async () => {

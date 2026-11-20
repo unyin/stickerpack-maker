@@ -1,10 +1,11 @@
 // Editor document model, history, and session (ADR-0005): pure TypeScript,
 // no Konva, no DOM.
 import { expect, test } from "bun:test";
-import type { RgbaImage } from "../src/editor/model/image";
+import { IMPORT_MAX_SIDE, type RgbaImage } from "../src/editor/model/image";
 import {
   addRasterLayer,
   addTextLayer,
+  centeredPlacement,
   contentBounds as modelContentBounds,
   deleteLayers,
   fitToBox,
@@ -15,6 +16,7 @@ import {
   newDocument,
   nextLayerId,
   placedBounds,
+  resizeLongestSide,
   resizeSideProblem,
   scaleLongestSide,
   setLayerImage,
@@ -41,16 +43,58 @@ function image(width: number, height: number, fill = 0): RgbaImage {
 
 const names = (doc: Doc) => doc.layers.map((l) => l.name);
 
+/**
+ * A document whose canvas matches its image (base layer at 0,0), as after
+ * "Longest side 512": keeps the sizing arithmetic below readable.
+ */
+function snug(width: number, height: number, name: string): Doc {
+  return newDocument(image(width, height), name, { width, height });
+}
+
 // ---- Document operations ----
 
-test("a new document is sized to the imported image with one base layer", () => {
+test("a new document starts at 512x512 with the image at native size, centred", () => {
   const doc = newDocument(image(30, 20), "cat.png");
-  expect([doc.width, doc.height]).toEqual([30, 20]);
+  expect([doc.width, doc.height]).toEqual([512, 512]);
   expect(doc.layers.length).toBe(1);
   const base = doc.layers[0];
   expect(base.kind).toBe("raster");
   expect(base.name).toBe("cat.png");
-  expect(base.transform).toEqual(IDENTITY);
+  expect(base.transform).toEqual({ ...IDENTITY, x: 241, y: 246 });
+  // A bigger image overflows the canvas evenly; nothing is scaled.
+  const big = newDocument(image(1000, 600), "big.png");
+  expect([big.width, big.height]).toEqual([512, 512]);
+  expect(big.layers[0].transform).toEqual({ ...IDENTITY, x: -244, y: -44 });
+  // Thumbnail mode will pass its own starting canvas.
+  expect(newDocument(image(30, 20), "t", { width: 100, height: 100 }).width).toBe(100);
+});
+
+test("centeredPlacement centres an image on the canvas at its own size, on whole pixels", () => {
+  const canvas = { width: 100, height: 80 };
+  expect(centeredPlacement(canvas, image(20, 10))).toEqual({ ...IDENTITY, x: 40, y: 35 });
+  // Larger than the canvas: still centred (it overhangs evenly).
+  expect(centeredPlacement(canvas, image(200, 80)).x).toBe(-50);
+  // Odd differences land on whole pixels.
+  expect(centeredPlacement(canvas, image(21, 11))).toMatchObject({ x: 40, y: 35 });
+});
+
+test("only Fit and Longest side change the canvas size", () => {
+  let doc = newDocument(image(800, 300), "base");
+  doc = addRasterLayer(doc, image(40, 40), "cutout", centeredPlacement(doc, image(40, 40)));
+  doc = addTextLayer(doc, { text: "hi", fontFamily: "Arial", fontSize: 12, color: "#000" });
+  const [base, cutout, text] = doc.layers.map((l) => l.id);
+  doc = setTransform(doc, cutout, { ...IDENTITY, x: 5 });
+  doc = moveLayer(doc, text, 0);
+  doc = mergeLayers(doc, [base, cutout], image(800, 300), IDENTITY);
+  doc = deleteLayers(doc, [text]);
+  // Add, move, restack, merge, delete and free resize all keep 512x512.
+  doc = resizeLongestSide(doc, contentBounds(doc), 100);
+  expect([doc.width, doc.height]).toEqual([512, 512]);
+  // Fit sets 512x512; Longest side sets the scaled image's size.
+  const fitted = fitToBox(doc, contentBounds(doc));
+  expect([fitted.width, fitted.height]).toEqual([512, 512]);
+  const scaled = scaleLongestSide(doc, contentBounds(doc));
+  expect([scaled.width, scaled.height]).toEqual([512, 192]);
 });
 
 test("operations are pure: the input document is never changed", () => {
@@ -296,7 +340,7 @@ test("placedBounds is the on-screen box of a placed layer, rotation included", (
 });
 
 test("contentBounds is the union of every raster layer, beyond the canvas too", () => {
-  let doc = newDocument(image(300, 200), "base");
+  let doc = snug(300, 200, "base");
   doc = addRasterLayer(doc, image(2000, 1000), "big", { ...IDENTITY, x: -850, y: -400 });
   expect(contentBounds(doc)).toEqual({ x: -850, y: -400, width: 2000, height: 1000 });
 });
@@ -304,7 +348,7 @@ test("contentBounds is the union of every raster layer, beyond the canvas too", 
 test("fit scales all layers as ONE group so the content's longest side is 512, centred", () => {
   // A 300x200 photo with a 2000x1000 layer over it: the content is the
   // 2000x1000 union, so everything shrinks by 512/2000 = 0.256 together.
-  let doc = newDocument(image(300, 200), "base");
+  let doc = snug(300, 200, "base");
   doc = addRasterLayer(doc, image(2000, 1000), "big", { ...IDENTITY, x: -850, y: -400 });
   const fitted = fitToBox(doc, contentBounds(doc), 512);
   expect([fitted.width, fitted.height]).toEqual([512, 512]);
@@ -326,12 +370,12 @@ test("fit scales all layers as ONE group so the content's longest side is 512, c
 
 test("fit keeps rotation and works up and down", () => {
   // A single small image grows: a sticker needs one side exactly 512.
-  const small = newDocument(image(300, 200), "small");
+  const small = snug(300, 200, "small");
   const grown = fitToBox(small, contentBounds(small), 512);
   expect(grown.layers[0].transform.scaleX).toBeCloseTo(512 / 300);
   expect(grown.layers[0].transform.y).toBe(85); // whole pixel
   // A rotated layer: the group is measured by its rotated box and rotation stays.
-  let doc = newDocument(image(100, 100), "base");
+  let doc = snug(100, 100, "base");
   doc = addRasterLayer(doc, image(400, 100), "bar", { ...IDENTITY, x: 300, y: 0, rotation: 90 });
   const fitted = fitToBox(doc, contentBounds(doc), 512);
   expect(fitted.layers[1].transform.rotation).toBe(90);
@@ -342,7 +386,7 @@ test("fit keeps rotation and works up and down", () => {
 });
 
 test("fitting content that already fills the box changes nothing (no undo step)", () => {
-  const doc = newDocument(image(512, 512), "done");
+  const doc = snug(512, 512, "done");
   expect(fitToBox(doc, contentBounds(doc), 512)).toBe(doc);
   const s = new EditorSession(doc);
   s.apply((d) => fitToBox(d, contentBounds(d), 512));
@@ -353,7 +397,7 @@ test("fitting content that already fills the box changes nothing (no undo step)"
 });
 
 test("fit is one undo step that restores canvas and layers", () => {
-  const s = new EditorSession(newDocument(image(1000, 500), "base"));
+  const s = new EditorSession(snug(1000, 500, "base"));
   s.apply((d) => fitToBox(d, contentBounds(d), 512));
   expect([s.doc.width, s.doc.height]).toEqual([512, 512]);
   s.undo();
@@ -366,7 +410,7 @@ test("fit is one undo step that restores canvas and layers", () => {
 // (no padding): tool 2 uses 512, tool 3 the owner's entered value.
 
 test("scaling the longest side to 512 shrinks the group and the canvas becomes the content", () => {
-  let doc = newDocument(image(300, 200), "base");
+  let doc = snug(300, 200, "base");
   doc = addRasterLayer(doc, image(2000, 1000), "big", { ...IDENTITY, x: -850, y: -400 });
   const scaled = scaleLongestSide(doc, contentBounds(doc), 512);
   expect([scaled.width, scaled.height]).toEqual([512, 256]);
@@ -384,7 +428,7 @@ test("scaling the longest side to 512 shrinks the group and the canvas becomes t
 test("the short side rounds up so nothing is clipped, content at whole-pixel 0,0", () => {
   // 300x200 -> 512 x 341.33: the short side rounds UP to 342 so nothing is
   // clipped, and the content's top-left sits on a whole pixel.
-  const doc = newDocument(image(300, 200), "base");
+  const doc = snug(300, 200, "base");
   const scaled = scaleLongestSide(doc, contentBounds(doc), 512);
   expect([scaled.width, scaled.height]).toEqual([512, 342]);
   const after = contentBounds(scaled);
@@ -396,7 +440,7 @@ test("the short side rounds up so nothing is clipped, content at whole-pixel 0,0
 });
 
 test("fit places the content's top-left on whole pixels", () => {
-  const doc = newDocument(image(300, 200), "base");
+  const doc = snug(300, 200, "base");
   const fitted = fitToBox(doc, contentBounds(doc), 512);
   expect(fitted.layers[0].transform.y).toBe(85); // (512 - 341.33) / 2 = 85.33 -> 85
   expect(fitted.layers[0].transform.x).toBe(0);
@@ -406,25 +450,25 @@ test("applying any sizing tool twice is a no-op (no undo step)", () => {
   const tools = [
     (d: Doc) => fitToBox(d, contentBounds(d), 512),
     (d: Doc) => scaleLongestSide(d, contentBounds(d), 512),
-    (d: Doc) => scaleLongestSide(d, contentBounds(d), 333),
+    (d: Doc) => resizeLongestSide(d, contentBounds(d), 333),
   ];
   for (const tool of tools) {
-    const once = tool(newDocument(image(300, 200), "base"));
+    const once = tool(snug(300, 200, "base"));
     expect(tool(once)).toBe(once);
   }
 });
 
-test("resizeSideProblem accepts whole numbers 1 to 2000 only", () => {
+test("resizeSideProblem accepts whole numbers from 1 to the import cap only", () => {
   expect(resizeSideProblem(1)).toBeNull();
-  expect(resizeSideProblem(2000)).toBeNull();
-  const text = "The longest side must be a whole number of pixels from 1 to 2000.";
-  for (const bad of [0, 2001, 1.5, NaN, -3]) expect(resizeSideProblem(bad)).toBe(text);
-  const doc = newDocument(image(10, 10), "b");
+  expect(resizeSideProblem(IMPORT_MAX_SIDE)).toBeNull();
+  const text = `The longest side must be a whole number of pixels from 1 to ${IMPORT_MAX_SIDE}.`;
+  for (const bad of [0, IMPORT_MAX_SIDE + 1, 1.5, NaN, -3]) expect(resizeSideProblem(bad)).toBe(text);
+  const doc = snug(10, 10, "b");
   expect(() => scaleLongestSide(doc, contentBounds(doc), 0)).toThrow(text);
 });
 
 test("contentBounds includes text layers via the supplied measurement", () => {
-  let doc = newDocument(image(100, 100), "base");
+  let doc = snug(100, 100, "base");
   doc = addTextLayer(doc, { text: "hi", fontFamily: "Arial", fontSize: 20, color: "#000" });
   const seen: string[] = [];
   const bounds = modelContentBounds(doc, (layer) => {
@@ -435,19 +479,31 @@ test("contentBounds includes text layers via the supplied measurement", () => {
   expect(bounds).toEqual({ x: 0, y: -10, width: 250, height: 110 });
 });
 
-test("free resize uses the entered longest side, up or down, for tall images too", () => {
+test("free resize scales the whole image to the entered longest side and keeps the canvas", () => {
+  // A 200x400 image centred on the 512x512 canvas (156, 56).
   const tall = newDocument(image(200, 400), "tall");
-  const grown = scaleLongestSide(tall, contentBounds(tall), 1000);
-  expect([grown.width, grown.height]).toEqual([500, 1000]);
-  const shrunk = scaleLongestSide(tall, contentBounds(tall), 100);
-  expect([shrunk.width, shrunk.height]).toEqual([50, 100]);
-  expect(() => scaleLongestSide(tall, contentBounds(tall), 0)).toThrow();
-  expect(() => scaleLongestSide(tall, contentBounds(tall), 1.5)).toThrow();
-  expect(() => scaleLongestSide(tall, contentBounds(tall), 2001)).toThrow();
+  const grown = resizeLongestSide(tall, contentBounds(tall), 1000);
+  expect([grown.width, grown.height]).toEqual([512, 512]);
+  expect(grown.layers[0].transform.scaleX).toBeCloseTo(2.5);
+  // The group keeps its centre (256, 256), top-left on whole pixels.
+  expect(contentBounds(grown)).toEqual({ x: 6, y: -244, width: 500, height: 1000 });
+  const shrunk = resizeLongestSide(tall, contentBounds(tall), 100);
+  expect([shrunk.width, shrunk.height]).toEqual([512, 512]);
+  expect(contentBounds(shrunk)).toEqual({ x: 231, y: 206, width: 50, height: 100 });
+  // Several layers scale together as one group.
+  let two = addRasterLayer(tall, image(100, 100), "dot", { ...IDENTITY, x: 0, y: 0 });
+  two = resizeLongestSide(two, contentBounds(two), 228);
+  expect(two.layers.map((l) => l.transform.scaleX)).toEqual([0.5, 0.5]);
+  expect(Math.max(contentBounds(two).width, contentBounds(two).height)).toBeCloseTo(228);
+  // Already that size: no change, so no undo step.
+  expect(resizeLongestSide(tall, contentBounds(tall), 400)).toBe(tall);
+  for (const bad of [0, 1.5, IMPORT_MAX_SIDE + 1]) {
+    expect(() => resizeLongestSide(tall, contentBounds(tall), bad)).toThrow();
+  }
 });
 
 test("scaling to the size the content already has changes nothing (no undo step)", () => {
-  const doc = newDocument(image(512, 300), "done");
+  const doc = snug(512, 300, "done");
   expect(scaleLongestSide(doc, contentBounds(doc), 512)).toBe(doc);
   const s = new EditorSession(doc);
   s.apply((d) => scaleLongestSide(d, contentBounds(d), 512));
@@ -459,7 +515,7 @@ test("scaling to the size the content already has changes nothing (no undo step)
 });
 
 test("a scaled side within 1e-3 of a whole pixel snaps like the Rust merge (342.0005 -> 342)", () => {
-  const doc = newDocument(image(1024, 684), "base");
+  const doc = snug(1024, 684, "base");
   const squashed = setTransform(doc, doc.layers[0].id, {
     ...IDENTITY,
     scaleX: 0.5,

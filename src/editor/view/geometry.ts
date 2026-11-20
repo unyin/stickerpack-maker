@@ -1,15 +1,13 @@
 // Pure decisions behind the Editor view: no Konva, no DOM, unit-tested.
-import type { RgbaImage } from "../model/image";
 import {
   fitToBox,
-  IDENTITY,
   KEEP_ONE_LAYER,
+  resizeLongestSide,
   resizeSideProblem,
   scaleLongestSide,
   STICKER_SIDE,
   type Doc,
   type Rect,
-  type Transform,
 } from "../model/document";
 import type { SelectMode } from "../model/session";
 
@@ -64,15 +62,6 @@ export function zoomAround(view: ViewTransform, pointer: Point, deltaY: number):
   return { scale, x: pointer.x - docX * scale, y: pointer.y - docY * scale };
 }
 
-/** Where "Add image as layer" puts an image: centred, at its own size, on whole pixels. */
-export function centeredPlacement(doc: Doc, image: RgbaImage): Transform {
-  return {
-    ...IDENTITY,
-    x: Math.round((doc.width - image.width) / 2),
-    y: Math.round((doc.height - image.height) / 2),
-  };
-}
-
 /**
  * Why the selection cannot be merged, or null when it can: merging needs
  * two or more layers, all raster (text is rasterised by the text tool, SPM-9).
@@ -116,7 +105,8 @@ export function sizeToolBlocker(
     return fitToBox(doc, content, STICKER_SIDE) === doc ? `The image already fills ${STICKER_SIDE}×${STICKER_SIDE}.` : null;
   }
   const side = tool === "longest" ? STICKER_SIDE : entered;
-  return scaleLongestSide(doc, content, side) === doc ? `The image's longest side is already ${side} px.` : null;
+  const next = tool === "longest" ? scaleLongestSide(doc, content, side) : resizeLongestSide(doc, content, side);
+  return next === doc ? `The image's longest side is already ${side} px.` : null;
 }
 
 /** Ctrl (Cmd on macOS) or Shift + click toggles a layer in or out of the selection. */

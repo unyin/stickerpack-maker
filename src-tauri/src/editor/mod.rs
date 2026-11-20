@@ -19,7 +19,7 @@ pub struct Rgba {
 
 impl Rgba {
     /// Binary IPC frame for the webview: u32 LE width, u32 LE height, then
-    /// the RGBA bytes (raw, never JSON — a 2000x2000 image is 16 MB).
+    /// the RGBA bytes (raw, never JSON — an image at the import cap is megabytes).
     pub fn to_frame(&self) -> Vec<u8> {
         let mut frame = Vec::with_capacity(8 + self.pixels.len());
         frame.extend_from_slice(&self.width.to_le_bytes());
@@ -29,7 +29,7 @@ impl Rgba {
     }
 }
 
-/// Resample to `(width, height)` with Lanczos3: the 2000 cap on import and
+/// Resample to `(width, height)` with Lanczos3: scaling imports down to the import cap and
 /// shrinking layers before compositing. fast_image_resize premultiplies
 /// alpha around the convolution, so transparent edges keep their colour.
 pub(crate) fn resize(src: Rgba, (width, height): (u32, u32)) -> Result<Rgba, String> {

@@ -2,14 +2,14 @@
 // "Editor" section; pixel work lives in src-tauri/src/editor/, ADR-0005).
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { MAX_SIDE, type RgbaImage } from "./model/image";
+import type { RgbaImage } from "./model/image";
 import type { Transform } from "./model/document";
 
 /** Extensions the Editor imports; mirrors IMPORT_EXTENSIONS in import.rs. */
 export const IMPORT_EXTENSIONS = ["jpg", "jpeg", "jfif", "png", "webp"];
 
 /** Largest side imported without the scale-to-fit dialog (SPEC §6). */
-export const IMPORT_MAX_SIDE = MAX_SIDE;
+export { IMPORT_MAX_SIDE } from "./model/image";
 
 /** Header-only probe result (serde camelCase from ImageInfo). */
 export interface ImageInfo {
@@ -23,7 +23,7 @@ export function probeImage(path: string): Promise<ImageInfo> {
 }
 
 /**
- * Decode an image in Rust. `scaleToFit` is the owner's OK in the 2000x2000
+ * Decode an image in Rust. `scaleToFit` is the owner's OK in the import
  * cap dialog; without it an oversize image is refused.
  */
 export async function importImage(
