@@ -4,9 +4,30 @@
 import Konva from "konva";
 import type { RgbaImage } from "../model/image";
 import type { ConstraintSet } from "../model/constraints";
-import { contentBounds, cropBox, setTransform, type Doc, type Layer, type Rect, type Transform } from "../model/document";
+import {
+  contentBounds,
+  cropBox,
+  layerImage,
+  setTransform,
+  type Doc,
+  type Layer,
+  type Point,
+  type Rect,
+  type Transform,
+} from "../model/document";
+import { lassoRegion, rectRegion } from "../model/region";
 import type { EditorSession } from "../model/session";
 import { fitView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
+
+/**
+ * What dragging on the canvas does: "move" moves the layer under the
+ * pointer (or pans on empty space); "rect" and "lasso" draw the cut
+ * selection (SPM-9) and never move layers.
+ */
+export type CanvasTool = "move" | "rect" | "lasso";
+
+/** Lasso points closer than this many screen px to the previous one are skipped. */
+const LASSO_STEP = 2;
 
 /** Canvas per pixel buffer: pixels are immutable, so a buffer draws once. */
 const canvases = new WeakMap<RgbaImage, HTMLCanvasElement>();
@@ -94,13 +115,30 @@ export class EditorStage {
     flipEnabled: false,
     ignoreStroke: true,
   });
-  private readonly nodes = new Map<string, Konva.Shape>();
+  /** The cut selection (session.region, or the one being drawn): a halo under a dashed line. */
+  private readonly regionHalo = new Konva.Line({ closed: true, strokeWidth: 3, strokeScaleEnabled: false, listening: false });
+  private readonly regionLine = new Konva.Line({
+    closed: true,
+    strokeWidth: 1,
+    dash: [4, 4],
+    strokeScaleEnabled: false,
+    listening: false,
+  });
+  private readonly nodes = new Map<string, Konva.Image>();
   private readonly pending = new Set<string>();
   private readonly resizeObserver: ResizeObserver;
   /** Watches <html data-theme> (set by src/theme.ts) to recolour the canvas. */
   private readonly themeObserver = new MutationObserver(() => this.applyTheme());
   private readonly unsubscribe: () => void;
   private viewChanged?: (view: ViewTransform) => void;
+  private editText?: (id: string) => void;
+  private tool: CanvasTool = "move";
+  private interactive = true;
+  /** The text layer whose overlay editor is open: its node is hidden meanwhile. */
+  private editing: string | null = null;
+  /** The selection being drawn: its start, and the lasso's points so far (document px). */
+  private drawing: { start: Point; points: Point[] } | null = null;
+  private readonly endDrawing = () => this.finishRegion();
   /**
    * Whether the view is settled: fitted once, or zoomed/panned by the user.
    * Until then a 0×0 host defers the first fit to resize().
@@ -128,7 +166,7 @@ export class EditorStage {
       strokeScaleEnabled: false,
       listening: false,
     });
-    this.guides.add(this.outline, this.boxHalo, this.box);
+    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine);
     this.content.add(this.backdrop);
     this.content.add(this.transformer);
     this.stage.add(this.content);
@@ -141,8 +179,13 @@ export class EditorStage {
       this.viewChanged?.(this.view());
     });
     this.stage.on("click tap", (e) => {
-      if (e.target === this.stage) this.session.clearSelection();
+      if (e.target === this.stage && this.tool === "move") this.session.clearSelection();
     });
+    this.stage.on("mousedown touchstart", () => this.startRegion());
+    this.stage.on("mousemove touchmove", () => this.extendRegion());
+    // Released anywhere, even outside the canvas, a drawn selection ends.
+    window.addEventListener("mouseup", this.endDrawing);
+    window.addEventListener("touchend", this.endDrawing);
 
     this.applyTheme();
     this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
@@ -165,17 +208,32 @@ export class EditorStage {
     return { scale: this.stage.scaleX(), x: this.stage.x(), y: this.stage.y() };
   }
 
+  /** Called with a text layer's id when it is double-clicked (to edit its text). */
+  onEditText(listener: (id: string) => void): void {
+    this.editText = listener;
+  }
+
   /**
    * The whole image's bounds in document pixels: the union of every layer's
-   * on-screen box. Raster layers are measured by the model's placedBounds;
-   * only text is measured by Konva. All three sizing tools scale this.
+   * on-screen box, text by its Rust-rendered box (CMT-61). All three sizing
+   * tools scale this.
    */
   contentBounds(): Rect {
-    return contentBounds(this.session.doc, (layer) =>
-      this.nodes
-        .get(layer.id)!
-        .getClientRect({ relativeTo: this.content, skipShadow: true, skipStroke: true }),
-    );
+    return contentBounds(this.session.doc);
+  }
+
+  /** Choose what dragging on the canvas does (SPM-9). */
+  setTool(tool: CanvasTool): void {
+    this.tool = tool;
+    this.drawing = null;
+    this.applyListening();
+    this.render();
+  }
+
+  /** Hide a text layer while its text is edited in the overlay (null shows it again). */
+  setEditing(id: string | null): void {
+    this.editing = id;
+    this.render();
   }
 
   /**
@@ -203,12 +261,21 @@ export class EditorStage {
    * so nothing is edited while an async operation works from a snapshot.
    */
   setInteractive(enabled: boolean): void {
-    this.content.listening(enabled);
-    this.stage.draggable(enabled);
+    this.interactive = enabled;
+    this.applyListening();
+  }
+
+  /** Layers listen and empty space pans only when interactive with the Move tool. */
+  private applyListening(): void {
+    const moving = this.interactive && this.tool === "move";
+    this.content.listening(moving);
+    this.stage.draggable(moving);
     this.content.batchDraw();
   }
 
   destroy(): void {
+    window.removeEventListener("mouseup", this.endDrawing);
+    window.removeEventListener("touchend", this.endDrawing);
     this.unsubscribe();
     this.themeObserver.disconnect();
     this.resizeObserver.disconnect();
@@ -224,6 +291,8 @@ export class EditorStage {
     this.transformer.borderStroke(token("--accent-ink"));
     this.transformer.anchorStroke(token("--accent-ink"));
     this.transformer.anchorFill(token("--panel"));
+    this.regionHalo.stroke(token("--panel"));
+    this.regionLine.stroke(token("--accent-ink"));
     this.content.batchDraw();
     this.guides.batchDraw();
   }
@@ -239,6 +308,61 @@ export class EditorStage {
     if (clientWidth === 0 || clientHeight === 0) return; // detached (other tab)
     this.stage.size({ width: clientWidth, height: clientHeight });
     if (!this.fitted) this.fit(); // later resizes keep the view
+  }
+
+  /** The pointer in document pixels. */
+  private pointer(): Point | null {
+    return this.content.getRelativePointerPosition();
+  }
+
+  private startRegion(): void {
+    if (this.tool === "move" || !this.interactive) return;
+    const start = this.pointer();
+    if (!start) return;
+    this.drawing = { start, points: [start] };
+    this.drawRegion();
+  }
+
+  private extendRegion(): void {
+    const drawing = this.drawing;
+    const at = this.pointer();
+    if (!drawing || !at) return;
+    const last = drawing.points[drawing.points.length - 1];
+    const step = LASSO_STEP / this.stage.scaleX();
+    if (this.tool === "rect") drawing.points = [drawing.start, at];
+    else if (Math.hypot(at.x - last.x, at.y - last.y) >= step) drawing.points.push(at);
+    this.drawRegion();
+  }
+
+  /** Finish drawing: the session's region becomes the shape (or nothing, for a click). */
+  private finishRegion(): void {
+    const drawing = this.drawing;
+    if (!drawing) return;
+    this.drawing = null;
+    const { points } = drawing;
+    const region =
+      this.tool === "rect" ? rectRegion(drawing.start, points[points.length - 1]) : lassoRegion(points);
+    if (region === this.session.region) this.drawRegion();
+    else this.session.setRegion(region);
+  }
+
+  /** Draw the selection being drawn, else the session's region. */
+  private drawRegion(): void {
+    let points: readonly Point[] = this.session.region?.points ?? [];
+    if (this.drawing) {
+      const { start, points: drawn } = this.drawing;
+      const end = drawn[drawn.length - 1];
+      points =
+        this.tool === "rect"
+          ? [start, { x: end.x, y: start.y }, end, { x: start.x, y: end.y }]
+          : drawn;
+    }
+    const flat = points.flatMap((p) => [p.x, p.y]);
+    for (const line of [this.regionHalo, this.regionLine]) {
+      line.points(flat);
+      line.visible(points.length > 1);
+    }
+    this.guides.batchDraw();
   }
 
   private onWheel(e: Konva.KonvaEventObject<WheelEvent>): void {
@@ -267,40 +391,30 @@ export class EditorStage {
     }
     doc.layers.forEach((layer, index) => {
       const node = this.nodeFor(layer);
-      // skew is reset so the view can never hold skew the model lacks (ADR-0005).
-      node.setAttrs({ ...layer.transform, skewX: 0, skewY: 0 });
-      if (layer.kind === "raster") (node as Konva.Image).image(canvasFor(layer.image));
-      else {
-        (node as Konva.Text).setAttrs({
-          text: layer.text,
-          fontFamily: layer.fontFamily,
-          fontSize: layer.fontSize,
-          fill: layer.color,
-        });
-      }
+      // skew is reset so the view can never hold skew the model lacks
+      // (ADR-0005). Text shows its Rust rendering (SPM-9), so the view draws
+      // the pixels merge, Crop and the save produce, in the same box.
+      node.setAttrs({ ...layer.transform, skewX: 0, skewY: 0, image: canvasFor(layerImage(layer)) });
+      node.visible(layer.id !== this.editing);
       // z-order: the backdrop is index 0, layers follow bottom to top.
       node.zIndex(index + 1);
     });
     this.transformer.nodes(
       this.session.selection.flatMap((id) => {
         const node = this.nodes.get(id);
-        return node ? [node] : [];
+        return node && id !== this.editing ? [node] : [];
       }),
     );
     this.transformer.moveToTop();
     this.content.batchDraw();
-    this.guides.batchDraw();
+    this.drawRegion();
     // A new canvas size, or a Crop, never moves the view (SPEC §6).
   }
 
-  private nodeFor(layer: Layer): Konva.Shape {
+  private nodeFor(layer: Layer): Konva.Image {
     const existing = this.nodes.get(layer.id);
-    if (existing && (existing instanceof Konva.Image) === (layer.kind === "raster")) return existing;
-    existing?.destroy();
-    const node: Konva.Shape =
-      layer.kind === "raster"
-        ? new Konva.Image({ image: canvasFor(layer.image), draggable: true })
-        : new Konva.Text({ draggable: true });
+    if (existing) return existing;
+    const node = new Konva.Image({ image: canvasFor(layerImage(layer)), draggable: true });
     node.id(layer.id);
     // Press selects (so a drag moves what you grabbed); modifiers toggle.
     node.on("mousedown touchstart", (e) => {
@@ -311,6 +425,11 @@ export class EditorStage {
       }
     });
     node.on("dragend transformend", () => this.queueTransform(layer.id));
+    // Double-click a text layer to edit its text. Looked up when it happens:
+    // a Crop can turn a text layer into pixels under the same id.
+    node.on("dblclick dbltap", () => {
+      if (this.session.doc.layers.find((l) => l.id === layer.id)?.kind === "text") this.editText?.(layer.id);
+    });
     this.content.add(node);
     this.nodes.set(layer.id, node);
     return node;

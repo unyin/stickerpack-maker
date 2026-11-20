@@ -181,3 +181,43 @@
   border-color: var(--accent-ink);
   color: var(--accent-ink);
 }
+
+/* The text-editing overlay (SPM-9): a textarea laid over the canvas where
+   the text layer is; the Konva stage scales and rotates it via transform. */
+.editor-canvas {
+  position: relative;
+}
+
+.editor-text-edit {
+  position: absolute;
+  z-index: 1;
+  transform-origin: 0 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: 1px dashed var(--accent-ink);
+  background: transparent;
+  white-space: pre;
+  overflow: hidden;
+  resize: none;
+  min-width: 1ch;
+}
+
+.editor-font-select {
+  max-width: 160px;
+  padding: 6px 8px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.editor-color-input {
+  width: 36px;
+  height: 32px;
+  padding: 2px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}

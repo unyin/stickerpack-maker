@@ -2,6 +2,8 @@
 import {
   fitToBox,
   KEEP_ONE_LAYER,
+  layerBounds,
+  localToDoc,
   NOTHING_IN_BOX,
   resizeLongestSide,
   resizeSideProblem,
@@ -9,7 +11,9 @@ import {
   type CropAction,
   type Doc,
   type Rect,
+  type TextLayer,
 } from "../model/document";
+import { regionBounds, type Region } from "../model/region";
 import type { ConstraintSet } from "../model/constraints";
 import type { SelectMode } from "../model/session";
 
@@ -66,15 +70,72 @@ export function zoomAround(view: ViewTransform, pointer: Point, deltaY: number):
 
 /**
  * Why the selection cannot be merged, or null when it can: merging needs
- * two or more layers, all raster (text is rasterised by the text tool, SPM-9).
+ * two or more layers. Text layers merge too: Rust rasterises them (SPM-9).
  */
-export function mergeBlocker(doc: Doc, selection: readonly string[]): string | null {
+export function mergeBlocker(_doc: Doc, selection: readonly string[]): string | null {
   if (selection.length < 2) return "Select two or more layers to merge.";
-  const chosen = doc.layers.filter((l) => selection.includes(l.id));
-  if (chosen.some((l) => l.kind === "text")) {
-    return "Text layers can't be merged yet: that arrives with the text tool.";
-  }
   return null;
+}
+
+/**
+ * Why Cut is disabled, or null when it can run (SPM-9): it needs a
+ * selection drawn on the canvas and exactly one selected image layer that
+ * the selection touches. Text is cut only after merging it into an image.
+ */
+export function cutBlocker(doc: Doc, selection: readonly string[], region: Region | null): string | null {
+  if (selection.length !== 1) return "Select the one image layer to cut from.";
+  const layer = doc.layers.find((l) => l.id === selection[0]);
+  if (!layer) return "Select the one image layer to cut from.";
+  if (layer.kind === "text") return "Text layers can't be cut: merge the text into an image layer first.";
+  if (!region) return "Draw a selection on the canvas with Rectangle or Lasso first.";
+  const a = regionBounds(region);
+  const b = layerBounds(layer);
+  const apart = a.x >= b.x + b.width || b.x >= a.x + a.width || a.y >= b.y + b.height || b.y >= a.y + a.height;
+  return apart ? "The selection does not touch the selected layer." : null;
+}
+
+/** Where the text-editing overlay goes on screen, in CSS px of the canvas host. */
+export interface OverlayPlacement {
+  /** Screen position of the anchor point. */
+  readonly left: number;
+  readonly top: number;
+  /** CSS scale (view zoom times the layer's scale) and rotation in degrees. */
+  readonly scale: number;
+  readonly rotation: number;
+  /** The anchor is the overlay's centre (new text) rather than its top-left. */
+  readonly centred: boolean;
+}
+
+/**
+ * Line the text-editing overlay up with a text layer, or centre it on the
+ * canvas for new text. The overlay's top-left is the layout's top-left
+ * moved up by half the line gap, because CSS centres each line's glyphs in
+ * its line height (`line-height: normal` spacing, like the Rust layout).
+ */
+export function textOverlayPlacement(
+  view: ViewTransform,
+  layer: Pick<TextLayer, "transform" | "render"> | null,
+  canvas: Size,
+): OverlayPlacement {
+  if (!layer) {
+    return {
+      left: view.x + (canvas.width / 2) * view.scale,
+      top: view.y + (canvas.height / 2) * view.scale,
+      scale: view.scale,
+      rotation: 0,
+      centred: true,
+    };
+  }
+  const m = layer.render.metrics;
+  const halfGap = (m.lineHeight - m.ascent - m.descent) / 2;
+  const at = localToDoc(layer.transform, m.originX, m.originY - halfGap);
+  return {
+    left: view.x + at.x * view.scale,
+    top: view.y + at.y * view.scale,
+    scale: view.scale * layer.transform.scaleX,
+    rotation: layer.transform.rotation,
+    centred: false,
+  };
 }
 
 /** Why the selection cannot be deleted, or null when it can (SPEC §6). */

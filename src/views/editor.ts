@@ -1,16 +1,33 @@
 // The Editor (SPEC §6, SPM-5 foundation): one session at a time. With no
-// session, "Open image" starts one; while open, "Add image as layer" is the
-// only way to bring in another image; "Close" ends it (warning on unsaved
+// session, "Open image" starts one; while open, "Add image as layer" and
+// pasting (Ctrl+V) bring in other images; "Close" ends it (warning on unsaved
 // changes). The session survives switching tabs: the view is built once.
+// SPM-9 adds the text tool, the cut selection tools and paste.
 import { ask } from "@tauri-apps/plugin-dialog";
 import "../editor/editor.css";
 import { baseName } from "../api";
-import { cropImages, IMPORT_MAX_SIDE, importImage, mergeImages, pickImageFile, probeImage } from "../editor/api";
+import {
+  cropImages,
+  cutImage,
+  IMPORT_MAX_SIDE,
+  importImage,
+  importPasted,
+  layerInput,
+  listFonts,
+  mergeImages,
+  pickImageFile,
+  probeImage,
+  probePasted,
+  renderText,
+  type ImageInfo,
+} from "../editor/api";
 import {
   addRasterLayer,
+  addTextLayer,
   centeredPlacement,
   cropBox,
   cropLayers,
+  cutLayer,
   deleteLayers,
   fitToBox,
   IDENTITY,
@@ -23,21 +40,36 @@ import {
   nextLayerId,
   planCrop,
   scaleLongestSide,
+  setTextStyle,
+  textStyleOf,
   type Doc,
   type Rect,
+  type TextLayer,
+  type TextStyle,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
-import { readoutText, STICKER, startCanvas, constraintStatus } from "../editor/model/constraints";
+import { readoutText, STICKER, startCanvas, constraintStatus, TEXT_FONT_SIZE } from "../editor/model/constraints";
+import {
+  DEFAULT_FONT_SIZE,
+  DEFAULT_TEXT_COLOR,
+  defaultFontFamily,
+  fontSizeProblem,
+  isBlankText,
+  isHexColor,
+} from "../editor/model/text";
 import { EditorSession } from "../editor/model/session";
 import {
   cropBlocker,
+  cutBlocker,
   deleteBlocker,
   mergeBlocker,
   selectModeFor,
   sizeToolBlocker,
+  textOverlayPlacement,
   type SizeTool,
 } from "../editor/view/geometry";
-import { EditorStage } from "../editor/view/stage";
+import { EditorStage, type CanvasTool } from "../editor/view/stage";
+import { TextEditOverlay } from "../editor/view/text-edit";
 import { el, errorMessage, withMessage } from "../ui";
 
 let root: HTMLElement | null = null;
@@ -58,6 +90,14 @@ function buildEditor(): HTMLElement {
   let busy = false;
   // The crop box overlay is on by default (owner, 2026-11-20).
   let showBox = true;
+  // What dragging on the canvas does: move layers, or draw the cut selection.
+  let tool: CanvasTool = "move";
+  // The system's font families (null while loading) and why there are none.
+  let fonts: string[] | null = null;
+  let fontsProblem: string | null = null;
+  // The style the next new text gets: the text controls edit it while no
+  // text layer is selected.
+  let nextStyle: Omit<TextStyle, "text"> = { fontFamily: "", fontSize: DEFAULT_FONT_SIZE, color: DEFAULT_TEXT_COLOR };
 
   const message = el("p", { class: "message editor-message", role: "alert" });
   const canvasHost = el("div", { class: "editor-canvas" }) as HTMLDivElement;
@@ -98,6 +138,49 @@ function buildEditor(): HTMLElement {
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
   const deleteButton = button("Delete", () => deleteSelected());
+  // Cut selection tools and paste (SPM-9).
+  const moveToolButton = button("Move", () => setTool("move"));
+  const rectToolButton = button("Rectangle", () => setTool("rect"));
+  const lassoToolButton = button("Lasso", () => setTool("lasso"));
+  const cutButton = button("Cut", () => run(cutSelection));
+  const pasteButton = button("Paste", () => run(pasteFromButton));
+  moveToolButton.title = "Drag layers to move them, or empty space to pan";
+  rectToolButton.title = "Drag on the canvas to select a rectangle to cut";
+  lassoToolButton.title = "Drag on the canvas to draw a freehand selection to cut";
+  const cutTitle = "Move the selected pixels into a new floating layer at the same spot";
+  const pasteTitle = "Paste an image from the clipboard as a new layer (Ctrl+V)";
+  // Text tool (SPM-9): the controls style the selected text layers, or the next new text.
+  const textButton = button("Add text", () => editText(null));
+  const editTextButton = button("Edit text", () => {
+    const id = session?.selection[0];
+    if (id) editText(id);
+  });
+  const fontSelect = el("select", { class: "editor-font-select", "aria-label": "Font" }) as HTMLSelectElement;
+  const fontSizeInput = el("input", {
+    class: "editor-side-input",
+    type: "number",
+    min: String(TEXT_FONT_SIZE.min),
+    max: String(TEXT_FONT_SIZE.max),
+    step: "1",
+    "aria-label": "Font size in pixels",
+  }) as HTMLInputElement;
+  const colorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": "Text colour" }) as HTMLInputElement;
+  fontSelect.addEventListener("change", () => restyle({ fontFamily: fontSelect.value }));
+  fontSizeInput.addEventListener("change", () => {
+    const size = Number(fontSizeInput.value);
+    const problem = fontSizeProblem(size);
+    if (problem) {
+      message.textContent = problem;
+      refresh(); // shows the current size again
+      return;
+    }
+    restyle({ fontSize: size });
+  });
+  colorInput.addEventListener("change", () => {
+    if (isHexColor(colorInput.value)) restyle({ color: colorInput.value.toLowerCase() });
+  });
+  const textTitle = "Type a new text layer in the chosen font, size and colour (Enter to finish, Shift+Enter for a new line)";
+  const editTextTitle = "Edit the selected text layer's text (or double-click it)";
 
   undoButton.title = "Undo (Ctrl+Z)";
   redoButton.title = "Redo (Ctrl+Y)";
@@ -150,6 +233,24 @@ function buildEditor(): HTMLElement {
       boxButton,
       cropButton,
     ),
+    el(
+      "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Select and cut" },
+      moveToolButton,
+      rectToolButton,
+      lassoToolButton,
+      cutButton,
+      pasteButton,
+    ),
+    el(
+      "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Text" },
+      textButton,
+      editTextButton,
+      fontSelect,
+      el("label", { class: "editor-side" }, fontSizeInput, " px"),
+      colorInput,
+    ),
     readout,
     resetViewButton,
     zoomLabel,
@@ -168,6 +269,7 @@ function buildEditor(): HTMLElement {
   );
 
   const workspace = el("div", { class: "editor-workspace" }, canvasHost, layersPanel);
+  const textOverlay = new TextEditOverlay(canvasHost);
   const view = el("section", { class: "view editor" }, toolbar, message, empty, workspace);
 
   /** Run an async action with one-at-a-time busy handling and error reporting. */
@@ -185,11 +287,14 @@ function buildEditor(): HTMLElement {
     }
   }
 
-  /** Pick an image and decode it, asking first when it exceeds the import cap. */
-  async function pickAndImport(): Promise<{ image: RgbaImage; name: string } | null> {
-    const path = await pickImageFile();
-    if (!path) return null;
-    const info = await probeImage(path);
+  /**
+   * Decode an image with the import cap rule (SPEC §6): an image over the
+   * cap needs the OK in the scale-to-fit dialog; Cancel aborts (null).
+   */
+  async function importWithCap(
+    info: ImageInfo,
+    decode: (scaleToFit: boolean) => Promise<RgbaImage>,
+  ): Promise<RgbaImage | null> {
     if (info.exceedsCap) {
       const side = `${IMPORT_MAX_SIDE}×${IMPORT_MAX_SIDE}`;
       const ok = await ask(
@@ -199,7 +304,15 @@ function buildEditor(): HTMLElement {
       );
       if (!ok) return null;
     }
-    return { image: await importImage(path, info.exceedsCap), name: baseName(path) };
+    return decode(info.exceedsCap);
+  }
+
+  /** Pick an image and decode it, asking first when it exceeds the import cap. */
+  async function pickAndImport(): Promise<{ image: RgbaImage; name: string } | null> {
+    const path = await pickImageFile();
+    if (!path) return null;
+    const image = await importWithCap(await probeImage(path), (scale) => importImage(path, scale));
+    return image ? { image, name: baseName(path) } : null;
   }
 
   async function openImage(): Promise<void> {
@@ -210,6 +323,8 @@ function buildEditor(): HTMLElement {
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session, constraints);
     stage.setCropBoxVisible(showBox);
+    stage.setTool(tool);
+    stage.onEditText((id) => editText(id));
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
     session.subscribe(refresh);
@@ -233,9 +348,8 @@ function buildEditor(): HTMLElement {
     // Bottom to top, as they are drawn.
     const chosen = doc.layers.filter((l) => current.selection.includes(l.id));
     const id = nextLayerId(doc);
-    const placed = await mergeImages(
-      chosen.flatMap((l) => (l.kind === "raster" ? [{ image: l.image, transform: l.transform }] : [])),
-    );
+    // Text layers go as text: Rust rasterises them at their transform (SPM-9).
+    const placed = await mergeImages(chosen.map(layerInput));
     if (current.doc !== doc) {
       message.textContent = "The layers changed while merging; nothing was merged. Try again.";
       return;
@@ -263,10 +377,11 @@ function buildEditor(): HTMLElement {
     const box = cropBox(doc, targetSide);
     const plan = planCrop(doc, box);
     if (cropBlocker(plan, box)) return;
+    // Text crossing the box edge is rasterised and clipped like an image (SPM-9).
     const clips = plan.flatMap((action) => {
       if (action.kind !== "clip") return [];
       const layer = doc.layers.find((l) => l.id === action.id);
-      return layer?.kind === "raster" ? [{ id: action.id, image: layer.image, transform: layer.transform, clip: action.rect }] : [];
+      return layer ? [{ id: action.id, ...layerInput(layer), clip: action.rect }] : [];
     });
     const images = clips.length > 0 ? await cropImages(clips) : [];
     if (current.doc !== doc) {
@@ -293,9 +408,172 @@ function buildEditor(): HTMLElement {
       });
       if (!discard) return;
     }
+    textOverlay.close();
     stage?.destroy();
     stage = null;
     session = null;
+    tool = "move";
+  }
+
+  // ---- Cut and paste (SPM-9) ----
+
+  function setTool(next: CanvasTool): void {
+    tool = next;
+    stage?.setTool(next);
+    refresh();
+  }
+
+  /**
+   * Cut (SPM-9): the selected pixels of the selected image layer move into
+   * a new floating layer at the same spot, as ONE undo step; the pixel work
+   * is Rust's. The selection is used up, and the Move tool comes back so the
+   * cutout can be dragged and resized at once.
+   */
+  async function cutSelection(): Promise<void> {
+    const current = session;
+    if (!current || cutBlocker(current.doc, current.selection, current.region)) return;
+    const doc = current.doc;
+    const region = current.region!;
+    const source = doc.layers[layerIndex(doc, current.selection[0])];
+    if (source.kind !== "raster") return;
+    const cut = await cutImage(source.image, source.transform, region.points);
+    if (current.doc !== doc) {
+      message.textContent = "The layers changed while cutting; nothing was cut. Try again.";
+      return;
+    }
+    const id = nextLayerId(doc);
+    current.apply((d) => cutLayer(d, source.id, cut));
+    current.setRegion(null);
+    current.select(id);
+    setTool("move");
+  }
+
+  /** Add a pasted image (encoded bytes) as a new layer, centred, under the import cap rule. */
+  async function pasteImage(bytes: Uint8Array): Promise<void> {
+    const current = session;
+    if (!current) return;
+    const image = await importWithCap(await probePasted(bytes), (scale) => importPasted(bytes, scale));
+    if (!image) return;
+    const id = nextLayerId(current.doc);
+    current.apply((doc) => addRasterLayer(doc, image, "Pasted image", centeredPlacement(doc, image)));
+    current.select(id);
+  }
+
+  /** The Paste button: read an image from the clipboard where the webview allows it. */
+  async function pasteFromButton(): Promise<void> {
+    let blob: Blob | null = null;
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        const type = item.types.find((t) => t.startsWith("image/"));
+        if (type) {
+          blob = await item.getType(type);
+          break;
+        }
+      }
+    } catch {
+      message.textContent = "The clipboard can't be read here: press Ctrl+V to paste an image.";
+      return;
+    }
+    if (!blob) {
+      message.textContent = "The clipboard holds no image.";
+      return;
+    }
+    await pasteImage(new Uint8Array(await blob.arrayBuffer()));
+  }
+
+  // ---- Text (SPM-9) ----
+
+  /** The selected text layers, bottom to top. */
+  function selectedTexts(current: EditorSession): TextLayer[] {
+    return current.doc.layers.filter((l): l is TextLayer => l.kind === "text" && current.selection.includes(l.id));
+  }
+
+  /** Why the text tool can't be used, or null. */
+  function textBlocker(): string | null {
+    if (fonts === null) return fontsProblem ?? "Looking for the installed fonts…";
+    return null;
+  }
+
+  /**
+   * Open the text overlay: for a new text layer (`id` null) centred on the
+   * canvas in the chosen style, or over an existing text layer to edit it.
+   * Committing renders the text in Rust and applies ONE undo step; blank
+   * text creates or changes nothing (decision: delete a text layer with
+   * Delete instead).
+   */
+  function editText(id: string | null): void {
+    const current = session;
+    if (!current || !stage || busy || textBlocker()) return;
+    const layer = id === null ? null : current.doc.layers.find((l) => l.id === id);
+    if (layer && layer.kind !== "text") return;
+    const style: TextStyle = layer ? textStyleOf(layer) : { ...nextStyle, text: "" };
+    setTool("move");
+    if (layer) {
+      current.select(layer.id);
+      stage.setEditing(layer.id);
+    }
+    const placement = textOverlayPlacement(stage.view(), layer ?? null, current.doc);
+    textOverlay.open(
+      { ...style, lineHeight: layer ? layer.render.metrics.lineHeight : null, placement },
+      {
+        commit: (text) => {
+          stage?.setEditing(null);
+          if (isBlankText(text) || text === style.text) return;
+          void run(() => (layer ? restyleLayers([layer.id], { text }) : addText({ ...style, text })));
+        },
+        cancel: () => stage?.setEditing(null),
+      },
+    );
+  }
+
+  async function addText(style: TextStyle): Promise<void> {
+    const current = session;
+    if (!current) return;
+    const render = await renderText(style);
+    const id = nextLayerId(current.doc);
+    current.apply((doc) => addTextLayer(doc, style, render, centeredPlacement(doc, render.image)));
+    current.select(id);
+  }
+
+  /** Re-render text layers with a style change, as ONE undo step. */
+  async function restyleLayers(ids: readonly string[], patch: Partial<TextStyle>): Promise<void> {
+    const current = session;
+    if (!current) return;
+    const doc = current.doc;
+    const layers = doc.layers.filter((l): l is TextLayer => l.kind === "text" && ids.includes(l.id));
+    const styles = layers.map((l) => ({ ...textStyleOf(l), ...patch }));
+    const renders = await Promise.all(styles.map(renderText));
+    if (current.doc !== doc) {
+      message.textContent = "The layers changed while drawing the text; nothing was changed. Try again.";
+      return;
+    }
+    current.apply((d) => layers.reduce((acc, l, i) => setTextStyle(acc, l.id, styles[i], renders[i]), d));
+  }
+
+  /** A text control changed: restyle the selected text layers, or the next new text. */
+  function restyle(patch: Partial<Omit<TextStyle, "text">>): void {
+    nextStyle = { ...nextStyle, ...patch };
+    const current = session;
+    const ids = current ? selectedTexts(current).map((l) => l.id) : [];
+    if (ids.length > 0) void run(() => restyleLayers(ids, patch));
+    else refresh();
+  }
+
+  /** Load the installed fonts once (Rust scans them); the text tool waits for them. */
+  async function loadFonts(): Promise<void> {
+    try {
+      const families = await listFonts();
+      const first = defaultFontFamily(families);
+      if (first === null) fontsProblem = "No fonts were found on this computer.";
+      else {
+        fonts = families;
+        nextStyle = { ...nextStyle, fontFamily: first };
+        fontSelect.replaceChildren(...families.map((f) => el("option", { value: f }, f)));
+      }
+    } catch (err) {
+      fontsProblem = `The installed fonts could not be listed: ${errorMessage(err)}`;
+    }
+    refresh();
   }
 
   /**
@@ -418,27 +696,89 @@ function buildEditor(): HTMLElement {
     mergeButton.title = blocker ?? "Merge the selected layers into one";
     deleteButton.disabled = busy || deleteReason !== null;
     deleteButton.title = deleteReason ?? "Delete the selected layers (Delete key)";
+    // Cut selection tools and paste (SPM-9).
+    for (const [b, t] of [
+      [moveToolButton, "move"],
+      [rectToolButton, "rect"],
+      [lassoToolButton, "lasso"],
+    ] as const) {
+      b.setAttribute("aria-pressed", String(tool === t));
+      b.disabled = busy;
+    }
+    const cutReason = cutBlocker(doc, current.selection, current.region);
+    cutButton.disabled = busy || cutReason !== null;
+    cutButton.title = cutReason ?? cutTitle;
+    pasteButton.disabled = busy;
+    pasteButton.title = pasteTitle;
+    // Text tool (SPM-9): the controls show the first selected text layer's
+    // style, else the next new text's.
+    const texts = selectedTexts(current);
+    const shown = texts.length > 0 ? textStyleOf(texts[0]) : nextStyle;
+    const textReason = textBlocker();
+    textButton.disabled = busy || textReason !== null;
+    textButton.title = textReason ?? textTitle;
+    const editReason =
+      textReason ?? (texts.length === 1 && current.selection.length === 1 ? null : "Select one text layer to edit.");
+    editTextButton.disabled = busy || editReason !== null;
+    editTextButton.title = editReason ?? editTextTitle;
+    if (fonts !== null && !fonts.includes(shown.fontFamily) && shown.fontFamily !== "") {
+      // A layer in a font that is no longer installed still shows its font.
+      fontSelect.append(el("option", { value: shown.fontFamily }, shown.fontFamily));
+      fonts = [...fonts, shown.fontFamily];
+    }
+    fontSelect.value = shown.fontFamily;
+    if (document.activeElement !== fontSizeInput) fontSizeInput.value = String(shown.fontSize);
+    colorInput.value = shown.color;
+    for (const control of [fontSelect, fontSizeInput, colorInput]) control.disabled = busy || textReason !== null;
+    fontSelect.title = textReason ?? (texts.length > 0 ? "Font of the selected text" : "Font of the next text");
+    fontSizeInput.title = `Font size in px (${TEXT_FONT_SIZE.min}–${TEXT_FONT_SIZE.max})`;
+    colorInput.title = texts.length > 0 ? "Colour of the selected text" : "Colour of the next text";
     // Explain disabled actions only once something is selected.
     layerHint.textContent =
       current.selection.length > 0 ? [blocker, deleteReason].filter((r) => r !== null).join(" ") : "";
     dirtyLabel.hidden = !current.isDirty;
   }
 
+  /**
+   * True when keys and paste belong to a form control or the text overlay,
+   * never to the layers: text fields, the font list, editable content.
+   */
+  function isTextTarget(target: EventTarget | null): boolean {
+    const t = target as HTMLElement | null;
+    return !!t && (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName) || t.isContentEditable);
+  }
+
   // Shortcuts while the Editor is on screen and no text field has focus.
+  // While text is typed in the overlay (a TEXTAREA), Delete, undo/redo and
+  // Esc act on the text (SPM-9).
   document.addEventListener("keydown", (e) => {
     const current = session;
-    if (!current || !view.isConnected || busy) return;
-    const target = e.target as HTMLElement | null;
-    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+    if (!current || !view.isConnected || busy || textOverlay.isOpen) return;
+    if (isTextTarget(e.target)) return;
     const key = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) current.undo();
     else if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) current.redo();
-    else if (e.key === "Escape") current.clearSelection();
+    // Esc drops the cut selection first, then the layer selection.
+    else if (e.key === "Escape") current.region ? current.setRegion(null) : current.clearSelection();
     else if (e.key === "Delete") deleteSelected();
     else return;
     e.preventDefault();
   });
 
+  // Ctrl+V with an image on the clipboard adds it as a layer (SPM-9).
+  document.addEventListener("paste", (e) => {
+    if (!session || !view.isConnected || busy || textOverlay.isOpen || isTextTarget(e.target)) return;
+    const item = [...(e.clipboardData?.items ?? [])].find((i) => i.kind === "file" && i.type.startsWith("image/"));
+    const file = item?.getAsFile();
+    e.preventDefault();
+    if (!file) {
+      message.textContent = "The clipboard holds no image to paste.";
+      return;
+    }
+    void run(async () => pasteImage(new Uint8Array(await file.arrayBuffer())));
+  });
+
+  void loadFonts();
   refresh();
   return view;
 }
