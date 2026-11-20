@@ -2,6 +2,8 @@
 // no Konva, no DOM.
 import { expect, test } from "bun:test";
 import { IMPORT_MAX_SIDE, type RgbaImage } from "../src/editor/model/image";
+import { STICKER, THUMBNAIL } from "../src/editor/model/constraints";
+import limits from "../src/shared/limits.json";
 import {
   addRasterLayer,
   addTextLayer,
@@ -53,20 +55,31 @@ function snug(width: number, height: number, name: string): Doc {
 
 // ---- Document operations ----
 
-test("a new document starts at 512x512 with the image at native size, centred", () => {
+test("the constraint sets come from the shared limits file", () => {
+  expect(STICKER).toEqual({ mode: "sticker", side: limits.sticker.side, maxKilobytes: limits.sticker.maxKilobytes });
+  expect(THUMBNAIL).toEqual({
+    mode: "thumbnail",
+    side: limits.thumbnail.side,
+    maxKilobytes: limits.thumbnail.maxKilobytes,
+  });
+});
+
+test("a new document starts at the sticker side, square, with the image at native size, centred", () => {
+  const S = STICKER.side;
   const doc = newDocument(image(30, 20), "cat.png");
-  expect([doc.width, doc.height]).toEqual([512, 512]);
+  expect([doc.width, doc.height]).toEqual([S, S]);
   expect(doc.layers.length).toBe(1);
   const base = doc.layers[0];
   expect(base.kind).toBe("raster");
   expect(base.name).toBe("cat.png");
-  expect(base.transform).toEqual({ ...IDENTITY, x: 241, y: 246 });
+  expect(base.transform).toEqual({ ...IDENTITY, x: Math.round((S - 30) / 2), y: Math.round((S - 20) / 2) });
   // A bigger image overflows the canvas evenly; nothing is scaled.
-  const big = newDocument(image(1000, 600), "big.png");
-  expect([big.width, big.height]).toEqual([512, 512]);
-  expect(big.layers[0].transform).toEqual({ ...IDENTITY, x: -244, y: -44 });
+  const big = newDocument(image(S * 2, S + 100), "big.png");
+  expect([big.width, big.height]).toEqual([S, S]);
+  expect(big.layers[0].transform).toEqual({ ...IDENTITY, x: -S / 2, y: -50 });
   // Thumbnail mode will pass its own starting canvas.
-  expect(newDocument(image(30, 20), "t", { width: 100, height: 100 }).width).toBe(100);
+  const thumb = newDocument(image(30, 20), "t", { width: THUMBNAIL.side, height: THUMBNAIL.side });
+  expect([thumb.width, thumb.height]).toEqual([THUMBNAIL.side, THUMBNAIL.side]);
 });
 
 test("centeredPlacement centres an image on the canvas at its own size, on whole pixels", () => {
@@ -87,14 +100,25 @@ test("only Fit and Longest side change the canvas size", () => {
   doc = moveLayer(doc, text, 0);
   doc = mergeLayers(doc, [base, cutout], image(800, 300), IDENTITY);
   doc = deleteLayers(doc, [text]);
-  // Add, move, restack, merge, delete and free resize all keep 512x512.
+  // Add, move, restack, merge, delete and free resize all keep the canvas.
+  const S = STICKER.side;
   doc = resizeLongestSide(doc, contentBounds(doc), 100);
-  expect([doc.width, doc.height]).toEqual([512, 512]);
-  // Fit sets 512x512; Longest side sets the scaled image's size.
-  const fitted = fitToBox(doc, contentBounds(doc));
-  expect([fitted.width, fitted.height]).toEqual([512, 512]);
-  const scaled = scaleLongestSide(doc, contentBounds(doc));
-  expect([scaled.width, scaled.height]).toEqual([512, 192]);
+  expect([doc.width, doc.height]).toEqual([S, S]);
+  // Fit sets the square; Longest side sets the scaled image's size (800x300).
+  const fitted = fitToBox(doc, contentBounds(doc), S);
+  expect([fitted.width, fitted.height]).toEqual([S, S]);
+  const scaled = scaleLongestSide(doc, contentBounds(doc), S);
+  expect([scaled.width, scaled.height]).toEqual([S, Math.ceil((S * 300) / 800)]);
+});
+
+test("in Thumbnail mode Fit and Longest side target the thumbnail side", () => {
+  const T = THUMBNAIL.side;
+  const doc = newDocument(image(800, 300), "base", { width: T, height: T });
+  const fitted = fitToBox(doc, contentBounds(doc), T);
+  expect([fitted.width, fitted.height]).toEqual([T, T]);
+  expect(Math.max(contentBounds(fitted).width, contentBounds(fitted).height)).toBeCloseTo(T);
+  const scaled = scaleLongestSide(doc, contentBounds(doc), T);
+  expect([scaled.width, scaled.height]).toEqual([T, Math.ceil((T * 300) / 800)]);
 });
 
 test("operations are pure: the input document is never changed", () => {

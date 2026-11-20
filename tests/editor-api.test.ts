@@ -1,7 +1,7 @@
 // Editor command wiring and binary frame parsing, without a running Tauri
 // app: names and argument keys must match src-tauri/src/commands.rs.
 import { expect, mock, test } from "bun:test";
-import limits from "../src/editor/limits.json";
+import limits from "../src/shared/limits.json";
 
 const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
 

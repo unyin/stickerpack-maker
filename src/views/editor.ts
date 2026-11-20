@@ -20,11 +20,11 @@ import {
   newDocument,
   nextLayerId,
   scaleLongestSide,
-  STICKER_SIDE,
   type Doc,
   type Rect,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
+import { STICKER } from "../editor/model/constraints";
 import { EditorSession } from "../editor/model/session";
 import { deleteBlocker, mergeBlocker, selectModeFor, sizeToolBlocker, type SizeTool } from "../editor/view/geometry";
 import { EditorStage } from "../editor/view/stage";
@@ -39,6 +39,10 @@ export function renderEditor(): HTMLElement {
 }
 
 function buildEditor(): HTMLElement {
+  // The active constraint set (SPEC §6-7). Sticker mode is the only one wired
+  // in the UI; Thumbnail mode (SPM-12) passes THUMBNAIL instead.
+  const constraints = STICKER;
+  const targetSide = constraints.side;
   let session: EditorSession | null = null;
   let stage: EditorStage | null = null;
   let busy = false;
@@ -55,9 +59,11 @@ function buildEditor(): HTMLElement {
   const undoButton = button("Undo", () => session?.undo());
   const redoButton = button("Redo", () => session?.redo());
   // Sizing tools (SPEC §6), all on the whole image as one group.
-  const fitButton = button("Fit to 512×512", () => resizeWholeImage((doc, c) => fitToBox(doc, c, STICKER_SIDE)));
-  const longestButton = button("Longest side 512", () =>
-    resizeWholeImage((doc, c) => scaleLongestSide(doc, c, STICKER_SIDE)),
+  const fitButton = button(`Fit to ${targetSide}×${targetSide}`, () =>
+    resizeWholeImage((doc, c) => fitToBox(doc, c, targetSide)),
+  );
+  const longestButton = button(`Longest side ${targetSide}`, () =>
+    resizeWholeImage((doc, c) => scaleLongestSide(doc, c, targetSide)),
   );
   const sideInput = el("input", {
     class: "editor-side-input",
@@ -79,10 +85,10 @@ function buildEditor(): HTMLElement {
   undoButton.title = "Undo (Ctrl+Z)";
   redoButton.title = "Redo (Ctrl+Y)";
   const fitTitle =
-    "Scale everything on the canvas together, as one image, so its longest side is 512 px; " +
-    "the canvas becomes 512×512 with transparent padding";
+    `Scale everything on the canvas together, as one image, so its longest side is ${targetSide} px; ` +
+    `the canvas becomes ${targetSide}×${targetSide} with transparent padding`;
   const longestTitle =
-    "Scale everything on the canvas together so its longest side is 512 px; the canvas becomes the image (no padding)";
+    `Scale everything on the canvas together so its longest side is ${targetSide} px; the canvas becomes the image (no padding)`;
   const resizeTitle =
     `Scale everything on the canvas together so its longest side is the entered size (1–${IMPORT_MAX_SIDE} px); ` +
     "the canvas size stays";
@@ -173,7 +179,7 @@ function buildEditor(): HTMLElement {
     if (session) return; // one session at a time: Close first
     const picked = await pickAndImport();
     if (!picked) return;
-    session = new EditorSession(newDocument(picked.image, picked.name));
+    session = new EditorSession(newDocument(picked.image, picked.name, { width: targetSide, height: targetSide }));
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
     // Subscribe AFTER the stage: on every change the canvas redraws first,
@@ -327,7 +333,7 @@ function buildEditor(): HTMLElement {
       [resizeButton, "free", resizeTitle],
     ];
     for (const [button, tool, action] of sizing) {
-      const reason = sizeToolBlocker(tool, doc, content, entered);
+      const reason = sizeToolBlocker(tool, doc, content, entered, constraints);
       button.disabled = busy || reason !== null;
       button.title = reason ?? action;
     }

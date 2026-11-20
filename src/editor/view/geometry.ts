@@ -5,10 +5,10 @@ import {
   resizeLongestSide,
   resizeSideProblem,
   scaleLongestSide,
-  STICKER_SIDE,
   type Doc,
   type Rect,
 } from "../model/document";
+import type { ConstraintSet } from "../model/constraints";
 import type { SelectMode } from "../model/session";
 
 export const MIN_ZOOM = 0.05;
@@ -88,23 +88,25 @@ export type SizeTool = "fit" | "longest" | "free";
  * Why a sizing tool is disabled, or null when it can run: the entered value
  * is invalid (free resize only) or the tool would change nothing. `entered`
  * is the free-resize field as a number (NaN when empty); `content` is null
- * while nothing can be measured.
+ * while nothing can be measured. Tools 1 and 2 target `constraints.side`.
  */
 export function sizeToolBlocker(
   tool: SizeTool,
   doc: Doc,
   content: Rect | null,
   entered: number,
+  constraints: ConstraintSet,
 ): string | null {
   if (tool === "free") {
     const problem = resizeSideProblem(entered);
     if (problem) return problem;
   }
   if (!content) return "There is nothing to resize.";
+  const target = constraints.side;
   if (tool === "fit") {
-    return fitToBox(doc, content, STICKER_SIDE) === doc ? `The image already fills ${STICKER_SIDE}×${STICKER_SIDE}.` : null;
+    return fitToBox(doc, content, target) === doc ? `The image already fills ${target}×${target}.` : null;
   }
-  const side = tool === "longest" ? STICKER_SIDE : entered;
+  const side = tool === "longest" ? target : entered;
   const next = tool === "longest" ? scaleLongestSide(doc, content, side) : resizeLongestSide(doc, content, side);
   return next === doc ? `The image's longest side is already ${side} px.` : null;
 }

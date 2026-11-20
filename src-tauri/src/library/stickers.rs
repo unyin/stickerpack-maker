@@ -17,11 +17,12 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::files::{self, has_pending_plan, remove_names, stage_copy, sticker_file_name, Step};
 use super::packs::open_pack_files;
 use super::schema::{load_pack, load_sticker, load_stickers, Format, Sticker};
+use crate::limits::{KB, STICKER_MAX_KB};
 
 /// Telegram's per-pack sticker cap: exceeding it warns, never blocks.
 pub const MAX_PACK_SIZE: usize = 120;
 /// Largest sticker file Telegram accepts (SPEC §7).
-pub const MAX_STICKER_BYTES: u64 = 512 * 1024;
+pub const MAX_STICKER_BYTES: u64 = STICKER_MAX_KB * KB;
 /// Most emoji an Emoji String may hold (SPEC §3).
 pub const MAX_EMOJI: usize = 20;
 
@@ -103,9 +104,9 @@ pub fn pack_size_warning(count: usize) -> Option<Warning> {
 
 /// Validate a file entering a pack as a sticker (drop-in, bulk import,
 /// replacement): PNG or WEBP by extension AND by content signature, at
-/// most 512 KB. Returns its format. Dimension rules (one side exactly
-/// 512 px) need image decoding and are enforced at the import/save seams
-/// (SPM-10/11), not here.
+/// most `STICKER_MAX_KB`. Returns its format. Dimension rules (longest side
+/// exactly `limits::STICKER_SIDE`) need image decoding and are enforced at
+/// the import/save seams (SPM-10/11), not here.
 pub fn validate_sticker_file(path: &Path) -> Result<Format, String> {
     let ext = path
         .extension()
@@ -118,8 +119,8 @@ pub fn validate_sticker_file(path: &Path) -> Result<Format, String> {
     }
     if meta.len() > MAX_STICKER_BYTES {
         return Err(format!(
-            "is {} KB; stickers must be at most 512 KB",
-            meta.len().div_ceil(1024)
+            "is {} KB; stickers must be at most {STICKER_MAX_KB} KB",
+            meta.len().div_ceil(KB)
         ));
     }
     let mut head = [0u8; 12];
@@ -735,13 +736,14 @@ mod tests {
     // ---- File validation ----
 
     #[test]
-    fn sticker_files_must_be_png_or_webp_within_512_kb() {
+    fn sticker_files_must_be_png_or_webp_within_the_size_limit() {
         let lib = Lib::new();
         assert_eq!(validate_sticker_file(&lib.source("a.png", "x")).unwrap(), Format::Png);
         assert_eq!(validate_sticker_file(&lib.source("b.WEBP", "x")).unwrap(), Format::Webp);
         let big = lib.sources.path().join("big.png");
         fs::write(&big, [PNG_MAGIC, &vec![0u8; MAX_STICKER_BYTES as usize]].concat()).unwrap();
-        assert!(validate_sticker_file(&big).unwrap_err().contains("512 KB"));
+        let err = validate_sticker_file(&big).unwrap_err();
+        assert!(err.contains(&format!("{STICKER_MAX_KB} KB")), "unexpected error: {err}");
         let at_limit = lib.sources.path().join("limit.png");
         fs::write(&at_limit, [PNG_MAGIC, &vec![0u8; MAX_STICKER_BYTES as usize - 8]].concat()).unwrap();
         assert!(validate_sticker_file(&at_limit).is_ok());

@@ -1,6 +1,7 @@
 // The Editor document (ADR-0005): an immutable value. Every operation
 // returns a new Doc and reuses every layer (and pixel buffer) it did not
 // change, so history can keep whole states cheaply. No Konva, no DOM.
+import { STICKER } from "./constraints";
 import { IMPORT_MAX_SIDE, type RgbaImage } from "./image";
 
 /** Transform of a layer in document pixels; rotation in degrees (Konva's convention). */
@@ -60,14 +61,15 @@ export interface Size {
 }
 
 /**
- * A fresh document: the canvas starts at `canvas` (512×512 for stickers,
- * SPEC §6), never sized to the image, and the image sits on it at its
- * native size, centred, free to overflow.
+ * A fresh document: the canvas starts at `canvas` (the constraint set's
+ * side, square; Sticker mode by default, SPEC §6), never sized to the
+ * image, and the image sits on it at its native size, centred, free to
+ * overflow.
  */
 export function newDocument(
   image: RgbaImage,
   name: string,
-  canvas: Size = { width: STICKER_SIDE, height: STICKER_SIDE },
+  canvas: Size = { width: STICKER.side, height: STICKER.side },
 ): Doc {
   return {
     width: canvas.width,
@@ -153,9 +155,6 @@ export function moveLayer(doc: Doc, id: string, toIndex: number): Doc {
   layers.splice(to, 0, layer);
   return withLayers(doc, layers);
 }
-
-/** Telegram's sticker size: one side exactly 512 px (SPEC §7). */
-export const STICKER_SIDE = 512;
 
 /** An axis-aligned rectangle in document pixels. */
 export interface Rect {
@@ -285,21 +284,21 @@ function longestSideOf(content: Rect): number {
 
 /**
  * Sizing tool 1 (SPEC §6): fit the whole image (`content`, the union of all
- * layers' on-screen boxes) into a `box` x `box` square and pad the rest with
- * transparency: its longest side becomes `box` (up or down), centred, and
- * the canvas becomes the square.
+ * layers' on-screen boxes) into a `box` x `box` square (`box` is the
+ * constraint set's side) and pad the rest with transparency: its longest
+ * side becomes `box` (up or down), centred, and the canvas becomes the square.
  */
-export function fitToBox(doc: Doc, content: Rect, box: number = STICKER_SIDE): Doc {
+export function fitToBox(doc: Doc, content: Rect, box: number): Doc {
   return scaleGroup(doc, content, box / longestSideOf(content), box, box);
 }
 
 /**
  * Sizing tool 2 (SPEC §6): scale the whole image so its longest side is
- * `side` px (512 for the tool). No padding: the canvas becomes the scaled
- * content, in whole pixels. The short side rounds UP (never above `side`),
+ * `side` px (the constraint set's side). No padding: the canvas becomes the
+ * scaled content, in whole pixels. The short side rounds UP (never above `side`),
  * so nothing is clipped; the longest side is exactly `side`.
  */
-export function scaleLongestSide(doc: Doc, content: Rect, side: number = STICKER_SIDE): Doc {
+export function scaleLongestSide(doc: Doc, content: Rect, side: number): Doc {
   const problem = resizeSideProblem(side);
   if (problem) throw new Error(problem);
   const factor = side / longestSideOf(content);

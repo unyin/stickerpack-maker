@@ -7,6 +7,9 @@ pub mod editor;
 /// renames, desync detection. Public because the core is a UI-agnostic,
 /// unit-testable library; Tauri command wiring (SPM-3) consumes it.
 pub mod library;
+/// Sticker, thumbnail and import limits: one definition shared with the
+/// webview (src/shared/limits.json, read by build.rs).
+pub mod limits;
 
 use std::path::PathBuf;
 use std::sync::Mutex;

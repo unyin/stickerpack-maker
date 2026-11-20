@@ -12,7 +12,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-# Reads the shared Editor limits (../src/editor/limits.json); already in the tree via Tauri.
+# Reads the shared limits (../src/shared/limits.json); already in the tree via Tauri.
 serde_json = "1"
 
 [dependencies]

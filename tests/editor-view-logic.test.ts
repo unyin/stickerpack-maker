@@ -2,6 +2,7 @@
 // fitting, zooming, merge eligibility, click modifiers.
 import { expect, test } from "bun:test";
 import { IMPORT_MAX_SIDE, type RgbaImage } from "../src/editor/model/image";
+import { STICKER, THUMBNAIL } from "../src/editor/model/constraints";
 import { addRasterLayer, addTextLayer, fitToBox, newDocument, scaleLongestSide } from "../src/editor/model/document";
 import {
   deleteBlocker,
@@ -77,21 +78,26 @@ test("delete needs a selection and must leave at least one layer, and says why n
   expect(deleteBlocker(single, [single.layers[0].id])).toContain("at least one layer");
 });
 
-test("sizeToolBlocker explains each disabled sizing tool", () => {
+test("sizeToolBlocker explains each disabled sizing tool, for the active constraint set", () => {
   const doc = newDocument(image(300, 200), "b");
   const content = { x: 0, y: 0, width: 300, height: 200 };
-  expect(sizeToolBlocker("fit", doc, content, NaN)).toBeNull();
-  expect(sizeToolBlocker("longest", doc, content, NaN)).toBeNull();
-  expect(sizeToolBlocker("free", doc, content, 400)).toBeNull();
-  expect(sizeToolBlocker("free", doc, content, NaN)).toBe(
+  expect(sizeToolBlocker("fit", doc, content, NaN, STICKER)).toBeNull();
+  expect(sizeToolBlocker("longest", doc, content, NaN, STICKER)).toBeNull();
+  expect(sizeToolBlocker("free", doc, content, 400, STICKER)).toBeNull();
+  expect(sizeToolBlocker("free", doc, content, NaN, STICKER)).toBe(
     `The longest side must be a whole number of pixels from 1 to ${IMPORT_MAX_SIDE}.`,
   );
-  expect(sizeToolBlocker("free", doc, content, 300)).toBe("The image's longest side is already 300 px.");
-  const fitted = fitToBox(doc, content, 512);
-  const filled = { x: 0, y: 85, width: 512, height: 512 * (200 / 300) };
-  expect(sizeToolBlocker("fit", fitted, filled, NaN)).toBe("The image already fills 512×512.");
-  const scaled = scaleLongestSide(doc, content, 512);
-  const placed = { x: 0, y: 0, width: 512, height: 512 * (200 / 300) };
-  expect(sizeToolBlocker("longest", scaled, placed, NaN)).toBe("The image's longest side is already 512 px.");
-  expect(sizeToolBlocker("fit", doc, null, NaN)).toBe("There is nothing to resize.");
+  expect(sizeToolBlocker("free", doc, content, 300, STICKER)).toBe("The image's longest side is already 300 px.");
+  expect(sizeToolBlocker("fit", doc, null, NaN, STICKER)).toBe("There is nothing to resize.");
+  // Once a tool has run, it is disabled with the set's own side in the message.
+  for (const set of [STICKER, THUMBNAIL]) {
+    const S = set.side;
+    const short = S * (200 / 300);
+    const fitted = fitToBox(doc, content, S);
+    const filled = { x: 0, y: Math.floor((S - short) / 2), width: S, height: short };
+    expect(sizeToolBlocker("fit", fitted, filled, NaN, set)).toBe(`The image already fills ${S}×${S}.`);
+    const scaled = scaleLongestSide(doc, content, S);
+    const placed = { x: 0, y: 0, width: S, height: short };
+    expect(sizeToolBlocker("longest", scaled, placed, NaN, set)).toBe(`The image's longest side is already ${S} px.`);
+  }
 });
