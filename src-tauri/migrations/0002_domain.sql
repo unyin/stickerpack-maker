@@ -30,5 +30,9 @@ CREATE TABLE stickers (
 
 CREATE TABLE rename_journal (
     pack_id INTEGER PRIMARY KEY REFERENCES packs(id) ON DELETE CASCADE,
-    plan    TEXT NOT NULL
+    plan    TEXT NOT NULL,
+    -- 0 = phase 1 (vacate) not yet confirmed complete, 1 = phase 1 done.
+    -- Recovery only re-vacates sources at phase 0: once phase 2 places
+    -- files, an original name may legitimately be occupied again (ADR-0004).
+    phase   INTEGER NOT NULL DEFAULT 0 CHECK (phase IN (0, 1))
 );

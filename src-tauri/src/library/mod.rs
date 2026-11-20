@@ -10,6 +10,7 @@
 //! is NO auto-migration and NO reconstruction of metadata from orphaned image
 //! files. This module is free of Tauri types so it can be unit-tested.
 
+pub mod files;
 pub mod packs;
 pub mod schema;
 
