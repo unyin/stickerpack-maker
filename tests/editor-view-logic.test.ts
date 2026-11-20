@@ -1,5 +1,5 @@
 // Pure decisions behind the Editor view (src/editor/view/geometry.ts):
-// fitting, zooming, placement, merge eligibility, click modifiers.
+// fitting, zooming, merge eligibility, click modifiers.
 import { expect, test } from "bun:test";
 import { IMPORT_MAX_SIDE, type RgbaImage } from "../src/editor/model/image";
 import { addRasterLayer, addTextLayer, fitToBox, newDocument, scaleLongestSide } from "../src/editor/model/document";

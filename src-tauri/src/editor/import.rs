@@ -239,13 +239,13 @@ mod tests {
     fn oversize_import_needs_the_owners_ok_to_scale() {
         let dir = tempfile::tempdir().unwrap();
         let cap = IMPORT_MAX_SIDE;
-        let path = write(dir.path(), "big.png", &solid(cap * 2, cap / 2, [0, 128, 0, 255]));
+        let path = write(dir.path(), "big.png", &solid(cap * 2, 10, [0, 128, 0, 255]));
         let info = probe(&path).unwrap();
         assert!(info.exceeds_cap);
         let err = import(&path, false).unwrap_err();
         assert!(err.contains(&cap.to_string()), "unexpected error: {err}");
         let fitted = import(&path, true).unwrap();
-        assert_eq!((fitted.width, fitted.height), fit_within(cap * 2, cap / 2, cap));
+        assert_eq!((fitted.width, fitted.height), fit_within(cap * 2, 10, cap));
         assert_eq!(fitted.width, cap);
         // Exactly the cap on one side is within it.
         let edge = write(dir.path(), "edge.png", &solid(cap, 10, [0, 0, 0, 255]));

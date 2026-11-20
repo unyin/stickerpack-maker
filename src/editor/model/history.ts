@@ -1,6 +1,7 @@
 // Undo/redo over immutable states (ADR-0005). States share unchanged pixel
 // buffers, so the memory budget counts each buffer once, and only buffers
 // the present state does not use: the cost of being able to go back.
+import { IMPORT_MAX_SIDE } from "./image";
 
 export interface HistoryOptions<S> {
   /** Maximum bytes of buffers kept alive only by undo/redo steps. */
@@ -9,8 +10,11 @@ export interface HistoryOptions<S> {
   buffersOf: (state: S) => Iterable<ArrayBufferLike>;
 }
 
-/** Default budget: room for ~32 full repaints of a layer at the import cap (IMPORT_MAX_SIDE square). */
-export const DEFAULT_HISTORY_BUDGET = 512 * 1024 * 1024;
+/** Undo steps the default budget holds when each repaints a whole layer at the import cap. */
+const DEFAULT_FULL_REPAINTS = 32;
+
+/** Default budget: room for 32 full repaints of an RGBA8 layer at the import cap (square). */
+export const DEFAULT_HISTORY_BUDGET = DEFAULT_FULL_REPAINTS * IMPORT_MAX_SIDE * IMPORT_MAX_SIDE * 4;
 
 export class History<S> {
   private past: S[] = [];

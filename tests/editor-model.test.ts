@@ -405,9 +405,9 @@ test("fit is one undo step that restores canvas and layers", () => {
   expect(s.doc.layers[0].transform).toEqual(IDENTITY);
 });
 
-// ---- Sizing tools 2 and 3: scale the longest side (SPEC §6) ----
+// ---- Sizing tool 2: scale the longest side to 512 (SPEC §6) ----
 // Same whole-image group as Fit, but the canvas becomes the scaled content
-// (no padding): tool 2 uses 512, tool 3 the owner's entered value.
+// (no padding). Free resize (tool 3) keeps the canvas; it is tested below.
 
 test("scaling the longest side to 512 shrinks the group and the canvas becomes the content", () => {
   let doc = snug(300, 200, "base");
