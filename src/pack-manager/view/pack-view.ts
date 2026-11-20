@@ -264,18 +264,23 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       }),
     reveal: (s) => void run(() => revealSticker(s.id)),
     remove: (stickers) => void run(() => remove(stickers)),
-    saveEmoji: (s, emojiString) =>
-      run(async () => {
+    // Not behind the busy guard: the change event fires on blur, often from
+    // the very click that starts another action, and must never be dropped.
+    // The Rust LibraryLock serializes it with that action.
+    saveEmoji: async (s, emojiString) => {
+      try {
         const saved = await setEmojiString(s.id, emojiString);
         view = {
           ...view,
           stickers: view.stickers.map((x) =>
-            x.id === saved.id
-              ? { ...x, emojiString: saved.emojiString, emojiWarning: emojiCountWarning(saved.emojiString) }
-              : x,
+            x.id === saved.id ? { ...x, emojiString: saved.emojiString, emojiWarning: emojiCountWarning(saved.emojiString) } : x,
           ),
         };
-      }),
+      } catch (err) {
+        message.textContent = errorMessage(err);
+      }
+      render();
+    },
     revealThumbnail: () => void run(() => revealThumbnail(packId)),
   };
 
