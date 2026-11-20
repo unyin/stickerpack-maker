@@ -145,9 +145,10 @@ pub fn editor_import_image(path: String, scale_to_fit: bool) -> Result<tauri::ip
 /// (JSON array of `LayerMeta`); the pixels travel as the raw body.
 pub const MERGE_LAYERS_HEADER: &str = "x-merge-layers";
 
-/// Merge selected raster layers (SPEC §6). Request: raw body = the layers'
-/// RGBA bytes concatenated bottom to top, header `x-merge-layers` = their
-/// sizes and transforms. Response: `PlacedImage::to_frame` (origin + image).
+/// Merge selected layers (SPEC §6). Request: raw body = the raster layers'
+/// RGBA bytes concatenated bottom to top, header `x-merge-layers` = every
+/// layer's size and transform, plus the text of text layers (which have no
+/// bytes in the body). Response: `PlacedImage::to_frame` (origin + image).
 #[tauri::command(async)]
 pub fn editor_merge_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
     let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
@@ -161,7 +162,7 @@ pub fn editor_merge_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ip
         .map_err(|e| format!("merge layer header is not text: {e}"))?;
     let meta: Vec<editor::merge::LayerMeta> =
         serde_json::from_str(meta_json).map_err(|e| format!("merge layer header is invalid: {e}"))?;
-    let layers = editor::merge::split_layers(&meta, body)?;
+    let layers = editor::merge::split_layers(&meta, body, editor::text::system_fonts())?;
     let merged = editor::merge::merge(&layers)?;
     Ok(tauri::ipc::Response::new(merged.to_frame()))
 }
@@ -170,9 +171,10 @@ pub fn editor_merge_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ip
 /// rectangles (JSON array of `CropMeta`); the pixels travel as the raw body.
 pub const CROP_LAYERS_HEADER: &str = "x-crop-layers";
 
-/// Crop raster layers to the crop box (SPEC §6). Request: raw body = the
+/// Crop layers to the crop box (SPEC §6). Request: raw body = the raster
 /// layers' RGBA bytes concatenated, header `x-crop-layers` = their sizes,
-/// transforms and clips. Response: each clip's RGBA bytes, concatenated.
+/// transforms and clips (text layers carry their text and no bytes).
+/// Response: each clip's RGBA bytes, concatenated.
 #[tauri::command(async)]
 pub fn editor_crop_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
     let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
@@ -186,8 +188,84 @@ pub fn editor_crop_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc
         .map_err(|e| format!("crop layer header is not text: {e}"))?;
     let meta: Vec<editor::crop::CropMeta> =
         serde_json::from_str(meta_json).map_err(|e| format!("crop layer header is invalid: {e}"))?;
-    let layers = editor::crop::split_crop_layers(&meta, body)?;
+    let layers = editor::crop::split_crop_layers(&meta, body, editor::text::system_fonts())?;
     Ok(tauri::ipc::Response::new(editor::crop::crop(&layers)?))
+}
+
+/// The raw body of a binary request, or an error naming the request.
+fn raw_body<'a>(request: &'a tauri::ipc::Request<'_>, what: &str) -> Result<&'a [u8], String> {
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(body) => Ok(body),
+        _ => Err(format!("{what} request must carry raw bytes")),
+    }
+}
+
+/// A request header as text, or an error naming it.
+fn header<'a>(request: &'a tauri::ipc::Request<'_>, name: &str) -> Result<&'a str, String> {
+    request
+        .headers()
+        .get(name)
+        .ok_or_else(|| format!("the request is missing the {name} header"))?
+        .to_str()
+        .map_err(|e| format!("the {name} header is not text: {e}"))
+}
+
+/// Header saying whether a pasted image over the import cap may be scaled
+/// to fit ("true" is the owner's OK in the cap dialog).
+pub const SCALE_TO_FIT_HEADER: &str = "x-scale-to-fit";
+
+/// Probe a pasted image (SPM-9): raw body = its encoded bytes (PNG, JPEG or
+/// WEBP, as the clipboard gives them). Same answer as `editor_probe_image`.
+#[tauri::command(async)]
+pub fn editor_probe_pasted(request: tauri::ipc::Request<'_>) -> Result<editor::import::ImageInfo, String> {
+    editor::import::probe_bytes(raw_body(&request, "paste")?)
+}
+
+/// Decode a pasted image (SPM-9) under the same import cap rule as
+/// `editor_import_image`. Request: raw body = the encoded bytes, header
+/// `x-scale-to-fit`. Response: `Rgba::to_frame`.
+#[tauri::command(async)]
+pub fn editor_import_pasted(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let scale_to_fit = header(&request, SCALE_TO_FIT_HEADER)? == "true";
+    let image = editor::import::import_bytes(raw_body(&request, "paste")?, scale_to_fit)?;
+    Ok(tauri::ipc::Response::new(image.to_frame()))
+}
+
+/// The system's font families for the text tool (SPM-9), sorted. The first
+/// call scans the font folders, so it runs off the main thread.
+#[tauri::command(async)]
+pub fn editor_list_fonts() -> Vec<String> {
+    editor::text::families(editor::text::system_fonts())
+}
+
+/// Draw a text layer at scale 1 (SPM-9): what the view shows and the box the
+/// layer is measured by. Response: `TextRender::to_frame` (metrics + image).
+#[tauri::command(async)]
+pub fn editor_render_text(spec: editor::text::TextSpec) -> Result<tauri::ipc::Response, String> {
+    let render = editor::text::render(editor::text::system_fonts(), &spec)?;
+    Ok(tauri::ipc::Response::new(render.to_frame()))
+}
+
+/// Header carrying the cut request's layer size, transform and selection
+/// polygon (JSON `CutMeta`); the layer's pixels travel as the raw body.
+pub const CUT_LAYER_HEADER: &str = "x-cut-layer";
+
+/// Cut a selection out of a raster layer (SPM-9). Request: raw body = the
+/// layer's RGBA bytes, header `x-cut-layer`. Response: `Cut::to_frame` (the
+/// layer with a hole, then the placed cutout).
+#[tauri::command(async)]
+pub fn editor_cut_layer(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let body = raw_body(&request, "cut")?;
+    let meta: editor::cut::CutMeta = serde_json::from_str(header(&request, CUT_LAYER_HEADER)?)
+        .map_err(|e| format!("the cut header is invalid: {e}"))?;
+    if meta.layer.text.is_some() {
+        return Err("text layers cannot be cut".to_string());
+    }
+    let layer = editor::merge::split_layers(std::slice::from_ref(&meta.layer), body, editor::text::system_fonts())?
+        .pop()
+        .ok_or_else(|| "the cut request has no layer".to_string())?;
+    let cut = editor::cut::cut(&layer, &meta.polygon)?;
+    Ok(tauri::ipc::Response::new(cut.to_frame()))
 }
 
 #[cfg(test)]

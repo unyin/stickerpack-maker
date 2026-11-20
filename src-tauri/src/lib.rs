@@ -54,6 +54,11 @@ pub fn run() {
             commands::editor_import_image,
             commands::editor_merge_layers,
             commands::editor_crop_layers,
+            commands::editor_probe_pasted,
+            commands::editor_import_pasted,
+            commands::editor_list_fonts,
+            commands::editor_render_text,
+            commands::editor_cut_layer,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

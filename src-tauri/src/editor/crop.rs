@@ -1,11 +1,13 @@
-//! "Crop" (SPEC §6): discard each raster layer's content outside the crop
-//! box. The webview plans the crop (src/editor/model/document.ts
+//! "Crop" (SPEC §6): discard each layer's content outside the crop box. The webview plans the crop (src/editor/model/document.ts
 //! `planCrop`): for every layer crossing the box edge it sends the layer and
 //! `clip`, the whole pixels the layer covers inside the box. Here each such
 //! layer is re-rendered into exactly that rectangle, placed by its
 //! transform the same way merge places it (and the Konva view draws it).
-//! The result is an untransformed image whose top-left is `clip`'s.
+//! The result is an untransformed image whose top-left is `clip`'s. A text
+//! layer crossing the box edge arrives as text and is rasterised first
+//! (merge.rs `split_layers`), so it is clipped exactly like an image.
 
+use fontdb::Database;
 use serde::Deserialize;
 use tiny_skia::Pixmap;
 
@@ -34,9 +36,13 @@ pub struct CropMeta {
 }
 
 /// Split a crop request's concatenated RGBA body into layers with their clips.
-pub fn split_crop_layers(meta: &[CropMeta], body: &[u8]) -> Result<Vec<(MergeInput, ClipRect)>, String> {
+pub fn split_crop_layers(
+    meta: &[CropMeta],
+    body: &[u8],
+    fonts: &Database,
+) -> Result<Vec<(MergeInput, ClipRect)>, String> {
     let layers: Vec<LayerMeta> = meta.iter().map(|m| m.layer.clone()).collect();
-    Ok(split_layers(&layers, body)?.into_iter().zip(meta.iter().map(|m| m.clip)).collect())
+    Ok(split_layers(&layers, body, fonts)?.into_iter().zip(meta.iter().map(|m| m.clip)).collect())
 }
 
 /// Render one layer into `clip`: the pixels the layer shows there, and
@@ -164,10 +170,32 @@ mod tests {
         )
         .unwrap();
         let body = [1, 2, 3, 255, 5, 6, 7, 255, 9, 10, 11, 255];
-        let layers = split_crop_layers(&meta, &body).unwrap();
+        let fonts = Database::new();
+        let layers = split_crop_layers(&meta, &body, &fonts).unwrap();
         assert_eq!(layers[0].1, ClipRect { x: 1, y: 0, width: 1, height: 1 });
         assert_eq!(crop(&layers).unwrap(), vec![5, 6, 7, 255, 9, 10, 11, 255]);
-        assert!(split_crop_layers(&meta, &body[..11]).is_err());
+        assert!(split_crop_layers(&meta, &body[..11], &fonts).is_err());
+    }
+
+    #[test]
+    fn a_text_layer_crossing_the_box_is_clipped_as_its_glyphs() {
+        // "A" at 100 px placed at (-30, 0): the glyph inks document x
+        // -20..20, y 10..80. Clipped to x 0..30 it keeps x 0..20.
+        let fonts = super::super::test_font::database();
+        let meta: Vec<CropMeta> = serde_json::from_str(&format!(
+            r##"[{{"width":60,"height":100,"transform":{{"x":-30,"y":0,"scaleX":1,"scaleY":1,"rotation":0}},
+                  "text":{{"text":"A","fontFamily":"{}","fontSize":100,"color":"#00ff00"}},
+                  "clip":{{"x":0,"y":0,"width":30,"height":100}}}}]"##,
+            super::super::test_font::FAMILY
+        ))
+        .unwrap();
+        let layers = split_crop_layers(&meta, &[], &fonts).unwrap();
+        let out = crop_layer(&layers[0].0, layers[0].1).unwrap();
+        assert_eq!((out.width, out.height), (30, 100));
+        assert_eq!(px(&out, 0, 10), [0, 255, 0, 255]);
+        assert_eq!(px(&out, 19, 79), [0, 255, 0, 255]);
+        assert_eq!(px(&out, 20, 50)[3], 0);
+        assert_eq!(px(&out, 10, 9)[3], 0);
     }
 
     #[test]

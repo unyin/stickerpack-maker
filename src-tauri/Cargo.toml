@@ -33,6 +33,12 @@ fast_image_resize = "6"
 # 2D rasteriser: composites transformed layers for "merge selected layers"
 # (and later the save flatten). Premultiplied RGBA internally.
 tiny-skia = "0.12"
+# Text layers (SPM-9): fontdb finds the system fonts (Windows Fonts folders,
+# fontconfig on Linux) and loads them by family; ab_glyph reads glyph
+# outlines and metrics, which tiny-skia fills, so text is rasterised in Rust
+# exactly the same for the view, merge, Crop and the save flatten.
+fontdb = "0.24"
+ab_glyph = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

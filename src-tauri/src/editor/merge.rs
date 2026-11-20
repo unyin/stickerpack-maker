@@ -1,11 +1,14 @@
 //! "Merge selected layers" (SPEC §6): composite raster layers, each placed
 //! by its transform exactly as the Konva view draws it (translate, then
 //! rotate, then scale, about the layer's top-left), into one layer covering
-//! their union. Text layers are rasterised by the text tool (SPM-9) first.
+//! their union. Text layers arrive as text, not pixels: each is rasterised
+//! from its outlines at its transform (text.rs) and composited like the rest.
 
+use fontdb::Database;
 use serde::Deserialize;
 use tiny_skia::{ColorU8, FilterQuality, IntSize, Pixmap, PixmapPaint, Point, Transform};
 
+use super::text::{rasterise_placed, TextSpec};
 use super::Rgba;
 
 /// Largest side a merged layer may have (guards runaway scales).
@@ -38,9 +41,14 @@ pub struct MergeInput {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LayerMeta {
+    /// Raster layers: the pixel size. Text layers: their box at scale 1
+    /// (informational; the box is laid out again from `text`).
     pub width: u32,
     pub height: u32,
     pub transform: LayerTransform,
+    /// Set for a text layer, which has no bytes in the body.
+    #[serde(default)]
+    pub text: Option<TextSpec>,
 }
 
 /// A merge result: an image whose top-left sits at (`x`, `y`) in the document.
@@ -63,11 +71,20 @@ impl PlacedImage {
 }
 
 /// Split the concatenated RGBA body of a merge request into layers, using
-/// each layer's declared size. The body must be exactly the sum of sizes.
-pub fn split_layers(meta: &[LayerMeta], body: &[u8]) -> Result<Vec<MergeInput>, String> {
+/// each raster layer's declared size. The body must be exactly the sum of
+/// sizes. Text layers take no bytes: each is rasterised with `fonts` at its
+/// transform into the whole pixels it covers, and becomes an aligned
+/// (integer-translated) raster input, so compositing copies it exactly.
+pub fn split_layers(meta: &[LayerMeta], body: &[u8], fonts: &Database) -> Result<Vec<MergeInput>, String> {
     let mut layers = Vec::with_capacity(meta.len());
     let mut offset = 0usize;
     for m in meta {
+        if let Some(text) = &m.text {
+            let placed = rasterise_placed(fonts, text, &m.transform)?;
+            let transform = LayerTransform { x: placed.x as f32, y: placed.y as f32, ..LayerTransform::IDENTITY };
+            layers.push(MergeInput { image: placed.image, transform });
+            continue;
+        }
         let len = m.width as usize * m.height as usize * 4;
         let end = offset + len;
         let pixels = body
@@ -356,17 +373,43 @@ mod tests {
 
     #[test]
     fn the_wire_body_splits_into_layers_by_their_sizes() {
+        let fonts = Database::new();
         let meta = [
-            LayerMeta { width: 1, height: 1, transform: LayerTransform::IDENTITY },
-            LayerMeta { width: 2, height: 1, transform: LayerTransform { x: 5.0, ..LayerTransform::IDENTITY } },
+            LayerMeta { width: 1, height: 1, transform: LayerTransform::IDENTITY, text: None },
+            LayerMeta { width: 2, height: 1, transform: LayerTransform { x: 5.0, ..LayerTransform::IDENTITY }, text: None },
         ];
         let body: Vec<u8> = (0..12).collect();
-        let layers = split_layers(&meta, &body).unwrap();
+        let layers = split_layers(&meta, &body, &fonts).unwrap();
         assert_eq!(layers[0].image.pixels, vec![0, 1, 2, 3]);
         assert_eq!(layers[1].image.pixels, (4..12).collect::<Vec<u8>>());
         assert_eq!(layers[1].transform.x, 5.0);
-        assert!(split_layers(&meta, &body[..11]).is_err());
-        assert!(split_layers(&meta, &[body.clone(), vec![0]].concat()).is_err());
+        assert!(split_layers(&meta, &body[..11], &fonts).is_err());
+        assert!(split_layers(&meta, &[body.clone(), vec![0]].concat(), &fonts).is_err());
+    }
+
+    #[test]
+    fn text_layers_take_no_bytes_and_merge_as_their_glyphs() {
+        // A white 100x100 base, then "A" in red at 100 px placed at (10, 0):
+        // its glyph inks x 20..60, y 10..80 (see text.rs).
+        let fonts = super::super::test_font::database();
+        let meta: Vec<LayerMeta> = serde_json::from_str(&format!(
+            r##"[{{"width":100,"height":100,"transform":{{"x":0,"y":0,"scaleX":1,"scaleY":1,"rotation":0}}}},
+                {{"width":60,"height":100,"transform":{{"x":10,"y":0,"scaleX":1,"scaleY":1,"rotation":0}},
+                  "text":{{"text":"A","fontFamily":"{}","fontSize":100,"color":"#ff0000"}}}}]"##,
+            super::super::test_font::FAMILY
+        ))
+        .unwrap();
+        let body = [255u8; 100 * 100 * 4];
+        let layers = split_layers(&meta, &body, &fonts).unwrap();
+        assert_eq!((layers[1].image.width, layers[1].image.height), (60, 100));
+        let merged = merge(&layers).unwrap();
+        assert_eq!((merged.x, merged.y, merged.image.width, merged.image.height), (0, 0, 100, 100));
+        assert_eq!(pixel(&merged, 20, 10), [255, 0, 0, 255]);
+        assert_eq!(pixel(&merged, 59, 79), [255, 0, 0, 255]);
+        assert_eq!(pixel(&merged, 19, 10), [255, 255, 255, 255]);
+        assert_eq!(pixel(&merged, 60, 50), [255, 255, 255, 255]);
+        // A text layer whose font is missing is refused, not skipped.
+        assert!(split_layers(&meta, &body, &Database::new()).unwrap_err().contains("not installed"));
     }
 
     #[test]
