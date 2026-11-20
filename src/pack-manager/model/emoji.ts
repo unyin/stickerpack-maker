@@ -27,3 +27,9 @@ export function emojiWarning(emojiString: string): string | null {
   if (count > EMOJI_MAX) return `${count} emoji: Telegram allows at most ${EMOJI_MAX}.`;
   return null;
 }
+
+/** The core's warning shape for an Emoji String (stickers::emoji_warning). */
+export function emojiCountWarning(emojiString: string): { kind: "emojiCount"; count: number } | null {
+  const count = emojiCount(emojiString);
+  return count < EMOJI_MIN || count > EMOJI_MAX ? { kind: "emojiCount", count } : null;
+}

@@ -3,13 +3,14 @@
 import { expect, test } from "bun:test";
 import limits from "../src/shared/limits.json";
 import type { StickerView } from "../src/pack-manager/api";
-import { EMOJI_MAX, emojiCount, emojiWarning } from "../src/pack-manager/model/emoji";
+import { EMOJI_MAX, emojiCount, emojiCountWarning, emojiWarning } from "../src/pack-manager/model/emoji";
 import {
   combinedSize,
   formatBytes,
   importSummary,
   matchesSearch,
   MISSING_REASON,
+  missingSummary,
   packDeleteMessage,
   packSizeText,
   sendBlocker,
@@ -128,6 +129,10 @@ test("emoji are counted as people see them, and warn outside 1-20", () => {
   expect(emojiWarning("😀")).toBeNull();
   expect(emojiWarning("😀".repeat(EMOJI_MAX))).toBeNull();
   expect(emojiWarning("😀".repeat(EMOJI_MAX + 1))).toContain(`at most ${EMOJI_MAX}`);
+  // Same shape the core reports in the pack view.
+  expect(emojiCountWarning("")).toEqual({ kind: "emojiCount", count: 0 });
+  expect(emojiCountWarning("😀😀")).toBeNull();
+  expect(emojiCountWarning("😀".repeat(EMOJI_MAX + 1))).toEqual({ kind: "emojiCount", count: EMOJI_MAX + 1 });
 });
 
 test("pack deletion wording depends on Draft or Live", () => {
@@ -173,7 +178,12 @@ test("combined size sums present files and counts Missing ones", () => {
 
 test("import and send reports say what happened", () => {
   expect(importSummary(2, 0)).toContain("Added 2 stickers without emoji");
+  expect(importSummary(0, 1)).toContain(`1 file is not a valid sticker`);
   expect(importSummary(0, 1)).toContain(`${limits.sticker.side} px`);
+  expect(importSummary(0, 2)).toContain(`2 files are not valid stickers`);
+  expect(missingSummary(0)).toBeNull();
+  expect(missingSummary(1)).toContain("1 sticker is Missing: its file");
+  expect(missingSummary(3)).toContain("3 stickers are Missing");
   const report = { copied: [], originalsDeleted: true, unfinished: "x", targetSizeWarning: null };
   expect(sendReportText(report, "Dogs")).toContain("Moved 0 stickers to “Dogs”. Not finished: x.");
 });

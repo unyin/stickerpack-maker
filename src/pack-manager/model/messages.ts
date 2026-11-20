@@ -56,6 +56,14 @@ export function warningText(warning: Warning | null): string | null {
   return warning.kind === "packSize" ? packSizeText(warning.count) : null;
 }
 
+/** The pack-level Missing banner, or null when nothing is Missing. */
+export function missingSummary(missing: number): string | null {
+  if (missing === 0) return null;
+  return missing === 1
+    ? "1 sticker is Missing: its file is not in the pack folder. Select it to replace or delete it."
+    : `${missing} stickers are Missing: their files are not in the pack folder. Select one to replace or delete it.`;
+}
+
 export const MISSING_REASON = "This sticker's file is Missing; replace it first.";
 export const MISSING_BANNER =
   "Missing: the file for this sticker is not in the pack folder (renamed, moved, or deleted outside the app). " +
@@ -83,7 +91,9 @@ export const STICKER_RULE =
 export function importSummary(added: number, rejected: number): string {
   const parts = [];
   if (added > 0) parts.push(`Added ${stickerCountText(added)} without emoji; give each its Emoji String.`);
-  if (rejected > 0) parts.push(`${rejected} file${rejected === 1 ? " was" : "s were"} not valid stickers (${STICKER_RULE}).`);
+  if (rejected > 0) {
+    parts.push(`${rejected === 1 ? "1 file is not a valid sticker" : `${rejected} files are not valid stickers`} (${STICKER_RULE}).`);
+  }
   return parts.join(" ");
 }
 

@@ -12,6 +12,12 @@
   --danger-bg: #fdf0ef;
   --danger-border: #e5a3a0;
   --danger-text: #8a2c26;
+  /* Warn-only conditions (Missing, emoji count, pack size): SPM-3. */
+  --warn-bg: #fff6e0;
+  --warn-border: #a87b0e;
+  --warn-text: #6b4a00;
+  /* Behind modal dialogs. */
+  --backdrop: rgb(0 0 0 / 45%);
 }
 
 /* Dark tokens (SPM-14). src/theme.ts sets data-theme on <html>: the stored
@@ -27,6 +33,10 @@
   --danger-bg: #38201e;
   --danger-border: #8a4a44;
   --danger-text: #f0b9b6;
+  --warn-bg: #33290f;
+  --warn-border: #9c7a22;
+  --warn-text: #f3d58a;
+  --backdrop: rgb(0 0 0 / 60%);
 }
 
 * {

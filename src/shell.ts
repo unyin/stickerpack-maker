@@ -1,6 +1,6 @@
 import type { AppState } from "./api";
 import { clear, el } from "./ui";
-import { renderEditor } from "./views/editor";
+import { openFileInEditor, renderEditor } from "./views/editor";
 import { renderPackManager } from "./views/pack-manager";
 import { renderSettings } from "./views/settings";
 
@@ -32,8 +32,14 @@ export function renderShell(
     }
     clear(content);
     if (view === "editor") content.append(renderEditor());
-    else if (view === "pack-manager") content.append(renderPackManager());
+    else if (view === "pack-manager") content.append(renderPackManager(state.libraryPath, { openInEditor }));
     else renderSettings(content, state, onChanged);
+  }
+
+  /** Pack Manager -> Editor: switch tabs, then open the file there. */
+  function openInEditor(path: string): void {
+    show("editor");
+    void openFileInEditor(path);
   }
 
   for (const item of NAV) {
