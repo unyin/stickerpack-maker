@@ -87,7 +87,7 @@ pub fn split_layers(meta: &[LayerMeta], body: &[u8]) -> Result<Vec<MergeInput>, 
 }
 
 /// The view's transform: translate, then rotate (degrees), then scale.
-fn transform_of(p: &LayerTransform) -> Result<Transform, String> {
+pub(super) fn transform_of(p: &LayerTransform) -> Result<Transform, String> {
     let finite = [p.x, p.y, p.scale_x, p.scale_y, p.rotation].iter().all(|v| v.is_finite());
     if !finite {
         return Err("a layer's transform is not a finite number".to_string());
@@ -96,7 +96,7 @@ fn transform_of(p: &LayerTransform) -> Result<Transform, String> {
 }
 
 /// Straight RGBA8 -> tiny-skia's premultiplied pixmap.
-fn to_pixmap(image: &Rgba) -> Result<Pixmap, String> {
+pub(super) fn to_pixmap(image: &Rgba) -> Result<Pixmap, String> {
     let expected = image.width as usize * image.height as usize * 4;
     if image.pixels.len() != expected {
         return Err(format!(
@@ -121,7 +121,7 @@ fn to_pixmap(image: &Rgba) -> Result<Pixmap, String> {
 /// with the leftover (near-1) scale. tiny-skia's bilinear filter samples only
 /// neighbouring pixels, so shrinking with it aliases; enlarging and rotating
 /// stay with tiny-skia, where bilinear is fine.
-fn shrink_to_drawn_size(layer: &MergeInput) -> Result<MergeInput, String> {
+pub(super) fn shrink_to_drawn_size(layer: &MergeInput) -> Result<MergeInput, String> {
     let t = layer.transform;
     transform_of(&t)?; // reject non-finite transforms before sizing anything
     let (w, h) = (layer.image.width, layer.image.height);
@@ -152,7 +152,7 @@ fn snap(v: f32) -> f32 {
 
 /// True when drawing needs no resampling (integer translation only), so
 /// pixels copy exactly.
-fn is_pixel_aligned(p: &LayerTransform) -> bool {
+pub(super) fn is_pixel_aligned(p: &LayerTransform) -> bool {
     p.scale_x == 1.0 && p.scale_y == 1.0 && p.rotation == 0.0 && p.x.fract() == 0.0 && p.y.fract() == 0.0
 }
 
@@ -189,22 +189,30 @@ pub fn merge(layers: &[MergeInput]) -> Result<PlacedImage, String> {
     let mut canvas = Pixmap::new(width.max(1), height.max(1))
         .ok_or_else(|| "cannot allocate the merged layer".to_string())?;
     for (pixmap, transform, aligned) in &prepared {
-        let paint = PixmapPaint {
-            quality: if *aligned { FilterQuality::Nearest } else { FilterQuality::Bilinear },
-            ..PixmapPaint::default()
-        };
-        canvas.draw_pixmap(0, 0, pixmap.as_ref(), &paint, transform.post_translate(-left, -top), None);
+        draw_placed(&mut canvas, pixmap, *transform, *aligned, left, top);
     }
+    Ok(PlacedImage { x: left as i32, y: top as i32, image: from_pixmap(&canvas) })
+}
+
+/// Draw a layer source-over onto `canvas`, whose top-left sits at
+/// (`left`, `top`) in the document: the one placement merge and crop share,
+/// so a pixel comes out the same whichever produced it.
+pub(super) fn draw_placed(canvas: &mut Pixmap, pixmap: &Pixmap, transform: Transform, aligned: bool, left: f32, top: f32) {
+    let paint = PixmapPaint {
+        quality: if aligned { FilterQuality::Nearest } else { FilterQuality::Bilinear },
+        ..PixmapPaint::default()
+    };
+    canvas.draw_pixmap(0, 0, pixmap.as_ref(), &paint, transform.post_translate(-left, -top), None);
+}
+
+/// tiny-skia's premultiplied pixmap -> straight RGBA8.
+pub(super) fn from_pixmap(canvas: &Pixmap) -> Rgba {
     let mut pixels = Vec::with_capacity(canvas.pixels().len() * 4);
     for px in canvas.pixels() {
         let c = px.demultiply();
         pixels.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
     }
-    Ok(PlacedImage {
-        x: left as i32,
-        y: top as i32,
-        image: Rgba { width: canvas.width(), height: canvas.height(), pixels },
-    })
+    Rgba { width: canvas.width(), height: canvas.height(), pixels }
 }
 
 #[cfg(test)]

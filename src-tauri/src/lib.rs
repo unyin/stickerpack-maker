@@ -53,6 +53,7 @@ pub fn run() {
             commands::editor_probe_image,
             commands::editor_import_image,
             commands::editor_merge_layers,
+            commands::editor_crop_layers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
