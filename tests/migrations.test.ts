@@ -46,12 +46,23 @@ test("bootstrap migrations apply cleanly and create the meta table", () => {
   db.close();
 });
 
-test("domain tables are intentionally absent until SPM-2", () => {
+test("domain migration creates the Library schema (SPM-2)", () => {
   const db = new Database(":memory:");
   applyAll(db);
   const tables = db
     .query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
     .all() as Array<{ name: string }>;
-  expect(tables.map((t) => t.name)).toEqual(["meta", "schema_migrations"]);
+  expect(tables.map((t) => t.name)).toEqual([
+    "meta",
+    "packs",
+    "rename_journal",
+    "schema_migrations",
+    "stickers",
+  ]);
+  // Short Names name the pack folders: unique, case-insensitively.
+  db.run("INSERT INTO packs (title, short_name) VALUES ('Cats', 'cats')");
+  expect(() =>
+    db.run("INSERT INTO packs (title, short_name) VALUES ('Cats', 'CATS')"),
+  ).toThrow();
   db.close();
 });

@@ -248,10 +248,16 @@ fn write_rows(tx: &Transaction, pack_id: i64, slots: &[Slot], deleted: &[Sticker
 }
 
 /// Bring a pack's folder up to date before touching its files: finish a
-/// pending folder rename, then roll forward a pending rename plan.
-fn open_pack_files(conn: &Connection, library_dir: &Path, pack_id: i64) -> Result<(Pack, PathBuf), String> {
+/// pending folder rename, recreate the folder if it was deleted outside the
+/// app (its stickers then read as Missing and can be replaced), then roll
+/// forward a pending rename plan and sweep stray pre-commit temps. Shared
+/// with desync detection.
+pub(super) fn open_pack_files(conn: &Connection, library_dir: &Path, pack_id: i64) -> Result<(Pack, PathBuf), String> {
     let pack = settle_pack_folder(conn, library_dir, pack_id)?;
     let dir = pack_dir(library_dir, &pack);
+    if !dir.exists() {
+        fs::create_dir(&dir).map_err(|e| format!("cannot recreate pack folder {}: {e}", dir.display()))?;
+    }
     files::recover(conn, &dir, pack_id)?;
     Ok((pack, dir))
 }
