@@ -155,6 +155,10 @@ stickers, Missing stickers, and the thumbnail.
   dialog: **OK** scales to fit within 2000×2000 preserving aspect ratio (longest side 2000);
   **Cancel** aborts the import.
 - The image is draggable on the canvas (pan/zoom for editing comfort).
+- One session at a time (owner decision 2026-11-20): with no session open, **Open image**
+  starts one; while a session is open, another image can only be brought in with **Add image
+  as layer** (placed centred on top, same 2000×2000 rule). Starting over means **Close**
+  first, which warns when there are unsaved changes.
 
 ### Crop and sizing
 - Togglable **512×512 box overlay**, fixed at canvas center; never draggable/resizable.

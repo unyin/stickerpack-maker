@@ -21,7 +21,8 @@ export interface ImageInfo {
 export interface RgbaImage {
   width: number;
   height: number;
-  pixels: Uint8ClampedArray;
+  /** Backed by a plain ArrayBuffer (never shared), as ImageData requires. */
+  pixels: Uint8ClampedArray<ArrayBuffer>;
 }
 
 export function probeImage(path: string): Promise<ImageInfo> {
