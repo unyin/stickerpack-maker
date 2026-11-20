@@ -12,7 +12,7 @@ Every operation needs undo/redo. The owner values the editing feel above all (AD
 **Interaction runs in the webview on Konva (MIT, v10). One-shot pixel work runs in Rust on maintained crates. The document model and history are ours, so neither side owns the state.**
 
 - **Document model and history (TypeScript, in the webview, no Konva types).**
-  - A `Document` has a size and an ordered list of layers. A **raster layer** is a pixel buffer plus a transform (position, scale, rotation). A **text layer** is text, a font, a size, a colour and a transform, and stays editable until it is merged or saved (SPEC §6).
+  - A `Doc` has a size and an ordered list of layers. A **raster layer** is a pixel buffer plus a transform (position, scale, rotation). A **text layer** is text, a font, a size, a colour and a transform, and stays editable until it is merged or saved (SPEC §6).
   - Z-order and the "unsaved changes" flag live in the model too. Selection lives beside it in the session, and is **not an undo step**: clicking between layers never fills the history, and undo/redo drops selected layers that no longer exist.
   - **History records whole document states with structural sharing.** Layers are immutable values, so a step only allocates what changed. A transform or z-order change makes a new layer list that reuses every pixel buffer; a pixel operation produces one new buffer for one layer. Undo restores the previous state, and "unsaved changes" means the current state is not the one last saved.
   - The history is capped by a **memory budget**, not a step count. The budget counts each pixel buffer only the current state does not use, once each. The oldest steps drop first, so a long session at 2000×2000 cannot exhaust memory.

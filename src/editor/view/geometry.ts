@@ -1,6 +1,6 @@
 // Pure decisions behind the Editor view: no Konva, no DOM, unit-tested.
-import type { RgbaImage } from "../api";
-import type { Doc, Transform } from "../model/document";
+import type { RgbaImage } from "../model/image";
+import { IDENTITY, type Doc, type Transform } from "../model/document";
 import type { SelectMode } from "../model/session";
 
 export const MIN_ZOOM = 0.05;
@@ -57,11 +57,9 @@ export function zoomAround(view: ViewTransform, pointer: Point, deltaY: number):
 /** Where "Add image as layer" puts an image: centred, at its own size, on whole pixels. */
 export function centeredPlacement(doc: Doc, image: RgbaImage): Transform {
   return {
+    ...IDENTITY,
     x: Math.round((doc.width - image.width) / 2),
     y: Math.round((doc.height - image.height) / 2),
-    scaleX: 1,
-    scaleY: 1,
-    rotation: 0,
   };
 }
 

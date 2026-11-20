@@ -5,7 +5,7 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import "../editor/editor.css";
 import { baseName } from "../api";
-import { importImage, mergeImages, pickImageFile, probeImage, type RgbaImage } from "../editor/api";
+import { IMPORT_MAX_SIDE, importImage, mergeImages, pickImageFile, probeImage } from "../editor/api";
 import {
   addRasterLayer,
   IDENTITY,
@@ -13,12 +13,13 @@ import {
   mergeLayers,
   moveLayer,
   newDocument,
-  type Doc,
+  nextLayerId,
 } from "../editor/model/document";
+import type { RgbaImage } from "../editor/model/image";
 import { EditorSession } from "../editor/model/session";
 import { centeredPlacement, mergeBlocker, selectModeFor } from "../editor/view/geometry";
 import { EditorStage } from "../editor/view/stage";
-import { el, errorMessage } from "../ui";
+import { el, withMessage } from "../ui";
 
 let root: HTMLElement | null = null;
 
@@ -57,7 +58,7 @@ function buildEditor(): HTMLElement {
     "div",
     { class: "editor-empty" },
     el("p", {}, "Open an image to start editing."),
-    el("p", { class: "muted" }, "JPG, JPEG, JFIF, PNG or WEBP. Images larger than 2000×2000 can be scaled to fit."),
+    el("p", { class: "muted" }, `JPG, JPEG, JFIF, PNG or WEBP. Images larger than ${IMPORT_MAX_SIDE}×${IMPORT_MAX_SIDE} can be scaled to fit.`),
     openButton,
   );
 
@@ -90,14 +91,13 @@ function buildEditor(): HTMLElement {
   async function run(action: () => Promise<void>): Promise<void> {
     if (busy) return;
     busy = true;
-    message.textContent = "";
+    stage?.setInteractive(false); // nothing is edited while an action works
     refresh();
     try {
-      await action();
-    } catch (err) {
-      message.textContent = errorMessage(err);
+      await withMessage(message, action);
     } finally {
       busy = false;
+      stage?.setInteractive(true);
       refresh();
     }
   }
@@ -108,9 +108,10 @@ function buildEditor(): HTMLElement {
     if (!path) return null;
     const info = await probeImage(path);
     if (info.exceedsCap) {
+      const side = `${IMPORT_MAX_SIDE}×${IMPORT_MAX_SIDE}`;
       const ok = await ask(
-        `This image is ${info.width}×${info.height}, larger than 2000×2000.\n\n` +
-          "OK scales it to fit within 2000×2000 (longest side 2000, aspect ratio kept). Cancel aborts the import.",
+        `This image is ${info.width}×${info.height}, larger than ${side}.\n\n` +
+          `OK scales it to fit within ${side} (longest side ${IMPORT_MAX_SIDE}, aspect ratio kept). Cancel aborts the import.`,
         { title: "Image too large", kind: "warning", okLabel: "OK", cancelLabel: "Cancel" },
       );
       if (!ok) return null;
@@ -134,9 +135,9 @@ function buildEditor(): HTMLElement {
     if (!current) return;
     const picked = await pickAndImport();
     if (!picked) return;
-    const before = current.doc;
+    const id = nextLayerId(current.doc);
     current.apply((doc) => addRasterLayer(doc, picked.image, picked.name, centeredPlacement(doc, picked.image)));
-    selectNew(current, before);
+    current.select(id);
   }
 
   async function mergeSelected(): Promise<void> {
@@ -145,9 +146,14 @@ function buildEditor(): HTMLElement {
     const doc = current.doc;
     // Bottom to top, as they are drawn.
     const chosen = doc.layers.filter((l) => current.selection.includes(l.id));
+    const id = nextLayerId(doc);
     const placed = await mergeImages(
       chosen.flatMap((l) => (l.kind === "raster" ? [{ image: l.image, transform: l.transform }] : [])),
     );
+    if (current.doc !== doc) {
+      message.textContent = "The layers changed while merging; nothing was merged. Try again.";
+      return;
+    }
     current.apply((d) =>
       mergeLayers(
         d,
@@ -156,7 +162,7 @@ function buildEditor(): HTMLElement {
         { ...IDENTITY, x: placed.x, y: placed.y },
       ),
     );
-    selectNew(current, doc);
+    current.select(id);
   }
 
   async function closeSession(): Promise<void> {
@@ -184,13 +190,6 @@ function buildEditor(): HTMLElement {
       const target = index + step;
       return target < 0 || target >= doc.layers.length ? doc : moveLayer(doc, id, target);
     });
-  }
-
-  /** Select the layer an operation just created (the one id `before` lacked). */
-  function selectNew(current: EditorSession, before: Doc): void {
-    const old = new Set(before.layers.map((l) => l.id));
-    const created = current.doc.layers.find((l) => !old.has(l.id));
-    if (created) current.select(created.id);
   }
 
   function renderLayers(current: EditorSession): void {
@@ -256,7 +255,5 @@ function buildEditor(): HTMLElement {
 }
 
 function button(label: string, onClick: () => void, variant?: "primary"): HTMLButtonElement {
-  const b = el("button", { class: variant ?? "secondary" }, label) as HTMLButtonElement;
-  b.addEventListener("click", onClick);
-  return b;
+  return el("button", { class: variant ?? "secondary", onclick: onClick }, label) as HTMLButtonElement;
 }

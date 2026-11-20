@@ -2,7 +2,7 @@
 // turns gestures into model operations. It never holds state the model
 // lacks, so undo/redo and save never read from Konva.
 import Konva from "konva";
-import type { RgbaImage } from "../api";
+import type { RgbaImage } from "../model/image";
 import { setTransform, type Doc, type Layer, type Transform } from "../model/document";
 import type { EditorSession } from "../model/session";
 import { fitView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
@@ -24,18 +24,27 @@ function canvasFor(image: RgbaImage): HTMLCanvasElement {
 }
 
 /** A light checkerboard tile showing transparency on the document area. */
-function checkerTile(): HTMLCanvasElement {
+function checkerTile(light: string, dark: string): HTMLCanvasElement {
   const tile = document.createElement("canvas");
   tile.width = tile.height = 16;
   const context = tile.getContext("2d");
   if (context) {
-    context.fillStyle = "#ffffff";
+    context.fillStyle = light;
     context.fillRect(0, 0, 16, 16);
-    context.fillStyle = "#e3e6ea";
+    context.fillStyle = dark;
     context.fillRect(0, 0, 8, 8);
     context.fillRect(8, 8, 8, 8);
   }
   return tile;
+}
+
+/**
+ * Reads a shared design token from src/styles.css. The canvas takes these
+ * colours once, at stage creation; a live theme switch (SPM-14) would need the
+ * stage to re-read them (e.g. on reopen).
+ */
+function token(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
 function transformOf(node: Konva.Node): Transform {
@@ -60,9 +69,14 @@ export class EditorStage {
   private readonly stage: Konva.Stage;
   private readonly content = new Konva.Layer();
   private readonly backdrop: Konva.Rect;
+  // Konva never holds state the model lacks (ADR-0005): the model's Transform
+  // has no skew and no flips, and SPEC §6 needs only aspect-preserving resize
+  // plus rotate. So only the corner anchors exist, ratio is kept, flips off.
   private readonly transformer = new Konva.Transformer({
+    enabledAnchors: ["top-left", "top-right", "bottom-left", "bottom-right"],
     rotateEnabled: true,
     keepRatio: true,
+    flipEnabled: false,
     ignoreStroke: true,
   });
   private readonly nodes = new Map<string, Konva.Shape>();
@@ -83,8 +97,8 @@ export class EditorStage {
       draggable: true,
     });
     this.backdrop = new Konva.Rect({
-      fillPatternImage: checkerTile() as unknown as HTMLImageElement,
-      stroke: "#9aa5b1",
+      fillPatternImage: checkerTile(token("--panel"), token("--border")) as unknown as HTMLImageElement,
+      stroke: token("--muted"),
       strokeWidth: 1,
       strokeScaleEnabled: false,
       listening: false,
@@ -122,6 +136,16 @@ export class EditorStage {
   fit(): void {
     const doc = this.session.doc;
     this.setView(fitView({ width: this.stage.width(), height: this.stage.height() }, doc, FIT_MARGIN));
+  }
+
+  /**
+   * Suspend or resume all pointer interaction (layers, selection, panning),
+   * so nothing is edited while an async operation works from a snapshot.
+   */
+  setInteractive(enabled: boolean): void {
+    this.content.listening(enabled);
+    this.stage.draggable(enabled);
+    this.content.batchDraw();
   }
 
   destroy(): void {
@@ -162,7 +186,8 @@ export class EditorStage {
     }
     doc.layers.forEach((layer, index) => {
       const node = this.nodeFor(layer);
-      node.setAttrs({ ...layer.transform });
+      // skew is reset so the view can never hold skew the model lacks (ADR-0005).
+      node.setAttrs({ ...layer.transform, skewX: 0, skewY: 0 });
       if (layer.kind === "raster") (node as Konva.Image).image(canvasFor(layer.image));
       else {
         (node as Konva.Text).setAttrs({

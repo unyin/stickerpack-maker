@@ -14,7 +14,7 @@ pub const MAX_MERGE_SIDE: u32 = 8192;
 /// A layer's transform; mirrors `Transform` in src/editor/model/document.ts.
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Placement {
+pub struct LayerTransform {
     pub x: f32,
     pub y: f32,
     pub scale_x: f32,
@@ -23,15 +23,15 @@ pub struct Placement {
     pub rotation: f32,
 }
 
-impl Placement {
-    pub const IDENTITY: Placement = Placement { x: 0.0, y: 0.0, scale_x: 1.0, scale_y: 1.0, rotation: 0.0 };
+impl LayerTransform {
+    pub const IDENTITY: LayerTransform = LayerTransform { x: 0.0, y: 0.0, scale_x: 1.0, scale_y: 1.0, rotation: 0.0 };
 }
 
 /// One merge input: pixels plus where they sit in the document.
 #[derive(Debug, Clone)]
-pub struct PlacedLayer {
+pub struct MergeInput {
     pub image: Rgba,
-    pub placement: Placement,
+    pub transform: LayerTransform,
 }
 
 /// Per-layer metadata sent alongside the concatenated pixel body.
@@ -40,18 +40,18 @@ pub struct PlacedLayer {
 pub struct LayerMeta {
     pub width: u32,
     pub height: u32,
-    pub transform: Placement,
+    pub transform: LayerTransform,
 }
 
 /// A merge result: an image whose top-left sits at (`x`, `y`) in the document.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Placed {
+pub struct PlacedImage {
     pub x: i32,
     pub y: i32,
     pub image: Rgba,
 }
 
-impl Placed {
+impl PlacedImage {
     /// Binary IPC frame: i32 LE x, i32 LE y, then `Rgba::to_frame`.
     pub fn to_frame(&self) -> Vec<u8> {
         let mut frame = Vec::with_capacity(8);
@@ -64,7 +64,7 @@ impl Placed {
 
 /// Split the concatenated RGBA body of a merge request into layers, using
 /// each layer's declared size. The body must be exactly the sum of sizes.
-pub fn split_layers(meta: &[LayerMeta], body: &[u8]) -> Result<Vec<PlacedLayer>, String> {
+pub fn split_layers(meta: &[LayerMeta], body: &[u8]) -> Result<Vec<MergeInput>, String> {
     let mut layers = Vec::with_capacity(meta.len());
     let mut offset = 0usize;
     for m in meta {
@@ -74,9 +74,9 @@ pub fn split_layers(meta: &[LayerMeta], body: &[u8]) -> Result<Vec<PlacedLayer>,
             .get(offset..end)
             .ok_or_else(|| "merge request body is shorter than its layers".to_string())?
             .to_vec();
-        layers.push(PlacedLayer {
+        layers.push(MergeInput {
             image: Rgba { width: m.width, height: m.height, pixels },
-            placement: m.transform,
+            transform: m.transform,
         });
         offset = end;
     }
@@ -87,7 +87,7 @@ pub fn split_layers(meta: &[LayerMeta], body: &[u8]) -> Result<Vec<PlacedLayer>,
 }
 
 /// The view's transform: translate, then rotate (degrees), then scale.
-fn transform_of(p: &Placement) -> Result<Transform, String> {
+fn transform_of(p: &LayerTransform) -> Result<Transform, String> {
     let finite = [p.x, p.y, p.scale_x, p.scale_y, p.rotation].iter().all(|v| v.is_finite());
     if !finite {
         return Err("a layer's transform is not a finite number".to_string());
@@ -125,20 +125,20 @@ fn snap(v: f32) -> f32 {
 
 /// True when drawing needs no resampling (integer translation only), so
 /// pixels copy exactly.
-fn is_pixel_aligned(p: &Placement) -> bool {
+fn is_pixel_aligned(p: &LayerTransform) -> bool {
     p.scale_x == 1.0 && p.scale_y == 1.0 && p.rotation == 0.0 && p.x.fract() == 0.0 && p.y.fract() == 0.0
 }
 
 /// Composite two or more raster layers, bottom to top, source-over, into
 /// one image covering the union of their transformed bounds.
-pub fn merge(layers: &[PlacedLayer]) -> Result<Placed, String> {
+pub fn merge(layers: &[MergeInput]) -> Result<PlacedImage, String> {
     if layers.len() < 2 {
         return Err("merging needs at least two layers".to_string());
     }
     let mut prepared = Vec::with_capacity(layers.len());
     let (mut min_x, mut min_y, mut max_x, mut max_y) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for layer in layers {
-        let transform = transform_of(&layer.placement)?;
+        let transform = transform_of(&layer.transform)?;
         let pixmap = to_pixmap(&layer.image)?;
         let (w, h) = (layer.image.width as f32, layer.image.height as f32);
         let mut corners = [Point::from_xy(0.0, 0.0), Point::from_xy(w, 0.0), Point::from_xy(0.0, h), Point::from_xy(w, h)];
@@ -149,7 +149,7 @@ pub fn merge(layers: &[PlacedLayer]) -> Result<Placed, String> {
             max_x = max_x.max(c.x);
             max_y = max_y.max(c.y);
         }
-        prepared.push((pixmap, transform, is_pixel_aligned(&layer.placement)));
+        prepared.push((pixmap, transform, is_pixel_aligned(&layer.transform)));
     }
     let (left, top) = (snap(min_x).floor(), snap(min_y).floor());
     let (width, height) = ((snap(max_x).ceil() - left) as u32, (snap(max_y).ceil() - top) as u32);
@@ -172,7 +172,7 @@ pub fn merge(layers: &[PlacedLayer]) -> Result<Placed, String> {
         let c = px.demultiply();
         pixels.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
     }
-    Ok(Placed {
+    Ok(PlacedImage {
         x: left as i32,
         y: top as i32,
         image: Rgba { width: canvas.width(), height: canvas.height(), pixels },
@@ -187,11 +187,11 @@ mod tests {
         Rgba { width, height, pixels: px.repeat((width * height) as usize) }
     }
 
-    fn at(image: Rgba, x: f32, y: f32) -> PlacedLayer {
-        PlacedLayer { image, placement: Placement { x, y, ..Placement::IDENTITY } }
+    fn at(image: Rgba, x: f32, y: f32) -> MergeInput {
+        MergeInput { image, transform: LayerTransform { x, y, ..LayerTransform::IDENTITY } }
     }
 
-    fn pixel(p: &Placed, doc_x: i32, doc_y: i32) -> [u8; 4] {
+    fn pixel(p: &PlacedImage, doc_x: i32, doc_y: i32) -> [u8; 4] {
         let (lx, ly) = ((doc_x - p.x) as u32, (doc_y - p.y) as u32);
         let i = ((ly * p.image.width + lx) * 4) as usize;
         p.image.pixels[i..i + 4].try_into().unwrap()
@@ -247,18 +247,18 @@ mod tests {
     fn scale_and_rotation_place_layers_like_the_view() {
         let base = solid(1, 1, [0, 0, 0, 255]);
         // 2x2 scaled by 2 at (0,0) covers 4x4.
-        let scaled = PlacedLayer {
+        let scaled = MergeInput {
             image: solid(2, 2, [255, 0, 0, 255]),
-            placement: Placement { scale_x: 2.0, scale_y: 2.0, ..Placement::IDENTITY },
+            transform: LayerTransform { scale_x: 2.0, scale_y: 2.0, ..LayerTransform::IDENTITY },
         };
         let merged = merge(&[at(base.clone(), 0.0, 0.0), scaled]).unwrap();
         assert_eq!((merged.image.width, merged.image.height), (4, 4));
         assert!(close(pixel(&merged, 3, 3), [255, 0, 0, 255]));
         // 4x2 rotated 90 degrees clockwise about its top-left at (0,0)
         // swings down-left: it covers x in [-2, 0), y in [0, 4).
-        let rotated = PlacedLayer {
+        let rotated = MergeInput {
             image: solid(4, 2, [0, 255, 0, 255]),
-            placement: Placement { rotation: 90.0, ..Placement::IDENTITY },
+            transform: LayerTransform { rotation: 90.0, ..LayerTransform::IDENTITY },
         };
         let merged = merge(&[at(base, 0.0, 0.0), rotated]).unwrap();
         assert_eq!((merged.x, merged.y), (-2, 0));
@@ -270,19 +270,19 @@ mod tests {
     fn merging_needs_two_valid_layers_of_bounded_size() {
         let one = at(solid(2, 2, [0, 0, 0, 255]), 0.0, 0.0);
         assert!(merge(std::slice::from_ref(&one)).is_err());
-        let huge = PlacedLayer {
+        let huge = MergeInput {
             image: solid(2, 2, [0, 0, 0, 255]),
-            placement: Placement { scale_x: 10_000.0, scale_y: 1.0, ..Placement::IDENTITY },
+            transform: LayerTransform { scale_x: 10_000.0, scale_y: 1.0, ..LayerTransform::IDENTITY },
         };
         assert!(merge(&[one.clone(), huge]).unwrap_err().contains("too large"));
-        let broken = PlacedLayer {
+        let broken = MergeInput {
             image: Rgba { width: 2, height: 2, pixels: vec![0; 3] },
-            placement: Placement::IDENTITY,
+            transform: LayerTransform::IDENTITY,
         };
         assert!(merge(&[one.clone(), broken]).is_err());
-        let nan = PlacedLayer {
+        let nan = MergeInput {
             image: solid(1, 1, [0, 0, 0, 255]),
-            placement: Placement { x: f32::NAN, ..Placement::IDENTITY },
+            transform: LayerTransform { x: f32::NAN, ..LayerTransform::IDENTITY },
         };
         assert!(merge(&[one, nan]).is_err());
     }
@@ -290,21 +290,21 @@ mod tests {
     #[test]
     fn the_wire_body_splits_into_layers_by_their_sizes() {
         let meta = [
-            LayerMeta { width: 1, height: 1, transform: Placement::IDENTITY },
-            LayerMeta { width: 2, height: 1, transform: Placement { x: 5.0, ..Placement::IDENTITY } },
+            LayerMeta { width: 1, height: 1, transform: LayerTransform::IDENTITY },
+            LayerMeta { width: 2, height: 1, transform: LayerTransform { x: 5.0, ..LayerTransform::IDENTITY } },
         ];
         let body: Vec<u8> = (0..12).collect();
         let layers = split_layers(&meta, &body).unwrap();
         assert_eq!(layers[0].image.pixels, vec![0, 1, 2, 3]);
         assert_eq!(layers[1].image.pixels, (4..12).collect::<Vec<u8>>());
-        assert_eq!(layers[1].placement.x, 5.0);
+        assert_eq!(layers[1].transform.x, 5.0);
         assert!(split_layers(&meta, &body[..11]).is_err());
         assert!(split_layers(&meta, &[body.clone(), vec![0]].concat()).is_err());
     }
 
     #[test]
     fn placed_frame_prefixes_the_signed_origin() {
-        let p = Placed { x: -2, y: 3, image: Rgba { width: 1, height: 1, pixels: vec![9, 9, 9, 9] } };
+        let p = PlacedImage { x: -2, y: 3, image: Rgba { width: 1, height: 1, pixels: vec![9, 9, 9, 9] } };
         let frame = p.to_frame();
         assert_eq!(&frame[..8], &[0xFE, 0xFF, 0xFF, 0xFF, 3, 0, 0, 0]);
         assert_eq!(&frame[8..16], &[1, 0, 0, 0, 1, 0, 0, 0]);
@@ -312,8 +312,8 @@ mod tests {
 
     #[test]
     fn transform_json_matches_the_typescript_field_names() {
-        let t: Placement =
+        let t: LayerTransform =
             serde_json::from_str(r#"{"x":1,"y":2,"scaleX":3,"scaleY":4,"rotation":5}"#).unwrap();
-        assert_eq!(t, Placement { x: 1.0, y: 2.0, scale_x: 3.0, scale_y: 4.0, rotation: 5.0 });
+        assert_eq!(t, LayerTransform { x: 1.0, y: 2.0, scale_x: 3.0, scale_y: 4.0, rotation: 5.0 });
     }
 }

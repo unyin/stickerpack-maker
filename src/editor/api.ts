@@ -2,6 +2,7 @@
 // "Editor" section; pixel work lives in src-tauri/src/editor/, ADR-0005).
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import type { RgbaImage } from "./model/image";
 import type { Transform } from "./model/document";
 
 /** Extensions the Editor imports; mirrors IMPORT_EXTENSIONS in import.rs. */
@@ -15,14 +16,6 @@ export interface ImageInfo {
   width: number;
   height: number;
   exceedsCap: boolean;
-}
-
-/** A straight (non-premultiplied) RGBA8 image, as canvas ImageData uses. */
-export interface RgbaImage {
-  width: number;
-  height: number;
-  /** Backed by a plain ArrayBuffer (never shared), as ImageData requires. */
-  pixels: Uint8ClampedArray<ArrayBuffer>;
 }
 
 export function probeImage(path: string): Promise<ImageInfo> {
@@ -112,7 +105,7 @@ export async function mergeImages(inputs: readonly MergeInput[]): Promise<Placed
   return decodePlacedFrame(frame);
 }
 
-/** Parse `Placed::to_frame`: i32 LE x, i32 LE y, then an image frame. */
+/** Parse `PlacedImage::to_frame`: i32 LE x, i32 LE y, then an image frame. */
 export function decodePlacedFrame(frame: ArrayBuffer): PlacedImage {
   if (frame.byteLength < 8) throw new Error("placed image frame is truncated");
   const origin = new DataView(frame, 0, 8);

@@ -1,7 +1,7 @@
 // One editing session: the document history, the layer selection, and
 // change notifications for the view. Selection is NOT an undo step
 // (ADR-0005); undo/redo prunes it to layers that still exist.
-import type { Doc } from "./document";
+import { layerIndex, type Doc } from "./document";
 import { DEFAULT_HISTORY_BUDGET, History } from "./history";
 
 /** Pixel buffers of a document, for the history's memory budget. */
@@ -72,7 +72,7 @@ export class EditorSession {
 
   /** Select a layer: "replace" makes it the only selection, "toggle" adds or removes it. */
   select(id: string, mode: SelectMode = "replace"): void {
-    if (!this.doc.layers.some((l) => l.id === id)) throw new Error(`layer ${id} does not exist`);
+    layerIndex(this.doc, id); // throws when the layer does not exist
     if (mode === "replace") this.selected = [id];
     else if (this.selected.includes(id)) this.selected = this.selected.filter((s) => s !== id);
     else this.selected = [...this.selected, id];

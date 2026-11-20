@@ -1,9 +1,9 @@
 // The Editor document (ADR-0005): an immutable value. Every operation
 // returns a new Doc and reuses every layer (and pixel buffer) it did not
 // change, so history can keep whole states cheaply. No Konva, no DOM.
-import type { RgbaImage } from "../api";
+import type { RgbaImage } from "./image";
 
-/** Placement of a layer in document pixels; rotation in degrees (Konva's convention). */
+/** Transform of a layer in document pixels; rotation in degrees (Konva's convention). */
 export interface Transform {
   readonly x: number;
   readonly y: number;
@@ -63,6 +63,11 @@ export function newDocument(image: RgbaImage, name: string): Doc {
   };
 }
 
+/** The id the next added or merged layer will get. */
+export function nextLayerId(doc: Doc): string {
+  return `layer-${doc.nextId}`;
+}
+
 /** Position of a layer in the stack (0 = bottom); throws when absent. */
 export function layerIndex(doc: Doc, id: string): number {
   const index = doc.layers.findIndex((l) => l.id === id);
@@ -88,7 +93,7 @@ export function addRasterLayer(
   name: string,
   transform: Transform = IDENTITY,
 ): Doc {
-  const layer: RasterLayer = { kind: "raster", id: `layer-${doc.nextId}`, name, transform, image };
+  const layer: RasterLayer = { kind: "raster", id: nextLayerId(doc), name, transform, image };
   return withLayers(doc, [...doc.layers, layer], doc.nextId + 1);
 }
 
@@ -96,7 +101,7 @@ export function addRasterLayer(
 export function addTextLayer(doc: Doc, style: TextStyle, transform: Transform = IDENTITY): Doc {
   const layer: TextLayer = {
     kind: "text",
-    id: `layer-${doc.nextId}`,
+    id: nextLayerId(doc),
     name: style.text,
     transform,
     ...style,
@@ -126,13 +131,6 @@ export function moveLayer(doc: Doc, id: string, toIndex: number): Doc {
   return withLayers(doc, layers);
 }
 
-/** Remove a layer; a document always keeps at least one. */
-export function removeLayer(doc: Doc, id: string): Doc {
-  const index = layerIndex(doc, id);
-  if (doc.layers.length === 1) throw new Error("a document must keep at least one layer");
-  return withLayers(doc, doc.layers.filter((_, i) => i !== index));
-}
-
 /**
  * Replace two or more layers with one merged raster layer (the composite
  * is produced in Rust, ADR-0005). The merged layer takes the slot of the
@@ -150,7 +148,7 @@ export function mergeLayers(
   const top = Math.max(...indices);
   const merged: RasterLayer = {
     kind: "raster",
-    id: `layer-${doc.nextId}`,
+    id: nextLayerId(doc),
     name: "Merged",
     transform,
     image,

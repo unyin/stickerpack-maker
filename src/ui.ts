@@ -1,5 +1,5 @@
-// Minimal DOM helpers. The scaffold uses no UI framework; the Editor's canvas
-// library choice is deferred to SPM-5 (SPEC §9).
+// Minimal DOM helpers. The UI uses no framework; the one exception is the
+// Editor's canvas, which uses Konva (ADR-0005, src/editor/).
 
 type Attrs = Record<string, string | boolean | EventListener>;
 

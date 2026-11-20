@@ -1,7 +1,7 @@
 // Editor document model, history, and session (ADR-0005): pure TypeScript,
 // no Konva, no DOM.
 import { expect, test } from "bun:test";
-import type { RgbaImage } from "../src/editor/api";
+import type { RgbaImage } from "../src/editor/model/image";
 import {
   addRasterLayer,
   addTextLayer,
@@ -10,7 +10,7 @@ import {
   mergeLayers,
   moveLayer,
   newDocument,
-  removeLayer,
+  nextLayerId,
   setLayerImage,
   setTransform,
   type Doc,
@@ -61,13 +61,15 @@ test("new layers go on top with unique ids; text layers carry their text", () =>
   expect(doc.layers[1].transform.x).toBe(2);
 });
 
-test("ids stay unique after removing the newest layer", () => {
-  let doc = newDocument(image(4, 4), "base");
-  doc = addRasterLayer(doc, image(1, 1), "a");
-  const removedId = doc.layers[1].id;
-  doc = removeLayer(doc, removedId);
-  doc = addRasterLayer(doc, image(1, 1), "b");
-  expect(doc.layers[1].id).not.toBe(removedId);
+test("the id an add or merge creates equals nextLayerId of the input doc", () => {
+  const base = newDocument(image(4, 4), "base");
+  const raster = addRasterLayer(base, image(1, 1), "a");
+  expect(raster.layers[1].id).toBe(nextLayerId(base));
+  const text = addTextLayer(raster, { text: "hi", fontFamily: "sans-serif", fontSize: 24, color: "#000" });
+  expect(text.layers[2].id).toBe(nextLayerId(raster));
+  const merged = mergeLayers(text, [text.layers[0].id, text.layers[1].id], image(1, 1), IDENTITY);
+  expect(merged.layers.map((l) => l.id)).toContain(nextLayerId(text));
+  expect(nextLayerId(merged)).not.toBe(nextLayerId(text));
 });
 
 test("z-order moves clamp to the stack", () => {
@@ -95,11 +97,6 @@ test("transform and image changes reuse untouched layers", () => {
   const repainted = setLayerImage(doc, b.id, image(2, 2, 9));
   expect(repainted.layers[0]).toBe(a);
   expect(() => setLayerImage(doc, "nope", image(1, 1))).toThrow();
-});
-
-test("removing the last layer is refused: a document always has one", () => {
-  const doc = newDocument(image(4, 4), "a");
-  expect(() => removeLayer(doc, doc.layers[0].id)).toThrow();
 });
 
 test("merge replaces the chosen layers with one at the topmost chosen slot", () => {
@@ -230,7 +227,7 @@ test("a failing operation leaves the session unchanged", () => {
   const s = new EditorSession(newDocument(image(4, 4), "base"));
   const before = s.doc;
   expect(() =>
-    s.apply((d) => removeLayer(d, d.layers[0].id)),
+    s.apply((d) => setLayerImage(d, "nope", image(1, 1))),
   ).toThrow();
   expect(s.doc).toBe(before);
   expect(s.canUndo).toBe(false);

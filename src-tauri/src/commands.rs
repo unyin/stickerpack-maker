@@ -147,7 +147,7 @@ pub const MERGE_LAYERS_HEADER: &str = "x-merge-layers";
 
 /// Merge selected raster layers (SPEC §6). Request: raw body = the layers'
 /// RGBA bytes concatenated bottom to top, header `x-merge-layers` = their
-/// sizes and transforms. Response: `Placed::to_frame` (origin + image).
+/// sizes and transforms. Response: `PlacedImage::to_frame` (origin + image).
 #[tauri::command(async)]
 pub fn editor_merge_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
     let tauri::ipc::InvokeBody::Raw(body) = request.body() else {

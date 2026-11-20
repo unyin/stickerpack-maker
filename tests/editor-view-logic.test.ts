@@ -1,7 +1,7 @@
 // Pure decisions behind the Editor view (src/editor/view/geometry.ts):
 // fitting, zooming, placement, merge eligibility, click modifiers.
 import { expect, test } from "bun:test";
-import type { RgbaImage } from "../src/editor/api";
+import type { RgbaImage } from "../src/editor/model/image";
 import { addRasterLayer, addTextLayer, newDocument } from "../src/editor/model/document";
 import {
   centeredPlacement,
