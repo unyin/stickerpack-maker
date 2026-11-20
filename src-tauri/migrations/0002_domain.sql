@@ -8,7 +8,9 @@
 -- roll-forward recovery (ADR-0004).
 
 CREATE TABLE packs (
-    id         INTEGER PRIMARY KEY,
+    -- AUTOINCREMENT: ids are never reused, so a pack folder left behind by a
+    -- failed delete can never be adopted by a new pack (ADR-0004).
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
     title      TEXT NOT NULL,
     short_name TEXT NOT NULL,
     status     TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'live')),
