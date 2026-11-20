@@ -16,7 +16,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 use super::files;
-use super::schema::{load_pack, Pack, PackStatus};
+use super::schema::{load_pack, load_packs, Pack, PackStatus};
 
 /// Longest Title, in characters (SPEC §7).
 pub const MAX_TITLE_CHARS: usize = 64;
@@ -90,6 +90,37 @@ fn unique_auto_short_name(conn: &Connection, library_dir: &Path, base: &str) -> 
         }
     }
     Err(format!("cannot find a free Short Name derived from {base:?}"))
+}
+
+/// The Short Name `create_pack` would auto-derive for `title` right now:
+/// the create dialog's live preview (SPEC §5). Not reserved — another pack
+/// may take it first, and creation derives it again.
+pub fn suggest_short_name(conn: &Connection, library_dir: &Path, title: &str) -> Result<String, String> {
+    unique_auto_short_name(conn, library_dir, &auto_short_name(title.trim()))
+}
+
+/// A pack as the pack list shows it: the row plus its sticker count, read
+/// from the database only (no file checks: desync detection runs on pack
+/// open and refresh, never on the list or at app start, SPEC §4).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackSummary {
+    #[serde(flatten)]
+    pub pack: Pack,
+    pub sticker_count: i64,
+}
+
+/// Every pack in creation order, with its sticker count.
+pub fn pack_summaries(conn: &Connection) -> Result<Vec<PackSummary>, String> {
+    load_packs(conn)?
+        .into_iter()
+        .map(|pack| {
+            let sticker_count = conn
+                .query_row("SELECT COUNT(*) FROM stickers WHERE pack_id = ?1", params![pack.id], |r| r.get(0))
+                .map_err(|e| format!("cannot count stickers of pack {}: {e}", pack.id))?;
+            Ok(PackSummary { pack, sticker_count })
+        })
+        .collect()
 }
 
 /// Create a pack (Draft, SPEC §3). A given `short_name` is validated and
@@ -581,6 +612,40 @@ mod tests {
             names.sort();
             names
         }
+    }
+
+    #[test]
+    fn suggested_short_name_matches_what_creation_derives() {
+        let mut lib = Lib::new();
+        assert_eq!(suggest_short_name(&lib.conn, lib.path(), "  Cats!  ").unwrap(), "cats");
+        lib.create("Cats", None).unwrap();
+        assert_eq!(suggest_short_name(&lib.conn, lib.path(), "Cats").unwrap(), "cats_2");
+        assert_eq!(lib.create("Cats", None).unwrap().short_name, "cats_2");
+        assert_eq!(suggest_short_name(&lib.conn, lib.path(), "").unwrap(), "pack");
+        assert_eq!(suggest_short_name(&lib.conn, lib.path(), "con").unwrap(), "con_pack");
+        // A non-empty foreign folder is skipped, like creation does.
+        fs::create_dir(lib.path().join("dogs")).unwrap();
+        fs::write(lib.path().join("dogs").join("x.png"), "x").unwrap();
+        assert_eq!(suggest_short_name(&lib.conn, lib.path(), "Dogs").unwrap(), "dogs_2");
+    }
+
+    #[test]
+    fn summaries_list_packs_in_creation_order_with_sticker_counts() {
+        let mut lib = Lib::new();
+        let a = lib.create("A", None).unwrap();
+        let b = lib.create("B", None).unwrap();
+        lib.conn
+            .execute_batch(&format!(
+                "INSERT INTO stickers (pack_id, position, file_name, format) VALUES
+                     ({0}, 1, '001.png', 'png'), ({0}, 2, '002.png', 'png');",
+                b.id
+            ))
+            .unwrap();
+        let list = pack_summaries(&lib.conn).unwrap();
+        assert_eq!(list.iter().map(|p| (p.pack.id, p.sticker_count)).collect::<Vec<_>>(), [(a.id, 0), (b.id, 2)]);
+        let json = serde_json::to_value(&list[1]).unwrap();
+        assert_eq!(json["shortName"], "b");
+        assert_eq!(json["stickerCount"], 2);
     }
 
     #[test]

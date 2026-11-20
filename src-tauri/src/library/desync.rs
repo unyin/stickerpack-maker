@@ -1,14 +1,35 @@
 //! Desync detection (SPEC §4): runs ONLY when a pack is opened and on
 //! manual refresh — never on app start.
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 use serde::Serialize;
 
 use super::packs::open_pack_files;
-use super::schema::{load_stickers, Pack, Sticker};
-use super::stickers::{emoji_warning, pack_size_warning, Warning};
+use super::schema::{load_pack, load_sticker, load_stickers, Pack, Sticker};
+use super::stickers::{emoji_warning, image_dimensions, pack_size_warning, Warning};
+
+/// What the pack view shows about a present file: its size, and its pixel
+/// size when the header can be read (None for a damaged file).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileInfo {
+    pub bytes: u64,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+/// File facts for `path`, or None when no file is there (Missing).
+pub fn file_info(path: &Path) -> Option<FileInfo> {
+    let meta = fs::metadata(path).ok().filter(|m| m.is_file())?;
+    let (width, height) = match image_dimensions(path) {
+        Ok((w, h)) => (Some(w), Some(h)),
+        Err(_) => (None, None),
+    };
+    Some(FileInfo { bytes: meta.len(), width, height })
+}
 
 /// A sticker as the pack view shows it.
 #[derive(Debug, Clone, Serialize)]
@@ -18,6 +39,8 @@ pub struct StickerView {
     pub sticker: Sticker,
     pub missing: bool,
     pub emoji_warning: Option<Warning>,
+    /// None when Missing.
+    pub file: Option<FileInfo>,
 }
 
 /// An opened pack: rows plus derived Missing state and warnings.
@@ -27,6 +50,8 @@ pub struct PackView {
     pub pack: Pack,
     pub stickers: Vec<StickerView>,
     pub thumbnail_missing: bool,
+    /// The thumbnail file, when the pack has one and it is present.
+    pub thumbnail_file: Option<FileInfo>,
     pub pack_size_warning: Option<Warning>,
 }
 
@@ -39,22 +64,51 @@ pub fn open_pack(conn: &Connection, library_dir: &Path, pack_id: i64) -> Result<
     let (pack, dir) = open_pack_files(conn, library_dir, pack_id)?;
     let stickers: Vec<StickerView> = load_stickers(conn, pack_id)?
         .into_iter()
-        .map(|sticker| StickerView {
-            missing: !dir.join(&sticker.file_name).is_file(),
-            emoji_warning: emoji_warning(&sticker.emoji_string),
-            sticker,
+        .map(|sticker| {
+            let file = file_info(&dir.join(&sticker.file_name));
+            StickerView {
+                missing: file.is_none(),
+                emoji_warning: emoji_warning(&sticker.emoji_string),
+                file,
+                sticker,
+            }
         })
         .collect();
-    let thumbnail_missing = pack
-        .thumbnail
-        .as_ref()
-        .is_some_and(|name| !dir.join(name).is_file());
+    let thumbnail_file = pack.thumbnail.as_ref().and_then(|name| file_info(&dir.join(name)));
     Ok(PackView {
         pack_size_warning: pack_size_warning(stickers.len()),
+        thumbnail_missing: pack.thumbnail.is_some() && thumbnail_file.is_none(),
+        thumbnail_file,
         pack,
         stickers,
-        thumbnail_missing,
     })
+}
+
+/// Where a sticker's file lives, after settling its pack folder; an error
+/// when the file is absent (Missing). Used by Open in explorer, Edit, and
+/// the pack view's previews.
+pub fn sticker_file_path(conn: &Connection, library_dir: &Path, sticker_id: i64) -> Result<PathBuf, String> {
+    let sticker = load_sticker(conn, sticker_id)?;
+    let (_, dir) = open_pack_files(conn, library_dir, sticker.pack_id)?;
+    // Re-read: settling may have finished a rename plan that renumbered it.
+    let path = dir.join(load_sticker(conn, sticker_id)?.file_name);
+    if !path.is_file() {
+        return Err(format!("sticker {sticker_id} is Missing: {} is not in the pack folder", path.display()));
+    }
+    Ok(path)
+}
+
+/// Where a pack's thumbnail file lives; an error when the pack has none or
+/// the file is absent.
+pub fn thumbnail_file_path(conn: &Connection, library_dir: &Path, pack_id: i64) -> Result<PathBuf, String> {
+    load_pack(conn, pack_id)?;
+    let (pack, dir) = open_pack_files(conn, library_dir, pack_id)?;
+    let name = pack.thumbnail.ok_or_else(|| format!("pack {pack_id} has no thumbnail"))?;
+    let path = dir.join(name);
+    if !path.is_file() {
+        return Err(format!("the thumbnail {} is missing from the pack folder", path.display()));
+    }
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -94,7 +148,7 @@ mod tests {
                 .iter()
                 .map(|t| {
                     let path = self.sources.path().join(format!("{t}.png"));
-                    fs::write(&path, [b"\x89PNG\r\n\x1a\n".as_slice(), t.as_bytes()].concat()).unwrap();
+                    fs::write(&path, crate::library::test_images::png(t)).unwrap();
                     NewSticker { path, emoji_string: t.to_string() }
                 })
                 .collect();
@@ -116,8 +170,7 @@ mod tests {
     }
 
     fn content(lib: &Lib, pack_id: i64, file: &str) -> String {
-        let bytes = fs::read(lib.dir_of(pack_id).join(file)).unwrap();
-        String::from_utf8(bytes[8..].to_vec()).unwrap()
+        crate::library::test_images::tag_of(&fs::read(lib.dir_of(pack_id).join(file)).unwrap())
     }
 
     #[test]
@@ -221,6 +274,60 @@ mod tests {
         assert!(lib.open(pack.id).thumbnail_missing);
         fs::write(lib.dir_of(pack.id).join("thumbnail.png"), "t").unwrap();
         assert!(!lib.open(pack.id).thumbnail_missing);
+    }
+
+    #[test]
+    fn present_files_report_their_size_and_dimensions() {
+        let mut lib = Lib::new();
+        let pack = lib.pack_with("p", &["A", "B"]);
+        lib.conn
+            .execute("UPDATE packs SET thumbnail = 'thumbnail.png' WHERE id = ?1", params![pack.id])
+            .unwrap();
+        fs::write(lib.dir_of(pack.id).join("thumbnail.png"), "not an image").unwrap();
+        fs::remove_file(lib.dir_of(pack.id).join("002.png")).unwrap();
+        let view = lib.open(pack.id);
+        let bytes = fs::metadata(lib.dir_of(pack.id).join("001.png")).unwrap().len();
+        let side = crate::limits::STICKER_SIDE;
+        assert_eq!(view.stickers[0].file, Some(FileInfo { bytes, width: Some(side), height: Some(1) }));
+        assert_eq!(view.stickers[1].file, None);
+        // A damaged file is present (not Missing) but has no readable size.
+        assert_eq!(view.thumbnail_file, Some(FileInfo { bytes: 12, width: None, height: None }));
+        assert!(!view.thumbnail_missing);
+    }
+
+    #[test]
+    fn file_paths_resolve_present_files_and_refuse_missing_ones() {
+        let mut lib = Lib::new();
+        let pack = lib.pack_with("p", &["A", "B"]);
+        let stickers = load_stickers(&lib.conn, pack.id).unwrap();
+        let path = sticker_file_path(&lib.conn, lib.path(), stickers[1].id).unwrap();
+        assert_eq!(path, lib.dir_of(pack.id).join("002.png"));
+        fs::remove_file(&path).unwrap();
+        assert!(sticker_file_path(&lib.conn, lib.path(), stickers[1].id).unwrap_err().contains("Missing"));
+        assert!(thumbnail_file_path(&lib.conn, lib.path(), pack.id).unwrap_err().contains("no thumbnail"));
+        lib.conn
+            .execute("UPDATE packs SET thumbnail = 'thumbnail.webp' WHERE id = ?1", params![pack.id])
+            .unwrap();
+        assert!(thumbnail_file_path(&lib.conn, lib.path(), pack.id).is_err());
+        fs::write(lib.dir_of(pack.id).join("thumbnail.webp"), "t").unwrap();
+        assert_eq!(
+            thumbnail_file_path(&lib.conn, lib.path(), pack.id).unwrap(),
+            lib.dir_of(pack.id).join("thumbnail.webp")
+        );
+    }
+
+    #[test]
+    fn file_paths_follow_a_settled_folder_rename() {
+        let mut lib = Lib::new();
+        let pack = lib.pack_with("before", &["A"]);
+        lib.conn
+            .execute(
+                "UPDATE packs SET short_name = 'after', folder_rename_from = 'before' WHERE id = ?1",
+                params![pack.id],
+            )
+            .unwrap();
+        let id = load_stickers(&lib.conn, pack.id).unwrap()[0].id;
+        assert_eq!(sticker_file_path(&lib.conn, lib.path(), id).unwrap(), lib.path().join("after").join("001.png"));
     }
 
     #[test]

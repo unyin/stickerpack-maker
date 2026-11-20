@@ -21,6 +21,8 @@ pub mod files;
 pub mod packs;
 pub mod schema;
 pub mod stickers;
+#[cfg(test)]
+pub(crate) mod test_images;
 
 use std::fs;
 use std::path::{Path, PathBuf};
