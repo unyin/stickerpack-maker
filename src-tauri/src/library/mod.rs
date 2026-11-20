@@ -1,17 +1,31 @@
-//! Library lifecycle: fresh creation and intact-library validation.
+//! The Library core: lifecycle (fresh creation, intact-library validation)
+//! here, and the pack and sticker operations in the submodules.
 //!
 //! A Library is an app-managed folder containing the SQLite database
-//! (`library.db`) and one folder per pack (SPEC §3). Pack folders are created
-//! when packs are created (SPM-2/SPM-3); a fresh Library contains only the
-//! database.
+//! (`library.db`) and one folder per pack, named after the pack's Short Name
+//! (SPEC §3).
+//!
+//! - `schema`: domain row types and loaders.
+//! - `packs`: pack lifecycle, Title / Short Name rules, folder renames.
+//! - `stickers`: sticker operations, warnings, and Send to pack.
+//! - `files`: order-encoded names and the crash-safe rename engine.
+//! - `desync`: opening a pack and detecting Missing stickers.
 //!
 //! v1 rules (SPEC §3): re-pointing expects an INTACT Library (database
 //! included); a fresh Library can be created in a new or empty folder; there
 //! is NO auto-migration and NO reconstruction of metadata from orphaned image
 //! files. This module is free of Tauri types so it can be unit-tested.
 
+pub mod desync;
+pub mod files;
+pub mod packs;
+pub mod schema;
+pub mod stickers;
+
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use rusqlite::{Connection, OpenFlags};
 
 use crate::db;
 
@@ -52,7 +66,7 @@ pub fn validate_intact(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Create a fresh Library: folder + database + bootstrap migrations.
+/// Create a fresh Library: folder + database + all migrations.
 /// `dir` must not exist yet, or be an existing EMPTY folder.
 pub fn create_fresh(dir: &Path) -> Result<(), String> {
     if dir.exists() {
@@ -74,9 +88,46 @@ pub fn create_fresh(dir: &Path) -> Result<(), String> {
     db::create_and_migrate(&db_path(dir))
 }
 
+/// Open an existing Library for read-write use. Validates intactness first,
+/// enables foreign keys (cascade deletes), and does NOT migrate: v1 has no
+/// auto-migration (SPEC §3) — a Library is created with the current schema.
+pub fn open(library_dir: &Path) -> Result<Connection, String> {
+    validate_intact(library_dir)?;
+    let conn = Connection::open_with_flags(db_path(library_dir), OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(|e| format!("cannot open database {}: {e}", db_path(library_dir).display()))?;
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")
+        .map_err(|e| format!("cannot configure database connection: {e}"))?;
+    Ok(conn)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn open_returns_writable_connection_with_foreign_keys_on() {
+        let root = tempfile::tempdir().unwrap();
+        create_fresh(root.path()).unwrap();
+        let conn = open(root.path()).unwrap();
+        conn.execute_batch(
+            "INSERT INTO packs (id, title, short_name) VALUES (1, 'T', 't');
+             INSERT INTO stickers (pack_id, position, file_name, format)
+                 VALUES (1, 1, '001.png', 'png');",
+        )
+        .unwrap();
+        // Deleting a pack cascades to its stickers only with foreign_keys ON.
+        conn.execute("DELETE FROM packs WHERE id = 1", []).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM stickers", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn open_rejects_folder_without_library() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(open(root.path()).is_err());
+    }
 
     #[test]
     fn fresh_library_in_new_folder() {

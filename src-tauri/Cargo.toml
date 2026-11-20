@@ -20,6 +20,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # `bundled` compiles SQLite from source: no system SQLite dependency on Windows.
 rusqlite = { version = "0.32", features = ["bundled"] }
+# Grapheme clusters: counts emoji as people see them (ZWJ sequences, flags,
+# skin tones), for the Emoji String 1-20 warning. Already in the tree via Tauri.
+unicode-segmentation = "1"
 
 [dev-dependencies]
 tempfile = "3"
