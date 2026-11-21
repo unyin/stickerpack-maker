@@ -166,8 +166,9 @@ stickers, Missing stickers, and the thumbnail.
 ### Pack-level
 - **UI conventions**: the app-wide dialog rule is in §2.
 - Create pack (Title → auto Short Name, editable while Draft; new packs are Draft).
-- Pack list: each pack has **Open in explorer**, which opens the pack's folder (owner
-  decision 2026-11-21).
+- Pack list: shows how many packs the Library holds, but no per-pack sticker counts (each
+  pack's view shows its own); each pack has **Open in explorer**, which opens the pack's
+  folder (owner decisions 2026-11-21).
 - Pack header: **← Pack list** back button; Title always editable; Short Name editable only
   in Draft; the Draft/Live badge and its button sit right after the Short Name, labelled
   **Go Live** / **Revert to Draft** like the dialogs they open (owner decision 2026-11-21);

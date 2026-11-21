@@ -100,6 +100,12 @@ button.pm-link {
   gap: 12px;
 }
 
+.pm-pack-count {
+  margin-left: 12px;
+  font-size: 15px;
+  font-weight: 400;
+}
+
 .pm-pack-list {
   list-style: none;
   padding: 0;
@@ -111,7 +117,7 @@ button.pm-link {
 
 .pm-pack-row {
   display: grid;
-  grid-template-columns: 1fr auto auto auto auto;
+  grid-template-columns: 1fr auto auto auto;
   align-items: center;
   gap: 14px;
   padding: 10px 14px;

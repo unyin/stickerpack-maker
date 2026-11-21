@@ -2,7 +2,7 @@
 // badges. Reads the database only; no desync checks here (SPEC §4).
 import { el, errorMessage } from "../../ui";
 import { deletePack, listPacks, revealPack, type PackSummary } from "../api";
-import { packDeleteMessage, stickerCountText } from "../model/messages";
+import { packCountText, packDeleteMessage } from "../model/messages";
 import { confirmChoice } from "../../dialog";
 import { createPackDialog, statusBadge } from "./dialogs";
 import { explorerLabel } from "./panels";
@@ -17,10 +17,12 @@ export function buildPackList(onOpen: (packId: number) => void): {
   const notice = el("p", { class: "pm-notice", role: "status" });
   const list = el("ul", { class: "pm-pack-list" });
   const newButton = el("button", { class: "primary", type: "button" }, "New pack…") as HTMLButtonElement;
+  // How many packs the Library holds; sticker counts live in each pack's view (owner, 2026-11-21).
+  const packCount = el("span", { class: "muted pm-pack-count", "aria-live": "polite" });
   const element = el(
     "section",
     { class: "view pm-list" },
-    el("div", { class: "pm-list-head" }, el("h1", {}, "Pack Manager"), newButton),
+    el("div", { class: "pm-list-head" }, el("h1", {}, "Pack Manager", packCount), newButton),
     el("p", { class: "muted" }, "Organise stickers into packs. Files are named in pack order, ready to drag into @Stickers."),
     message,
     notice,
@@ -72,7 +74,6 @@ export function buildPackList(onOpen: (packId: number) => void): {
       "li",
       { class: "pm-pack-row" },
       open,
-      el("span", { class: "muted" }, stickerCountText(pack.stickerCount)),
       statusBadge(pack.status),
       reveal,
       del,
@@ -82,6 +83,7 @@ export function buildPackList(onOpen: (packId: number) => void): {
   async function reload(): Promise<void> {
     try {
       const packs = await listPacks();
+      packCount.textContent = packCountText(packs.length);
       list.replaceChildren(...packs.map(row));
       if (packs.length === 0) list.append(el("li", { class: "pm-empty-item muted" }, "No packs yet. Create one to start."));
     } catch (err) {

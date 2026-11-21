@@ -32,6 +32,10 @@ export function stickerCountText(n: number): string {
   return n === 1 ? "1 sticker" : `${n} stickers`;
 }
 
+export function packCountText(n: number): string {
+  return n === 1 ? "1 pack" : `${n} packs`;
+}
+
 /** Pack deletion confirmation, per status (SPEC §3). */
 export function packDeleteMessage(title: string, status: PackStatus, stickerCount: number): string {
   if (status === "live") {

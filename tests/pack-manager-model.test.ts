@@ -16,6 +16,7 @@ import {
   matchesSearch,
   MISSING_REASON,
   missingSummary,
+  packCountText,
   packDeleteMessage,
   packSizeText,
   sendBlocker,
@@ -274,4 +275,10 @@ test("importOrder: leaves the input untouched", () => {
   const input = ["b.png", "a.png"];
   importOrder(input);
   expect(input).toEqual(["b.png", "a.png"]);
+});
+
+test("packCountText: singular and plural", () => {
+  expect(packCountText(0)).toBe("0 packs");
+  expect(packCountText(1)).toBe("1 pack");
+  expect(packCountText(12)).toBe("12 packs");
 });
