@@ -305,6 +305,11 @@ stickers, Missing stickers, and the thumbnail.
 - Editor: Crop could also drop a layer that crosses the box edge when its part inside the
   box is fully transparent. In v1 such a layer is kept; only layers entirely outside the box
   are discarded (owner, 2026-11-21: may revisit).
+- Editor: hold Shift while rotating a layer to snap to fixed angles (e.g. 15° steps) or
+  to a grid.
+- Editor: hold Shift while moving a layer to snap to whole pixels or to a grid. Note:
+  Shift+click already toggles a layer in or out of the selection, so a Shift-drag must
+  not also toggle it; and the Editor has no grid yet (owner, 2026-11-21).
 
 ## 10. Draft work packages (for review — not yet filed as issues)
 
