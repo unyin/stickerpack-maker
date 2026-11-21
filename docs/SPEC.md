@@ -174,18 +174,18 @@ stickers, Missing stickers, and the thumbnail.
   512×439 canvas gets a 512×439 box (owner decision 2026-11-20). It follows the canvas size,
   staying centred; when the canvas and box sides differ by an odd number, its top-left is
   rounded down to a whole pixel, so it always covers whole pixels. The Crop button names
-  the actual box size (e.g. **Crop to 512×439**) (agent decision, pending owner confirmation).
+  the actual box size (e.g. **Crop to 512×439**) (owner confirmed 2026-11-21).
 - **Crop** is destructive: everything outside the box (512×512 for stickers, 100×100 for
   thumbnails, capped at the canvas size as above) is discarded; the canvas size stays as it
   is (owner decision 2026-11-20).
   - A layer inside the box is left exactly as it is. A layer crossing the box edge keeps
     only the whole pixels it covers inside the box: it becomes an unrotated, unscaled layer
     at that spot, with its rotation and scale baked into its pixels. It keeps its name and
-    its place in the stack (agent decision, pending owner confirmation).
+    its place in the stack (owner confirmed 2026-11-21).
   - Layers **entirely outside** the box are discarded in the same single undo step (owner
     decision 2026-11-20). If every layer is entirely outside, Crop is disabled ("Nothing is
     inside the box"), because a session always keeps at least one layer.
-  - Crop is disabled, with the reason in its tooltip, when nothing lies outside the box (agent decision, pending owner confirmation).
+  - Crop is disabled, with the reason in its tooltip, when nothing lies outside the box (owner confirmed 2026-11-21).
   - Crop never moves the view: the canvas origin does not move.
   - Text layers on Crop are decided with the text tool (SPM-9).
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
@@ -214,7 +214,7 @@ stickers, Missing stickers, and the thumbnail.
   2026-11-20): Sticker mode means longest side 512; Thumbnail mode means exactly 100×100.
   It shows the canvas size and either that it meets the set or how many pixels each side is
   over or under (e.g. "600×400 px · needs longest side 512: 88 px over"), and updates on
-  every change, undo and redo included (agent decision, pending owner confirmation).
+  every change, undo and redo included (owner confirmed 2026-11-21).
 
 ### Layers and tools
 - Session layer model: base image, pasted cutouts, text objects. Undo/redo throughout.
@@ -294,6 +294,9 @@ stickers, Missing stickers, and the thumbnail.
 - Editor: custom canvas resizing (in v1 only Fit and Longest side change the canvas).
 - Drag and drop an image file to open it in the Editor. (v3 idea: drag and drop onto an
   open session to add it as a layer.)
+- Editor: Crop could also drop a layer that crosses the box edge when its part inside the
+  box is fully transparent. In v1 such a layer is kept; only layers entirely outside the box
+  are discarded (owner, 2026-11-21: may revisit).
 
 ## 10. Draft work packages (for review — not yet filed as issues)
 
