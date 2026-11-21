@@ -68,6 +68,7 @@ import {
   deleteBlocker,
   editTextBlocker,
   escapeTarget,
+  isCutShortcut,
   fontChoices,
   layerHint as layerHintText,
   mergeBlocker,
@@ -829,6 +830,12 @@ function buildEditor(): HTMLElement {
     const key = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) current.undo();
     else if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) current.redo();
+    // Ctrl+X is the Cut tool, not the clipboard; a blocked cut says why.
+    else if (isCutShortcut(e)) {
+      const reason = cutBlocker(current.doc, current.selection, current.region);
+      if (reason) message.textContent = reason;
+      else void run(cutSelection);
+    }
     // Esc drops the cut selection first, then the layer selection.
     else if (e.key === "Escape") escapeTarget(current.region) === "region" ? current.setRegion(null) : current.clearSelection();
     else if (e.key === "Delete") deleteSelected();

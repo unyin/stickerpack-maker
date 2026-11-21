@@ -51,6 +51,7 @@ import {
   editTextBlocker,
   escapeTarget,
   fontChoices,
+  isCutShortcut,
   layerHint,
   mergeBlocker,
   textBlocker,
@@ -380,6 +381,16 @@ test("the font list adds an uninstalled family without changing the installed li
 test("Esc clears the cut selection first, then the layer selection", () => {
   expect(escapeTarget(rectRegion({ x: 0, y: 0 }, { x: 5, y: 5 }))).toBe("region");
   expect(escapeTarget(null)).toBe("selection");
+});
+
+test("Ctrl+X (or Cmd+X) is the Cut shortcut; Ctrl+C and modified variants are not", () => {
+  const k = (key: string, o: object = {}) => ({ key, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...o });
+  expect(isCutShortcut(k("x", { ctrlKey: true }))).toBe(true);
+  expect(isCutShortcut(k("X", { metaKey: true }))).toBe(true);
+  expect(isCutShortcut(k("x"))).toBe(false);
+  expect(isCutShortcut(k("c", { ctrlKey: true }))).toBe(false);
+  expect(isCutShortcut(k("x", { ctrlKey: true, shiftKey: true }))).toBe(false);
+  expect(isCutShortcut(k("x", { ctrlKey: true, altKey: true }))).toBe(false);
 });
 
 test("the layer hint adds cut and text reasons only where they are relevant", () => {

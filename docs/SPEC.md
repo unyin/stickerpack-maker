@@ -238,8 +238,10 @@ stickers, Missing stickers, and the thumbnail.
     cutout is trimmed to its visible pixels; a selection holding no visible pixels cuts
     nothing. After a cut the cutout is selected and the Move tool is back, so it can be
     dragged and resized at once. Text layers are not cut (merge them into an image first).
-    Delete still deletes layers, never selected pixels; there is no Ctrl+X/Ctrl+C
-    (open: owner deciding on Ctrl+X/Ctrl+C).
+    Delete still deletes layers, never selected pixels. Ctrl+X runs Cut (lifting the
+    selection to a new layer, not to the clipboard; when Cut is blocked it shows the
+    tooltip's reason in the message line), and there is no Ctrl+C (owner decision
+    2026-11-21).
   - **Paste**: Ctrl+V with an image on the clipboard (or the Paste button, where the
     webview allows reading the clipboard) adds it as a new layer named "Pasted image",
     native size, centred on the canvas, on top, with the same 2000×2000 import cap dialog
@@ -267,8 +269,9 @@ stickers, Missing stickers, and the thumbnail.
     gives up focus so Ctrl+Z, Delete, Esc and Ctrl+V work at once (typing in the size field
     is not intercepted).
   - Text is laid out and rasterised in Rust (left-aligned lines, the font's own line
-    spacing, kerning; no ligature shaping and no fallback font for missing characters
-    (open: owner deciding on a fallback font / missing-character box)), and the canvas
+    spacing, kerning; no ligature shaping and no fallback font: characters the font
+    lacks show as whatever the font draws for them, often a box, sometimes nothing (owner
+    decision 2026-11-21: left as is)), and the canvas
     shows exactly that rendering, so the view, merge, Crop, the sizing tools and the save
     agree on its pixels and its box. Resizing a text layer scales it (it stays
     text, and is drawn sharp at its size when merged or saved); its font size field keeps
@@ -349,6 +352,9 @@ stickers, Missing stickers, and the thumbnail.
   are discarded (owner, 2026-11-21: may revisit).
 - Editor: a "Convert text to image" tool, so a text layer can be edited with pixel tools
   (e.g. Cut) without merging it onto another layer first (owner, 2026-11-21).
+- Editor: real clipboard for Cut/Copy: Ctrl+C copies the selected pixels (or the selected
+  layer) to the system clipboard as PNG, Ctrl+X does the same and leaves a transparent
+  hole, so stickers can be copied between sessions and apps (owner, 2026-11-21).
 
 ## 10. Draft work packages (for review — not yet filed as issues)
 

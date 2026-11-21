@@ -240,6 +240,17 @@ export function escapeTarget(region: Region | null): "region" | "selection" {
   return region ? "region" : "selection";
 }
 
+/** Ctrl/Cmd+X (no Shift or Alt) runs the Cut tool; it never touches the clipboard (SPEC §6). */
+export function isCutShortcut(e: {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+}): boolean {
+  return (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "x";
+}
+
 /** The reasons behind the layer panel's disabled actions. */
 export interface LayerReasons {
   readonly merge: string | null;
