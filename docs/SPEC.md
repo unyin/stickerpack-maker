@@ -78,7 +78,9 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 - A **fresh** library + DB can always be created from scratch (first run, or re-point at an
   empty folder). **Reconstructing** metadata (titles, short names, emoji, status, thumbnails)
   from orphaned image files is out of scope for v1.
-- No auto-migration in v1.
+- An older Library's database is upgraded to the current schema when the app opens it: the
+  migrations it lacks are applied once, in order, in one transaction (owner decision
+  2026-11-21). The app does not move or relocate a Library by itself.
 
 ## 4. Files and order (ADR-0003)
 
@@ -312,7 +314,7 @@ stickers, Missing stickers, and the thumbnail.
 
 - Bot API sync (model is shaped for it; Draft/Live and short-name lock anticipate it).
 - Custom emoji packs (100×100), animated .TGS, video .WEBM.
-- Library auto-migration; DB reconstruction from orphaned files.
+- Automatic Library relocation; DB reconstruction from orphaned files.
 - Project files / version history; export/prep folders; scratch saves.
 
 ## 9. Deferred decisions

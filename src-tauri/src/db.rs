@@ -80,6 +80,16 @@ pub fn migrate(conn: &mut Connection) -> Result<(), String> {
     Ok(())
 }
 
+/// True when every embedded migration has been applied to `conn`. A
+/// database from a newer build (more migrations than this one knows) also
+/// counts as current: it is left alone.
+pub fn is_current(conn: &Connection) -> Result<bool, String> {
+    let applied: i64 = conn
+        .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_migrations", [], |r| r.get(0))
+        .map_err(|e| format!("cannot read schema_migrations: {e}"))?;
+    Ok(applied >= MIGRATIONS.len() as i64)
+}
+
 /// True when `conn` has a table with the given name.
 pub fn table_exists(conn: &Connection, table: &str) -> Result<bool, String> {
     let found = conn

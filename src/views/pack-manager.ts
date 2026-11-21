@@ -12,12 +12,24 @@ export interface PackManagerNav {
   openInEditor(path: string): void;
 }
 
-let cached: { library: string | null; root: HTMLElement; shown(): void } | null = null;
+let cached: { library: string | null; root: HTMLElement; shown(): void; dispose(): void } | null = null;
 
 export function renderPackManager(library: string | null, nav: PackManagerNav): HTMLElement {
-  if (cached?.library !== library) cached = build(library, nav);
+  if (cached?.library !== library) forgetPackManager();
+  cached ??= build(library, nav);
   cached.shown();
   return cached.root;
+}
+
+/**
+ * Drop the cached Pack Manager. Settings calls this whenever it creates or
+ * re-points a Library: a new Library in the SAME folder keeps the path, so
+ * the path alone cannot tell the cache it is stale (an open pack or an error
+ * from the old Library would otherwise stay on screen).
+ */
+export function forgetPackManager(): void {
+  cached?.dispose();
+  cached = null;
 }
 
 function build(library: string | null, nav: PackManagerNav): NonNullable<typeof cached> {
@@ -50,6 +62,10 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
     root,
     shown: () => {
       if (!pack) void list.reload();
+    },
+    dispose: () => {
+      pack?.destroy();
+      pack = null;
     },
   };
 }

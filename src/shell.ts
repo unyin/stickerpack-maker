@@ -1,7 +1,7 @@
 import type { AppState } from "./api";
 import { clear, el } from "./ui";
 import { openFileInEditor, renderEditor } from "./views/editor";
-import { renderPackManager } from "./views/pack-manager";
+import { forgetPackManager, renderPackManager } from "./views/pack-manager";
 import { renderSettings } from "./views/settings";
 
 type ViewId = "editor" | "pack-manager" | "settings";
@@ -33,7 +33,11 @@ export function renderShell(
     clear(content);
     if (view === "editor") content.append(renderEditor());
     else if (view === "pack-manager") content.append(renderPackManager(state.libraryPath, { openInEditor }));
-    else renderSettings(content, state, onChanged);
+    else
+      renderSettings(content, state, () => {
+        forgetPackManager(); // a new Library may sit at the same path
+        onChanged();
+      });
   }
 
   /** Pack Manager -> Editor: the Editor asks about unsaved changes, then switches tabs and opens the file. */

@@ -12,9 +12,11 @@
 //! - `desync`: opening a pack and detecting Missing stickers.
 //!
 //! v1 rules (SPEC §3): re-pointing expects an INTACT Library (database
-//! included); a fresh Library can be created in a new or empty folder; there
-//! is NO auto-migration and NO reconstruction of metadata from orphaned image
-//! files. This module is free of Tauri types so it can be unit-tested.
+//! included); a fresh Library can be created in a new or empty folder; an
+//! older Library's database is upgraded to the current schema when opened;
+//! there is NO reconstruction of metadata from orphaned image files and NO
+//! automatic moving of a Library. This module is free of Tauri types so it
+//! can be unit-tested.
 
 pub mod desync;
 pub mod files;
@@ -91,14 +93,18 @@ pub fn create_fresh(dir: &Path) -> Result<(), String> {
 }
 
 /// Open an existing Library for read-write use. Validates intactness first,
-/// enables foreign keys (cascade deletes), and does NOT migrate: v1 has no
-/// auto-migration (SPEC §3) — a Library is created with the current schema.
+/// enables foreign keys (cascade deletes), and upgrades a database made by
+/// an older build by applying the migrations it lacks, in one transaction
+/// (owner decision 2026-11-21, SPEC §3). A current database is not touched.
 pub fn open(library_dir: &Path) -> Result<Connection, String> {
     validate_intact(library_dir)?;
-    let conn = Connection::open_with_flags(db_path(library_dir), OpenFlags::SQLITE_OPEN_READ_WRITE)
+    let mut conn = Connection::open_with_flags(db_path(library_dir), OpenFlags::SQLITE_OPEN_READ_WRITE)
         .map_err(|e| format!("cannot open database {}: {e}", db_path(library_dir).display()))?;
     conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;")
         .map_err(|e| format!("cannot configure database connection: {e}"))?;
+    if !db::is_current(&conn)? {
+        db::migrate(&mut conn)?;
+    }
     Ok(conn)
 }
 
@@ -123,6 +129,39 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM stickers", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 0);
+    }
+
+    /// A Library as the SPM-1 build made it: the bootstrap migration only.
+    fn bootstrap_only_library(dir: &Path) {
+        let mut conn = Connection::open(db_path(dir)).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_migrations (
+                 version    INTEGER PRIMARY KEY,
+                 name       TEXT NOT NULL,
+                 applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );",
+        )
+        .unwrap();
+        let tx = conn.transaction().unwrap();
+        tx.execute_batch(include_str!("../../migrations/0001_init.sql")).unwrap();
+        tx.execute("INSERT INTO schema_migrations (version, name) VALUES (1, '0001_init')", []).unwrap();
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn open_upgrades_an_older_library_to_the_current_schema() {
+        let root = tempfile::tempdir().unwrap();
+        bootstrap_only_library(root.path());
+        // Before the fix this listed with "no such table: stickers".
+        let mut conn = open(root.path()).unwrap();
+        assert!(db::is_current(&conn).unwrap());
+        assert!(packs::pack_summaries(&conn).unwrap().is_empty());
+        let pack = packs::create_pack(&mut conn, root.path(), "Cats", None).unwrap();
+        assert_eq!(packs::pack_summaries(&conn).unwrap()[0].pack.id, pack.id);
+        // Opening again finds it current and changes nothing.
+        drop(conn);
+        let conn = open(root.path()).unwrap();
+        assert_eq!(packs::pack_summaries(&conn).unwrap().len(), 1);
     }
 
     #[test]

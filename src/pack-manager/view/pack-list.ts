@@ -83,6 +83,7 @@ export function buildPackList(onOpen: (packId: number) => void): {
   async function reload(): Promise<void> {
     try {
       const packs = await listPacks();
+      message.textContent = ""; // a successful load clears an earlier failure
       packCount.textContent = packCountText(packs.length);
       list.replaceChildren(...packs.map(row));
       if (packs.length === 0) list.append(el("li", { class: "pm-empty-item muted" }, "No packs yet. Create one to start."));
