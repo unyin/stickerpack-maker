@@ -1,0 +1,40 @@
+/* The app's one dialog frame (src/dialog.ts); tokens only. */
+
+.app-dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  width: min(560px, 92vw);
+}
+
+.app-dialog::backdrop {
+  background: var(--backdrop);
+}
+
+.app-dialog button:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+.app-dialog h2 {
+  font-size: 18px;
+  margin: 0 0 12px;
+}
+
+.app-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 65vh;
+  overflow: auto;
+}
+
+.app-dialog-body p {
+  margin: 0;
+}
+
+.app-dialog-actions {
+  justify-content: flex-end;
+}

@@ -1,6 +1,8 @@
 mod commands;
 mod config;
 mod db;
+/// Pack Manager commands (SPM-3) over the Library core.
+mod pack_commands;
 /// Editor pixel work (ADR-0005): Tauri-free, unit-tested; commands wrap it.
 pub mod editor;
 /// Library core (SPEC §3-4): data model, file operations, crash-safe
@@ -37,6 +39,7 @@ pub fn config_file_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(pack_commands::LibraryLock::default())
         .setup(|app| {
             let path = config_file_path(app.handle())?;
             let cfg = config::AppConfig::load(&path)?;
@@ -54,6 +57,28 @@ pub fn run() {
             commands::editor_import_image,
             commands::editor_merge_layers,
             commands::editor_crop_layers,
+            pack_commands::list_packs,
+            pack_commands::suggest_short_name,
+            pack_commands::create_pack,
+            pack_commands::delete_pack,
+            pack_commands::open_pack,
+            pack_commands::load_pack_view,
+            pack_commands::set_pack_title,
+            pack_commands::set_pack_short_name,
+            pack_commands::set_pack_status,
+            pack_commands::reorder_sticker,
+            pack_commands::delete_stickers,
+            pack_commands::set_emoji_string,
+            pack_commands::import_stickers,
+            pack_commands::check_sticker_file,
+            pack_commands::replace_sticker,
+            pack_commands::send_to_pack,
+            pack_commands::sticker_file_path,
+            pack_commands::reveal_sticker,
+            pack_commands::reveal_pack,
+            pack_commands::reveal_thumbnail,
+            pack_commands::sticker_image,
+            pack_commands::thumbnail_image,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
