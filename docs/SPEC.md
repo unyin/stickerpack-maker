@@ -22,6 +22,8 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 - Background removal runs offline via ONNX with a one-time model download. Whether ONNX runs
   in Rust (`ort`) or the webview (onnxruntime-web) is a deferred engineering decision (own ADR).
 - Difficult implementation choices get ADRs and detailed task breakdowns.
+- UI conventions: disabled controls look disabled (faded) and still show their reason as a
+  tooltip (owner decision 2026-11-21).
 
 ## 3. Domain model
 
@@ -211,8 +213,9 @@ stickers, Missing stickers, and the thumbnail.
   Undo/redo of a sizing tool behaves the same.
 - **Middle-mouse click-and-drag pans the view** without moving any layer (owner decision
   2026-11-21). It works anywhere on the stage, over layers too, in every tool; it never
-  selects or moves a layer, and it counts as a manual view change like a left-drag pan or
-  wheel zoom (a later fit never overrides it).
+  selects or moves a layer, and it triggers no browser autoscroll. It counts as a manual view
+  change like a left-drag pan or wheel zoom (an automatic fit never overrides it; only Reset
+  view re-fits), and the zoom readout updates.
 - **Reset view** is the only way to re-fit: it re-centres the canvas and zooms to fit it in
   the view (never above 100%), without changing the image. The view is fitted automatically
   only when an editing session opens.

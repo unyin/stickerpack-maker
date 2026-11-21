@@ -211,7 +211,7 @@ function buildEditor(): HTMLElement {
     session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(constraints)));
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
-    stage.setCropBoxVisible(showBox);
+    stage.setCropGuidesVisible(showBox);
     refresh(); // place the crop box overlay
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
@@ -287,7 +287,7 @@ function buildEditor(): HTMLElement {
 
   function toggleBox(): void {
     showBox = !showBox;
-    stage?.setCropBoxVisible(showBox);
+    stage?.setCropGuidesVisible(showBox);
     refresh();
   }
 
