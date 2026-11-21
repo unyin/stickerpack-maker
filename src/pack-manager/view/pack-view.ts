@@ -28,8 +28,6 @@ import {
 import {
   fileNameOf,
   importSummary,
-  DRAFT_TO_LIVE_CONFIRMATION,
-  LIVE_TO_DRAFT_WARNING,
   missingSummary,
   SHORT_NAME_LOCKED,
   stickerCountText,
@@ -49,7 +47,7 @@ import {
 import { emojiCountWarning, emojiWarning } from "../model/emoji";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { dialogOpen } from "../../dialog";
-import { confirmBackToDraft, confirmGoLive, confirmStickerDelete, invalidFileDialog, sendDialog, statusBadge } from "./dialogs";
+import { confirmGoLive, confirmRevertToDraft, confirmStickerDelete, invalidFileDialog, sendDialog, statusBadge } from "./dialogs";
 import { aggregatePanel, detailPanel, emptyPanel, thumbnailPanel, type PanelActions } from "./panels";
 import { previewImage, Previews } from "./previews";
 import { startReorderDrag, type ReorderDragHost } from "./reorder-drag";
@@ -185,8 +183,8 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     void run(async () => {
       const toLive = view.pack.status === "draft";
       const ok = toLive
-        ? await confirmGoLive(DRAFT_TO_LIVE_CONFIRMATION)
-        : await confirmBackToDraft(LIVE_TO_DRAFT_WARNING);
+        ? await confirmGoLive()
+        : await confirmRevertToDraft();
       if (!ok) return;
       view = { ...view, pack: await setPackStatus(packId, toLive ? "live" : "draft") };
     }),
@@ -249,7 +247,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     try {
       await checkStickerFile(path);
     } catch (err) {
-      if ((await invalidFileDialog(path, errorMessage(err))) === "editor") host.openInEditor(path);
+      if (await invalidFileDialog(path, errorMessage(err))) host.openInEditor(path);
       return;
     }
     const next = await replaceSticker(sticker.id, path);

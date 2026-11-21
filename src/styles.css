@@ -166,10 +166,15 @@ button {
   font: inherit;
 }
 
+/* The --accent fill alone is 2.57:1 on a light panel, so primary buttons
+   get an --accent-ink boundary (5.5:1) to meet 3:1 there; in the dark
+   theme --accent-ink equals --accent, so the border blends into the fill.
+   Same padding and 1px border as button.secondary/.danger, so paired
+   buttons line up. */
 button.primary {
   background: var(--accent);
   color: var(--accent-text);
-  border: none;
+  border: 1px solid var(--accent-ink);
   padding: 8px 18px;
   border-radius: 8px;
   cursor: pointer;

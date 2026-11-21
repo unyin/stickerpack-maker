@@ -43,11 +43,11 @@ export function packDeleteMessage(title: string, status: PackStatus, stickerCoun
   return `Delete “${title}”? Its folder and ${stickerCountText(stickerCount)} are permanently deleted.`;
 }
 
-export const LIVE_TO_DRAFT_WARNING =
+export const REVERT_TO_DRAFT_WARNING =
   "Mark this pack as Draft? Use this only if it does not exist on Telegram. " +
   "Draft unlocks the Short Name; a Live pack's Telegram short name can never change.";
 
-export const DRAFT_TO_LIVE_CONFIRMATION =
+export const GO_LIVE_CONFIRMATION =
   "Go Live with this pack? Use this only if it exists on Telegram. " +
   "Going Live locks the Short Name; a Live pack's Telegram short name can never change.";
 

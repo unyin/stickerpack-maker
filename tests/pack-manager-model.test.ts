@@ -9,10 +9,10 @@ import { charCount, rustTrim, shortNameProblem, titleProblem } from "../src/pack
 import { EMOJI_MAX, emojiCount, emojiCountWarning, emojiWarning } from "../src/pack-manager/model/emoji";
 import {
   combinedSize,
-  DRAFT_TO_LIVE_CONFIRMATION,
+  GO_LIVE_CONFIRMATION,
   formatBytes,
   importSummary,
-  LIVE_TO_DRAFT_WARNING,
+  REVERT_TO_DRAFT_WARNING,
   matchesSearch,
   MISSING_REASON,
   missingSummary,
@@ -254,8 +254,8 @@ test("names trim like Rust str::trim, not like JS trim", () => {
 });
 
 test("the status toggle is confirmed both ways, and each text names the Short Name lock (SPEC §3)", () => {
-  expect(DRAFT_TO_LIVE_CONFIRMATION).toContain("Going Live locks the Short Name");
-  expect(DRAFT_TO_LIVE_CONFIRMATION).toContain("exists on Telegram");
-  expect(LIVE_TO_DRAFT_WARNING).toContain("unlocks the Short Name");
-  expect(DRAFT_TO_LIVE_CONFIRMATION).not.toBe(LIVE_TO_DRAFT_WARNING);
+  expect(GO_LIVE_CONFIRMATION).toContain("Going Live locks the Short Name");
+  expect(GO_LIVE_CONFIRMATION).toContain("exists on Telegram");
+  expect(REVERT_TO_DRAFT_WARNING).toContain("unlocks the Short Name");
+  expect(GO_LIVE_CONFIRMATION).not.toBe(REVERT_TO_DRAFT_WARNING);
 });

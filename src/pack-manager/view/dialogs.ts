@@ -14,7 +14,16 @@ import {
   type StickerView,
 } from "../api";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
-import { fileNameOf, matchesSearch, sendReportText, STICKER_RULE, statusLabel, stickerCountText } from "../model/messages";
+import {
+  fileNameOf,
+  GO_LIVE_CONFIRMATION,
+  matchesSearch,
+  REVERT_TO_DRAFT_WARNING,
+  sendReportText,
+  statusLabel,
+  STICKER_RULE,
+  stickerCountText,
+} from "../model/messages";
 import { confirmChoice, openDialog, type DialogHandle } from "../../dialog";
 import { previewImage, type Previews } from "./previews";
 
@@ -98,7 +107,6 @@ export async function createPackDialog(): Promise<Pack | null> {
     "New pack",
     [form.fields, el("p", { class: "muted" }, "New packs start as Draft."), message],
     [
-      { label: "Cancel", value: "cancel" },
       {
         label: "Create",
         value: "create",
@@ -114,6 +122,7 @@ export async function createPackDialog(): Promise<Pack | null> {
           }
         },
       },
+      { label: "Cancel", value: "cancel" },
     ],
     "cancel",
   );
@@ -160,18 +169,18 @@ export function confirmStickerDelete(stickers: readonly StickerView[], previews:
 }
 
 /** Draft→Live confirmation: "Go Live?" with Go Live / Keep Draft (default). */
-export function confirmGoLive(message: string): Promise<boolean> {
-  return confirmChoice("Go Live?", [el("p", {}, message)], { actionLabel: "Go Live", keepLabel: "Keep Draft" });
+export function confirmGoLive(): Promise<boolean> {
+  return confirmChoice("Go Live?", [el("p", {}, GO_LIVE_CONFIRMATION)], { actionLabel: "Go Live", keepLabel: "Keep Draft" });
 }
 
 /** Live→Draft warning: "Revert to Draft?" with Make Draft / Keep Live (default). */
-export function confirmBackToDraft(message: string): Promise<boolean> {
-  return confirmChoice("Revert to Draft?", [el("p", {}, message)], { actionLabel: "Make Draft", keepLabel: "Keep Live" });
+export function confirmRevertToDraft(): Promise<boolean> {
+  return confirmChoice("Revert to Draft?", [el("p", {}, REVERT_TO_DRAFT_WARNING)], { actionLabel: "Make Draft", keepLabel: "Keep Live" });
 }
 
-/** Hard block for a file that is not a valid sticker (SPEC §5 replacement rules). */
-export async function invalidFileDialog(path: string, reason: string): Promise<"editor" | "cancel"> {
-  const open = await confirmChoice(
+/** Hard block for a file that is not a valid sticker (SPEC §5 replacement rules). Resolves true to open it in the Editor. */
+export function invalidFileDialog(path: string, reason: string): Promise<boolean> {
+  return confirmChoice(
     "Not a valid sticker",
     [
       el("p", {}, el("strong", {}, fileNameOf(path)), ` ${reason}.`),
@@ -179,7 +188,6 @@ export async function invalidFileDialog(path: string, reason: string): Promise<"
     ],
     { actionLabel: "Open in editor", keepLabel: "Cancel" },
   );
-  return open ? "editor" : "cancel";
 }
 
 /**
@@ -297,8 +305,8 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
       message,
     ],
     [
-      { label: "Cancel", value: "cancel" },
       { label: "Send", value: "send", variant: "primary", action: send },
+      { label: "Cancel", value: "cancel" },
     ],
     "cancel",
   );

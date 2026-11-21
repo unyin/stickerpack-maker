@@ -22,6 +22,11 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 - Background removal runs offline via ONNX with a one-time model download. Whether ONNX runs
   in Rust (`ort`) or the webview (onnxruntime-web) is a deferred engineering decision (own ADR).
 - Difficult implementation choices get ADRs and detailed task breakdowns.
+- **UI conventions**: every two-option confirmation in the app (deletes, Draft/Live, invalid
+  import, creating a Library) uses the one shared in-app dialog: the safe choice is the default
+  (focused, primary), and Esc and closing choose the safe option (owner decision 2026-11-21).
+  Buttons read action first, safe choice last. Forms that collect input (New pack, Send to
+  pack) are not confirmations: their submit button stays primary.
 
 ## 3. Domain model
 
@@ -143,9 +148,7 @@ stickers, Missing stickers, and the thumbnail.
   slot at the end of the list; unnumbered file (§4).
 
 ### Pack-level
-- **UI convention**: every two-option confirmation in the app (deletes, Draft/Live, invalid
-  import, creating a Library) uses the one shared in-app dialog: the safe choice is the default
-  (focused, primary), and Esc and close cancel (owner decision 2026-11-21).
+- **UI conventions**: the app-wide dialog rule is in §2.
 - Create pack (Title → auto Short Name, editable while Draft; new packs are Draft).
 - Pack header: Title always editable; Short Name editable only in Draft; Draft/Live manual
   toggle both ways, each direction confirmed (owner decision 2026-11-21); Draft→Live offers

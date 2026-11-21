@@ -1,6 +1,6 @@
 // The app's one modal, built on <dialog>: every two-option confirmation and
 // every form that needs more than a native message box. Styles: dialog.css.
-import { CANCEL_CHOICE, confirmButtons, type ConfirmSpec } from "./dialog-model";
+import { confirmButtons, SAFE_CHOICE, type ConfirmSpec } from "./shared/dialog-model";
 import { el } from "./ui";
 
 export interface DialogButton<T> {
@@ -74,17 +74,16 @@ export function openDialog<T>(
 
 /**
  * The two-option confirmation, used for every two-option question in the app
- * (SPEC §5): title, body, the action and keep labels. The safe choice (keep)
- * is focused and primary unless `defaultChoice` says otherwise; Esc and close
- * always keep. Resolves true only for the action.
+ * (SPEC §2): title, body, the action and keep labels. The safe choice (keep)
+ * is focused and primary; Esc and close choose it. Resolves true only for the
+ * action.
  */
 export async function confirmChoice(
   title: string,
   body: Array<Node | string>,
   spec: ConfirmSpec,
 ): Promise<boolean> {
-  const defaultChoice = spec.defaultChoice ?? "keep";
-  const chosen = await openDialog(title, body, confirmButtons(spec), CANCEL_CHOICE, { defaultChoice }).result;
+  const chosen = await openDialog(title, body, confirmButtons(spec), SAFE_CHOICE, { defaultChoice: SAFE_CHOICE }).result;
   return chosen === "action";
 }
 
