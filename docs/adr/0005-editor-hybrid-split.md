@@ -47,7 +47,7 @@ Every operation needs undo/redo. The owner values the editing feel above all (AD
 - **The history's memory budget is a tunable constant.** The owner feels it only as "very old steps can't be undone" in very long sessions.
 - **Swapping Konva later only means rewriting the view layer** (`src/editor/view/`), because the model and the Rust pixel code never depend on it.
 
-## Amendment (SPM-9, 2026-11-20; agent decision, pending owner confirmation)
+## Amendment (SPM-9, 2026-11-20; owner confirmed 2026-11-21)
 
 **Text layers are drawn on the canvas from their Rust rendering, not by `Konva.Text`.**
 
