@@ -21,7 +21,7 @@ A Library's database schema grows with the app: migration 0001 (SPM-1) created o
 
 ## Consequences
 
-- **An upgraded Library cannot be opened by an older build** that predates the new tables. Downgrading the app is not supported once a newer build has opened the Library.
+- **Downgrading the app is not supported** once a newer build has upgraded a Library. An older build still opens it (it sees a version at least as high as it knows and ignores unknown tables), but a migration that changes an existing table, such as a new required column, can make that older build's writes fail.
 - Every migration must be safe to run on a Library that has real data (no destructive rewrites without their own decision), because users' Libraries upgrade silently.
 - The upgrade happens on the first command that opens the Library after an update, inside the Library lock, so no other operation sees a half-upgraded schema.
 - Regression test: `open_upgrades_an_older_library_to_the_current_schema` (src-tauri/src/library/mod.rs) builds a bootstrap-only Library, opens it, then lists and creates packs.
