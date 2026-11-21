@@ -160,6 +160,27 @@ export function confirmStickerDelete(stickers: readonly StickerView[], previews:
   );
 }
 
+/**
+ * Draft→Live confirmation (SPEC §3/§5, owner decision 2026-11-21): exactly
+ * "Go Live" and "Keep Draft". Keep Draft is the primary, initially focused
+ * button, so Enter, Esc and closing the dialog all keep the pack Draft.
+ * Resolves true only for Go Live.
+ */
+export async function confirmGoLive(message: string): Promise<boolean> {
+  return (
+    (await openDialog<"live" | "draft">(
+      "Go Live?",
+      [el("p", {}, message)],
+      [
+        { label: "Go Live", value: "live", variant: "secondary" },
+        { label: "Keep Draft", value: "draft", variant: "primary" },
+      ],
+      "draft",
+      { defaultChoice: "draft" },
+    ).result) === "live"
+  );
+}
+
 /** Hard block for a file that is not a valid sticker (SPEC §5 replacement rules). */
 export function invalidFileDialog(path: string, reason: string): Promise<"editor" | "cancel"> {
   return openDialog<"editor" | "cancel">(

@@ -50,7 +50,7 @@ import {
 import { emojiCountWarning, emojiWarning } from "../model/emoji";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { dialogOpen } from "./dialog";
-import { confirmStickerDelete, invalidFileDialog, sendDialog, statusBadge } from "./dialogs";
+import { confirmGoLive, confirmStickerDelete, invalidFileDialog, sendDialog, statusBadge } from "./dialogs";
 import { aggregatePanel, detailPanel, emptyPanel, thumbnailPanel, type PanelActions } from "./panels";
 import { previewImage, Previews } from "./previews";
 import { startReorderDrag, type ReorderDragHost } from "./reorder-drag";
@@ -186,7 +186,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     void run(async () => {
       const toLive = view.pack.status === "draft";
       const ok = toLive
-        ? await ask(DRAFT_TO_LIVE_CONFIRMATION, { title: "Mark as Live", kind: "warning", okLabel: "Mark as Live", cancelLabel: "Keep Draft" })
+        ? await confirmGoLive(DRAFT_TO_LIVE_CONFIRMATION)
         : await ask(LIVE_TO_DRAFT_WARNING, { title: "Mark as Draft", kind: "warning", okLabel: "Mark as Draft", cancelLabel: "Keep Live" });
       if (!ok) return;
       view = { ...view, pack: await setPackStatus(packId, toLive ? "live" : "draft") };

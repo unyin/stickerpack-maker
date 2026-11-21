@@ -21,12 +21,17 @@ export interface DialogHandle<T> {
   buttons: Map<T, HTMLButtonElement>;
 }
 
-/** Open a modal with a title, body content and buttons (the last is the default focus). */
+/**
+ * Open a modal with a title, body content and buttons. `cancel` is the value
+ * for Esc. `options.defaultChoice` names the button that takes initial focus
+ * (so Enter presses it); without it the browser's default focus applies.
+ */
 export function openDialog<T>(
   title: string,
   body: Array<Node | string>,
   buttons: DialogButton<T>[],
   cancel: T,
+  options: { defaultChoice?: T } = {},
 ): DialogHandle<T> {
   const dialog = el("dialog", { class: "pm-dialog" }) as HTMLDialogElement;
   const map = new Map<T, HTMLButtonElement>();
@@ -62,6 +67,7 @@ export function openDialog<T>(
   });
   document.body.append(dialog);
   dialog.showModal();
+  if (options.defaultChoice !== undefined) map.get(options.defaultChoice)?.focus();
   return { dialog, result, close, buttons: map };
 }
 

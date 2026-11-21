@@ -531,6 +531,11 @@ button.pm-link {
   background: var(--backdrop);
 }
 
+.pm-dialog button:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
 .pm-dialog h2 {
   font-size: 18px;
   margin: 0 0 12px;

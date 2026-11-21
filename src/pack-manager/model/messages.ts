@@ -48,7 +48,7 @@ export const LIVE_TO_DRAFT_WARNING =
   "Draft unlocks the Short Name; a Live pack's Telegram short name can never change.";
 
 export const DRAFT_TO_LIVE_CONFIRMATION =
-  "Mark this pack as Live? Use this only if it exists on Telegram. " +
+  "Go Live with this pack? Use this only if it exists on Telegram. " +
   "Going Live locks the Short Name; a Live pack's Telegram short name can never change.";
 
 export const SHORT_NAME_LOCKED = "Locked: a Live pack's Short Name cannot change (Telegram short names are permanent).";
