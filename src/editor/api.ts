@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
-import type { Transform } from "./model/document";
+import type { Rect, Transform } from "./model/document";
 
 /** Extensions the Editor imports; mirrors IMPORT_EXTENSIONS in import.rs. */
 export const IMPORT_EXTENSIONS = ["jpg", "jpeg", "jfif", "png", "webp"];
@@ -114,4 +114,54 @@ export function decodePlacedFrame(frame: ArrayBuffer): PlacedImage {
     y: origin.getInt32(4, true),
     image: decodeFrame(frame, 8),
   };
+}
+
+/** Header naming each crop input's size, transform and clip; mirrors CROP_LAYERS_HEADER. */
+export const CROP_LAYERS_HEADER = "x-crop-layers";
+
+/** A raster layer handed to Rust for cropping, with the whole pixels it keeps. */
+export interface CropInput {
+  image: RgbaImage;
+  transform: Transform;
+  clip: Rect;
+}
+
+/**
+ * Re-render raster layers clipped to their rectangles in Rust (ADR-0005),
+ * one image per input, each exactly its clip's size. Pixels go as one raw
+ * body; sizes, transforms and clips ride in a header. The response is the
+ * clips' RGBA bytes concatenated, so it is split here by the known sizes.
+ */
+export async function cropImages(inputs: readonly CropInput[]): Promise<RgbaImage[]> {
+  const body = new Uint8Array(inputs.reduce((n, i) => n + i.image.pixels.length, 0));
+  let offset = 0;
+  for (const input of inputs) {
+    body.set(input.image.pixels, offset);
+    offset += input.image.pixels.length;
+  }
+  const meta = inputs.map((i) => ({
+    width: i.image.width,
+    height: i.image.height,
+    transform: i.transform,
+    clip: i.clip,
+  }));
+  const frame = await invoke<ArrayBuffer>("editor_crop_layers", body, {
+    headers: { [CROP_LAYERS_HEADER]: JSON.stringify(meta) },
+  });
+  return splitClips(frame, inputs.map((i) => i.clip));
+}
+
+/** Split concatenated RGBA bytes into one image per clip; the sizes must add up exactly. */
+export function splitClips(frame: ArrayBuffer, clips: readonly Rect[]): RgbaImage[] {
+  const expected = clips.reduce((n, c) => n + c.width * c.height * 4, 0);
+  if (frame.byteLength !== expected) {
+    throw new Error(`cropped pixels have ${frame.byteLength} bytes, expected ${expected}`);
+  }
+  let offset = 0;
+  return clips.map((c) => {
+    const length = c.width * c.height * 4;
+    const pixels = new Uint8ClampedArray(frame, offset, length);
+    offset += length;
+    return { width: c.width, height: c.height, pixels };
+  });
 }

@@ -5,7 +5,7 @@ import Konva from "konva";
 import type { RgbaImage } from "../model/image";
 import { contentBounds, setTransform, type Doc, type Layer, type Rect, type Transform } from "../model/document";
 import type { EditorSession } from "../model/session";
-import { fitView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
+import { fitView, panView, selectModeFor, zoomAround, type Point, type ViewTransform } from "./geometry";
 
 /** Canvas per pixel buffer: pixels are immutable, so a buffer draws once. */
 const canvases = new WeakMap<RgbaImage, HTMLCanvasElement>();
@@ -68,9 +68,21 @@ export class EditorStage {
   private readonly stage: Konva.Stage;
   private readonly content = new Konva.Layer();
   private readonly backdrop: Konva.Rect;
-  /** Non-interactive layer drawn above the content: document outline (and later the crop box). */
+  /** Non-interactive layer drawn above the content: the canvas outline and the crop box. */
   private readonly guides = new Konva.Layer({ listening: false });
   private readonly outline: Konva.Rect;
+  /**
+   * The crop box overlay (SPEC §6), drawn at the rectangle the view hands
+   * `setCropBox` (the one Crop keeps). A solid halo under a dashed line keeps
+   * it visible over any image.
+   */
+  private readonly boxHalo = new Konva.Rect({ strokeWidth: 3, strokeScaleEnabled: false, listening: false });
+  private readonly box = new Konva.Rect({
+    strokeWidth: 1,
+    dash: [6, 4],
+    strokeScaleEnabled: false,
+    listening: false,
+  });
   // Konva never holds state the model lacks (ADR-0005): the model's Transform
   // has no skew and no flips, and SPEC §6 needs only aspect-preserving resize
   // plus rotate. So only the corner anchors exist, ratio is kept, flips off.
@@ -87,6 +99,16 @@ export class EditorStage {
   /** Watches <html data-theme> (set by src/theme.ts) to recolour the canvas. */
   private readonly themeObserver = new MutationObserver(() => this.applyTheme());
   private readonly unsubscribe: () => void;
+  /** The middle-button pan in progress, if any: the view and pointer when it began. */
+  private middlePan: { view: ViewTransform; pointer: Point } | null = null;
+  private readonly onMiddleDown = (e: MouseEvent): void => this.beginMiddlePan(e);
+  private readonly onMiddleMove = (e: MouseEvent): void => this.moveMiddlePan(e);
+  private readonly onMiddleUp = (e: MouseEvent): void => {
+    if (e.button === 1) this.middlePan = null;
+  };
+  private readonly onAuxClick = (e: MouseEvent): void => {
+    if (e.button === 1) e.preventDefault();
+  };
   private viewChanged?: (view: ViewTransform) => void;
   /**
    * Whether the view is settled: fitted once, or zoomed/panned by the user.
@@ -108,22 +130,29 @@ export class EditorStage {
     // Checkerboard under the layers shows transparency...
     this.backdrop = new Konva.Rect({ listening: false });
     // ...while guides sit ABOVE every layer, so covering layers never hide
-    // them (owner, 2026-11-20). SPM-6's crop box belongs on this layer too.
+    // them (owner, 2026-11-20): the canvas outline and the crop box.
     this.outline = new Konva.Rect({
       strokeWidth: 1,
       strokeScaleEnabled: false,
       listening: false,
     });
-    this.guides.add(this.outline);
+    this.guides.add(this.outline, this.boxHalo, this.box);
     this.content.add(this.backdrop);
     this.content.add(this.transformer);
     this.stage.add(this.content);
     this.stage.add(this.guides);
 
+    // Middle-drag pans anywhere, over layers too. Capture phase on the host
+    // runs before Konva sees the press, so no layer is selected or moved.
+    container.addEventListener("mousedown", this.onMiddleDown, true);
+    container.addEventListener("auxclick", this.onAuxClick, true);
+    window.addEventListener("mousemove", this.onMiddleMove);
+    window.addEventListener("mouseup", this.onMiddleUp);
     this.stage.on("wheel", (e) => this.onWheel(e));
     this.stage.on("dragmove dragend", (e) => {
       if (e.target !== this.stage) return;
-      if (e.type === "dragend") this.fitted = true; // a hand pan is never overwritten
+      // Konva has already moved the stage: only mark it hand-moved and notify.
+      if (e.type === "dragend") this.fitted = true;
       this.viewChanged?.(this.view());
     });
     this.stage.on("click tap", (e) => {
@@ -177,6 +206,27 @@ export class EditorStage {
     this.fitted = true;
   }
 
+  /** Place the crop box overlay; the view computes the box once per refresh and passes it here. */
+  setCropBox(box: Rect): void {
+    this.boxHalo.setAttrs(box);
+    this.box.setAttrs(box);
+    this.guides.batchDraw();
+  }
+
+  /**
+   * Show or hide the crop guides, the crop box overlay and the canvas outline
+   * together (on when the stage opens). In v1 the canvas never exceeds the
+   * constraint side (it starts at the side, and only Fit and Longest side
+   * change it, never above the side), so the capped box equals the canvas and
+   * they are one guide; the checkerboard still shows where the canvas is (SPEC §6).
+   */
+  setCropGuidesVisible(visible: boolean): void {
+    this.outline.visible(visible);
+    this.boxHalo.visible(visible);
+    this.box.visible(visible);
+    this.guides.batchDraw();
+  }
+
   /**
    * Suspend or resume all pointer interaction (layers, selection, panning),
    * so nothing is edited while an async operation works from a snapshot.
@@ -184,10 +234,15 @@ export class EditorStage {
   setInteractive(enabled: boolean): void {
     this.content.listening(enabled);
     this.stage.draggable(enabled);
+    if (!enabled) this.middlePan = null; // ends a middle pan as Konva ends a left drag
     this.content.batchDraw();
   }
 
   destroy(): void {
+    this.container.removeEventListener("mousedown", this.onMiddleDown, true);
+    this.container.removeEventListener("auxclick", this.onAuxClick, true);
+    window.removeEventListener("mousemove", this.onMiddleMove);
+    window.removeEventListener("mouseup", this.onMiddleUp);
     this.unsubscribe();
     this.themeObserver.disconnect();
     this.resizeObserver.disconnect();
@@ -198,6 +253,8 @@ export class EditorStage {
   private applyTheme(): void {
     this.backdrop.fillPatternImage(checkerTile(token("--panel"), token("--border")) as unknown as HTMLImageElement);
     this.outline.stroke(token("--muted"));
+    this.boxHalo.stroke(token("--panel"));
+    this.box.stroke(token("--accent-ink"));
     this.transformer.borderStroke(token("--accent-ink"));
     this.transformer.anchorStroke(token("--accent-ink"));
     this.transformer.anchorFill(token("--panel"));
@@ -211,6 +268,12 @@ export class EditorStage {
     this.viewChanged?.(view);
   }
 
+  /** A view the user moved by hand: it is never overwritten by an automatic fit. */
+  private setHandView(view: ViewTransform): void {
+    this.setView(view);
+    this.fitted = true;
+  }
+
   private resize(): void {
     const { clientWidth, clientHeight } = this.container;
     if (clientWidth === 0 || clientHeight === 0) return; // detached (other tab)
@@ -218,12 +281,29 @@ export class EditorStage {
     if (!this.fitted) this.fit(); // later resizes keep the view
   }
 
+  private beginMiddlePan(e: MouseEvent): void {
+    if (e.button !== 1) return;
+    e.preventDefault(); // no browser autoscroll
+    e.stopPropagation(); // Konva never sees it: no select, no layer drag
+    if (!this.stage.draggable()) return; // interaction is suspended
+    this.middlePan = { view: this.view(), pointer: { x: e.clientX, y: e.clientY } };
+  }
+
+  private moveMiddlePan(e: MouseEvent): void {
+    const pan = this.middlePan;
+    if (!pan) return;
+    if ((e.buttons & 4) === 0) {
+      this.middlePan = null; // released outside the window
+      return;
+    }
+    this.setHandView(panView(pan.view, pan.pointer, { x: e.clientX, y: e.clientY }));
+  }
+
   private onWheel(e: Konva.KonvaEventObject<WheelEvent>): void {
     e.evt.preventDefault();
     const pointer = this.stage.getPointerPosition();
     if (!pointer) return;
-    this.setView(zoomAround(this.view(), pointer, e.evt.deltaY));
-    this.fitted = true; // a hand zoom is never overwritten
+    this.setHandView(zoomAround(this.view(), pointer, e.evt.deltaY));
   }
 
   /** Bring Konva in line with the model: create, update, order, drop nodes. */
@@ -263,7 +343,7 @@ export class EditorStage {
     this.transformer.moveToTop();
     this.content.batchDraw();
     this.guides.batchDraw();
-    // A new canvas size never moves the view (SPEC §6).
+    // A new canvas size, or a Crop, never moves the view (SPEC §6).
   }
 
   private nodeFor(layer: Layer): Konva.Shape {

@@ -12,6 +12,7 @@ import {
   MIN_ZOOM,
   selectModeFor,
   sizeToolBlocker,
+  panView,
   zoomAround,
 } from "../src/editor/view/geometry";
 
@@ -119,4 +120,10 @@ test("Longest side is greyed out with a reason when the set needs a square canva
   expect(sizeToolBlocker("longest", thumb, null, NaN, THUMBNAIL)).toBe(reason);
   // Free resize is the same in both modes.
   expect(sizeToolBlocker("free", thumb, content, 50, THUMBNAIL)).toBeNull();
+});
+
+test("panView moves the view by the pointer travel and keeps the scale", () => {
+  const start = { scale: 2, x: 10, y: -5 };
+  expect(panView(start, { x: 100, y: 100 }, { x: 130, y: 80 })).toEqual({ scale: 2, x: 40, y: -25 });
+  expect(panView(start, { x: 7, y: 7 }, { x: 7, y: 7 })).toEqual(start);
 });

@@ -35,6 +35,7 @@ mock.module("@tauri-apps/api/core", () => ({
       return { width: 2400, height: 1200, exceedsCap: true };
     }
     if (cmd === "editor_merge_layers") return placedFrame(-2, 3, frame(1, 1, 5));
+    if (cmd === "editor_crop_layers") return new Uint8Array([1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]).buffer;
     return frame(2, 1, 7);
   },
   Channel: class {},
@@ -117,4 +118,32 @@ test("decodePlacedFrame reads a signed origin", () => {
   const p = api.decodePlacedFrame(placedFrame(-7, -1, frame(1, 1, 0)));
   expect([p.x, p.y, p.image.width]).toEqual([-7, -1, 1]);
   expect(() => api.decodePlacedFrame(new ArrayBuffer(3))).toThrow("truncated");
+});
+
+test("crop sends one raw body plus a size/transform/clip header, and splits the clips", async () => {
+  const t = { x: -1, y: 0, scaleX: 1, scaleY: 1, rotation: 0 };
+  const a = { width: 2, height: 1, pixels: new Uint8ClampedArray([1, 2, 3, 4, 5, 6, 7, 8]) };
+  const b = { width: 1, height: 1, pixels: new Uint8ClampedArray([9, 10, 11, 12]) };
+  const clipA = { x: 0, y: 0, width: 1, height: 1 };
+  const clipB = { x: 3, y: 4, width: 2, height: 1 };
+  const out = await api.cropImages([
+    { image: a, transform: t, clip: clipA },
+    { image: b, transform: { ...t, rotation: 45 }, clip: clipB },
+  ]);
+  const call = calls[calls.length - 1];
+  expect(call.cmd).toBe("editor_crop_layers");
+  expect(Array.from(call.args as unknown as Uint8Array)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  const headers = (options[options.length - 1] as { headers: Record<string, string> }).headers;
+  expect(JSON.parse(headers["x-crop-layers"])).toEqual([
+    { width: 2, height: 1, transform: t, clip: clipA },
+    { width: 1, height: 1, transform: { ...t, rotation: 45 }, clip: clipB },
+  ]);
+  expect(out.map((i) => [i.width, i.height, ...i.pixels])).toEqual([
+    [1, 1, 1, 1, 1, 1],
+    [2, 1, 2, 2, 2, 2, 3, 3, 3, 3],
+  ]);
+});
+
+test("splitClips refuses a response whose size does not match the clips", () => {
+  expect(() => api.splitClips(new ArrayBuffer(3), [{ x: 0, y: 0, width: 1, height: 1 }])).toThrow("expected 4");
 });

@@ -5,10 +5,13 @@
 import { ask } from "@tauri-apps/plugin-dialog";
 import "../editor/editor.css";
 import { baseName } from "../api";
-import { IMPORT_MAX_SIDE, importImage, mergeImages, pickImageFile, probeImage } from "../editor/api";
+import { cropImages, IMPORT_MAX_SIDE, importImage, mergeImages, pickImageFile, probeImage } from "../editor/api";
 import {
   addRasterLayer,
   centeredPlacement,
+  cropBox,
+  cropClipInputs,
+  cropLayers,
   deleteLayers,
   fitToBox,
   IDENTITY,
@@ -19,14 +22,23 @@ import {
   moveLayer,
   newDocument,
   nextLayerId,
+  planCrop,
   scaleLongestSide,
+  type CropAction,
   type Doc,
   type Rect,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
-import { STICKER, startCanvas } from "../editor/model/constraints";
+import { readoutStatus, STICKER, startCanvas } from "../editor/model/constraints";
 import { EditorSession } from "../editor/model/session";
-import { deleteBlocker, mergeBlocker, selectModeFor, sizeToolBlocker, type SizeTool } from "../editor/view/geometry";
+import {
+  cropBlocker,
+  deleteBlocker,
+  mergeBlocker,
+  selectModeFor,
+  sizeToolBlocker,
+  type SizeTool,
+} from "../editor/view/geometry";
 import { EditorStage } from "../editor/view/stage";
 import { el, errorMessage, withMessage } from "../ui";
 
@@ -46,6 +58,8 @@ function buildEditor(): HTMLElement {
   let session: EditorSession | null = null;
   let stage: EditorStage | null = null;
   let busy = false;
+  // The crop box overlay is on by default (owner, 2026-11-20).
+  let showBox = true;
 
   const message = el("p", { class: "message editor-message", role: "alert" });
   const canvasHost = el("div", { class: "editor-canvas" }) as HTMLDivElement;
@@ -53,6 +67,8 @@ function buildEditor(): HTMLElement {
   const zoomLabel = el("span", { class: "editor-zoom muted" });
   const dirtyLabel = el("span", { class: "editor-dirty" }, "● Unsaved changes");
   const layerHint = el("p", { class: "editor-hint muted" });
+  // Live readout of the canvas against the constraint set (SPEC §6).
+  const readout = el("span", { class: "editor-readout", "aria-live": "polite" });
 
   const openButton = button("Open image", () => run(openImage), "primary");
   const addButton = button("Add image as layer", () => run(addImageAsLayer), "primary");
@@ -75,6 +91,9 @@ function buildEditor(): HTMLElement {
     "aria-label": "Longest side in pixels",
   }) as HTMLInputElement;
   const resizeButton = button("Resize", () => freeResize());
+  const boxButton = button("Crop box", () => toggleBox());
+  // Labelled with the actual box size in refresh(): it is capped at the canvas.
+  const cropButton = button("Crop", () => run(cropToBox));
   const resetViewButton = button("Reset view", () => stage?.fit());
   const closeButton = button("Close", () => run(closeSession));
   const upButton = button("Move up", () => moveSelected(+1));
@@ -96,6 +115,9 @@ function buildEditor(): HTMLElement {
   longestButton.title = longestTitle;
   resizeButton.title = resizeTitle;
   resetViewButton.title = "Zoom and centre the canvas in view (changes the view only)";
+  boxButton.title = "Show or hide the crop box";
+  const cropTitle = (size: string) =>
+    `Discard everything outside the ${size} box; drag the image to choose what stays. The canvas size stays`;
   sideInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") freeResize();
   });
@@ -124,6 +146,13 @@ function buildEditor(): HTMLElement {
       el("label", { class: "editor-side" }, "Longest side ", sideInput, " px"),
       resizeButton,
     ),
+    el(
+      "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Crop" },
+      boxButton,
+      cropButton,
+    ),
+    readout,
     resetViewButton,
     zoomLabel,
     dirtyLabel,
@@ -182,6 +211,8 @@ function buildEditor(): HTMLElement {
     session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(constraints)));
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
+    stage.setCropGuidesVisible(showBox);
+    refresh(); // place the crop box overlay
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
     session.subscribe(refresh);
@@ -221,6 +252,43 @@ function buildEditor(): HTMLElement {
       ),
     );
     current.select(id);
+  }
+
+  /**
+   * Crop (SPEC §6): discard every layer's content outside the box as ONE
+   * undo step. Layers crossing the box edge are re-rendered in Rust; layers
+   * entirely outside it are removed. The canvas size and the view stay.
+   */
+  async function cropToBox(): Promise<void> {
+    const current = session;
+    if (!current) return;
+    const doc = current.doc;
+    const { plan, blocker } = cropState(doc);
+    if (blocker) return;
+    const clips = cropClipInputs(doc, plan);
+    const images = clips.length > 0 ? await cropImages(clips) : [];
+    if (current.doc !== doc) {
+      message.textContent = "The layers changed while cropping; nothing was cropped. Try again.";
+      return;
+    }
+    current.apply((d) => cropLayers(d, plan, new Map(clips.map((c, i) => [c.id, images[i]]))));
+  }
+
+  /**
+   * The crop box, Crop's plan and its blocker for a document: the ONE place
+   * they are computed. refresh() feeds the overlay, the label and the
+   * button from it, and Crop runs from it, so all four use the same box.
+   */
+  function cropState(doc: Doc): { box: Rect; plan: CropAction[]; blocker: string | null } {
+    const box = cropBox(doc, targetSide);
+    const plan = planCrop(doc, box);
+    return { box, plan, blocker: cropBlocker(plan, box) };
+  }
+
+  function toggleBox(): void {
+    showBox = !showBox;
+    stage?.setCropGuidesVisible(showBox);
+    refresh();
   }
 
   async function closeSession(): Promise<void> {
@@ -339,6 +407,18 @@ function buildEditor(): HTMLElement {
       button.title = reason ?? action;
     }
     sideInput.disabled = busy;
+    // One cropState result drives the overlay, the label and the blocker;
+    // cropToBox() reads the same function.
+    const { box, blocker: cropReason } = cropState(doc);
+    stage?.setCropBox(box);
+    const boxSize = `${box.width}×${box.height}`;
+    cropButton.textContent = `Crop to ${boxSize}`;
+    cropButton.disabled = busy || cropReason !== null;
+    cropButton.title = cropReason ?? cropTitle(boxSize);
+    boxButton.setAttribute("aria-pressed", String(showBox));
+    const status = readoutStatus(doc, constraints);
+    readout.textContent = status.text;
+    readout.classList.toggle("off", !status.ok);
     resetViewButton.disabled = busy;
     closeButton.disabled = busy;
     undoButton.disabled = busy || !current.canUndo;

@@ -164,24 +164,31 @@ export interface Rect {
  * and the Rust merge place it.
  */
 export function placedBounds(width: number, height: number, t: Transform): Rect {
-  const rad = (t.rotation * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-  const corners = [
-    [0, 0],
-    [width, 0],
-    [0, height],
-    [width, height],
-  ].map(([u, v]) => {
-    const sx = u * t.scaleX;
-    const sy = v * t.scaleY;
-    return [t.x + sx * cos - sy * sin, t.y + sx * sin + sy * cos];
-  });
+  const corners = placedCorners(width, height, t);
   const xs = corners.map((c) => c[0]);
   const ys = corners.map((c) => c[1]);
   const x = Math.min(...xs);
   const y = Math.min(...ys);
   return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+}
+
+type Point = readonly [number, number];
+
+/** The four corners of a layer's placed rectangle (its image's (0,0), (w,0), (0,h), (w,h)). */
+function placedCorners(width: number, height: number, t: Transform): Point[] {
+  const rad = (t.rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return [
+    [0, 0],
+    [width, 0],
+    [0, height],
+    [width, height],
+  ].map(([u, v]): Point => {
+    const sx = u * t.scaleX;
+    const sy = v * t.scaleY;
+    return [t.x + sx * cos - sy * sin, t.y + sx * sin + sy * cos];
+  });
 }
 
 /** Union of rectangles; throws for none. */
@@ -361,4 +368,179 @@ export function mergeLayers(
     else if (!chosen.has(layer.id)) layers.push(layer);
   });
   return withLayers(doc, layers, doc.nextId + 1);
+}
+
+/**
+ * The crop box (SPEC §6): the constraint set's `side`, capped at the canvas
+ * size on each axis (owner, 2026-11-20), so it is never larger than the
+ * canvas: a 512×439 canvas gets a 512×439 box. Centred on the canvas, with
+ * its top-left rounded down to a whole pixel. The overlay draws exactly this
+ * rectangle and Crop keeps exactly it.
+ */
+export function cropBox(canvas: Size, side: number): Rect {
+  const width = Math.min(side, canvas.width);
+  const height = Math.min(side, canvas.height);
+  return {
+    x: Math.floor((canvas.width - width) / 2),
+    y: Math.floor((canvas.height - height) / 2),
+    width,
+    height,
+  };
+}
+
+/** Snap to the nearest whole pixel when float noise is all that separates them (merge.rs `snap`). */
+function snapPixel(v: number): number {
+  return Math.abs(v - Math.round(v)) < PIXEL_SNAP ? Math.round(v) : v;
+}
+
+/** The whole pixels a rectangle touches: its bounds rounded outwards (after snapping). */
+export function pixelBounds(r: Rect): Rect {
+  const x = Math.floor(snapPixel(r.x));
+  const y = Math.floor(snapPixel(r.y));
+  return {
+    x,
+    y,
+    width: Math.ceil(snapPixel(r.x + r.width)) - x,
+    height: Math.ceil(snapPixel(r.y + r.height)) - y,
+  };
+}
+
+/**
+ * What Crop does to one layer:
+ * - "keep": it lies inside the box, so it is left exactly as it is;
+ * - "remove": it lies entirely outside the box, so it is discarded;
+ * - "clip": it crosses the box edge, so it is re-rendered (in Rust) into
+ *   `rect`, the whole pixels it covers inside the box, and becomes an
+ *   untransformed raster layer placed at `rect`.
+ */
+export type CropAction =
+  | { readonly kind: "keep"; readonly id: string }
+  | { readonly kind: "remove"; readonly id: string }
+  | { readonly kind: "clip"; readonly id: string; readonly rect: Rect };
+
+/**
+ * True when a placed rectangle (its four `corners`, in the order of
+ * `placedCorners`) shares no area with `box`: a separating-axis test, which
+ * for a rotated layer is sharper than comparing bounding boxes (the
+ * bounding box of a turned layer covers corners the layer never reaches).
+ * Corners snap to whole pixels like merge.rs `snap`; touching is disjoint.
+ */
+function quadMissesBox(corners: readonly Point[], box: Rect): boolean {
+  const quad = corners.map(([x, y]): Point => [snapPixel(x), snapPixel(y)]);
+  const boxCorners: Point[] = [
+    [box.x, box.y],
+    [box.x + box.width, box.y],
+    [box.x, box.y + box.height],
+    [box.x + box.width, box.y + box.height],
+  ];
+  // The box's axes (x, y), then the quad's two edge normals.
+  const axes: Point[] = [
+    [1, 0],
+    [0, 1],
+  ];
+  for (const end of [quad[1], quad[2]]) {
+    const dx = end[0] - quad[0][0];
+    const dy = end[1] - quad[0][1];
+    const length = Math.hypot(dx, dy);
+    if (length > 0) axes.push([-dy / length, dx / length]);
+  }
+  return axes.some(([ax, ay]) => {
+    const q = quad.map(([x, y]) => x * ax + y * ay);
+    const b = boxCorners.map(([x, y]) => x * ax + y * ay);
+    return Math.max(...q) <= Math.min(...b) + EPSILON || Math.max(...b) <= Math.min(...q) + EPSILON;
+  });
+}
+
+/** Crop's plan for every layer, bottom to top (SPEC §6). */
+export function planCrop(doc: Doc, box: Rect): CropAction[] {
+  return doc.layers.map((layer): CropAction => {
+    // Nothing creates text layers yet: the text tool (SPM-9) decides how
+    // Crop treats them. Until then they are left as they are.
+    if (layer.kind === "text") return { kind: "keep", id: layer.id };
+    const { width, height } = layer.image;
+    const b = pixelBounds(placedBounds(width, height, layer.transform));
+    const left = Math.max(b.x, box.x);
+    const top = Math.max(b.y, box.y);
+    const right = Math.min(b.x + b.width, box.x + box.width);
+    const bottom = Math.min(b.y + b.height, box.y + box.height);
+    // Entirely outside: by bounding box, or (a turned layer) by its real rectangle.
+    if (right <= left || bottom <= top || quadMissesBox(placedCorners(width, height, layer.transform), box)) {
+      return { kind: "remove", id: layer.id };
+    }
+    const inside = left === b.x && top === b.y && right === b.x + b.width && bottom === b.y + b.height;
+    if (inside) return { kind: "keep", id: layer.id };
+    return { kind: "clip", id: layer.id, rect: { x: left, y: top, width: right - left, height: bottom - top } };
+  });
+}
+
+/**
+ * What a plan amounts to, the one place the view's blocker and `cropLayers`
+ * agree on: "nothing-outside" (every layer kept: Crop would change nothing),
+ * "nothing-inside" (every layer removed: a session keeps at least one), or
+ * "crop".
+ */
+export type CropOutcome = "nothing-outside" | "nothing-inside" | "crop";
+
+export function cropOutcome(plan: readonly CropAction[]): CropOutcome {
+  if (plan.every((a) => a.kind === "keep")) return "nothing-outside";
+  if (plan.every((a) => a.kind === "remove")) return "nothing-inside";
+  return "crop";
+}
+
+/** A raster layer handed to the Rust crop with the whole pixels it keeps. */
+export interface CropClipInput {
+  readonly id: string;
+  readonly image: RgbaImage;
+  readonly transform: Transform;
+  readonly clip: Rect;
+}
+
+/** The layers a plan clips, with what Rust needs to re-render each. */
+export function cropClipInputs(doc: Doc, plan: readonly CropAction[]): CropClipInput[] {
+  const inputs: CropClipInput[] = [];
+  plan.forEach((action, i) => {
+    const layer = doc.layers[i];
+    if (action.kind !== "clip" || layer?.id !== action.id || layer.kind !== "raster") return;
+    inputs.push({ id: layer.id, image: layer.image, transform: layer.transform, clip: action.rect });
+  });
+  return inputs;
+}
+
+/** Why Crop would leave a session without layers (SPEC §6). */
+export const NOTHING_IN_BOX = "Nothing is inside the box: drag the image into it first.";
+
+/**
+ * Apply a crop plan as ONE operation (SPEC §6): clipped layers get their new
+ * pixels (`images`, by layer id, each exactly its rect's size) at their rect,
+ * untransformed, keeping their id, name and stack position; layers entirely
+ * outside the box are removed (a crossing layer is kept even when its part
+ * in the box happens to be transparent). The canvas size never changes. A
+ * plan that changes nothing returns the document as is (no undo step); one
+ * that would leave no layer throws NOTHING_IN_BOX.
+ */
+export function cropLayers(
+  doc: Doc,
+  plan: readonly CropAction[],
+  images: ReadonlyMap<string, RgbaImage>,
+): Doc {
+  if (plan.length !== doc.layers.length || plan.some((a, i) => a.id !== doc.layers[i].id)) {
+    throw new Error("the crop plan does not match the document");
+  }
+  const outcome = cropOutcome(plan);
+  if (outcome === "nothing-outside") return doc;
+  if (outcome === "nothing-inside") throw new Error(NOTHING_IN_BOX);
+  const layers: Layer[] = [];
+  plan.forEach((action, i) => {
+    const layer = doc.layers[i];
+    if (action.kind === "keep") layers.push(layer);
+    if (action.kind !== "clip") return;
+    const image = images.get(action.id);
+    const { rect } = action;
+    if (layer.kind !== "raster") throw new Error(`layer ${action.id} is not a raster layer`);
+    if (!image || image.width !== rect.width || image.height !== rect.height) {
+      throw new Error(`the cropped pixels for layer ${action.id} do not match its box`);
+    }
+    layers.push({ ...layer, image, transform: { ...IDENTITY, x: rect.x, y: rect.y } });
+  });
+  return withLayers(doc, layers);
 }

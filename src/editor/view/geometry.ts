@@ -1,10 +1,13 @@
 // Pure decisions behind the Editor view: no Konva, no DOM, unit-tested.
 import {
+  cropOutcome,
   fitToBox,
   KEEP_ONE_LAYER,
+  NOTHING_IN_BOX,
   resizeLongestSide,
   resizeSideProblem,
   scaleLongestSide,
+  type CropAction,
   type Doc,
   type Rect,
 } from "../model/document";
@@ -28,7 +31,7 @@ interface Size {
   readonly height: number;
 }
 
-interface Point {
+export interface Point {
   readonly x: number;
   readonly y: number;
 }
@@ -60,6 +63,14 @@ export function zoomAround(view: ViewTransform, pointer: Point, deltaY: number):
   const docX = (pointer.x - view.x) / view.scale;
   const docY = (pointer.y - view.y) / view.scale;
   return { scale, x: pointer.x - docX * scale, y: pointer.y - docY * scale };
+}
+
+/**
+ * Pan by a pointer drag: the view moves by the pointer's travel since the
+ * drag began, scale unchanged. `start` is the view when the drag began.
+ */
+export function panView(start: ViewTransform, startPointer: Point, pointer: Point): ViewTransform {
+  return { scale: start.scale, x: start.x + (pointer.x - startPointer.x), y: start.y + (pointer.y - startPointer.y) };
 }
 
 /**
@@ -122,4 +133,20 @@ export function selectModeFor(event: {
   shiftKey: boolean;
 }): SelectMode {
   return event.ctrlKey || event.metaKey || event.shiftKey ? "toggle" : "replace";
+}
+
+/**
+ * Why Crop is disabled, or null when it can run: it would change nothing
+ * (every layer already inside the box), or it would discard every layer
+ * (a session keeps at least one, SPEC §6).
+ */
+export function cropBlocker(plan: readonly CropAction[], box: Rect): string | null {
+  switch (cropOutcome(plan)) {
+    case "nothing-outside":
+      return `Everything is already inside the ${box.width}×${box.height} box.`;
+    case "nothing-inside":
+      return NOTHING_IN_BOX;
+    case "crop":
+      return null;
+  }
 }

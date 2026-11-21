@@ -22,6 +22,8 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 - Background removal runs offline via ONNX with a one-time model download. Whether ONNX runs
   in Rust (`ort`) or the webview (onnxruntime-web) is a deferred engineering decision (own ADR).
 - Difficult implementation choices get ADRs and detailed task breakdowns.
+- UI conventions: disabled controls look disabled (faded) and still show their reason as a
+  tooltip (owner decision 2026-11-21).
 
 ## 3. Domain model
 
@@ -168,9 +170,28 @@ stickers, Missing stickers, and the thumbnail.
   a 512×512 box for stickers, 100×100 for thumbnails. Fixed at canvas center; never
   draggable/resizable; drawn **above all layers** so it stays visible when layers cover the
   canvas.
-  Drag the image to choose what survives.
+  Drag the image to choose what survives. The overlay is **on by default** and the **Crop
+  box** button shows or hides it (owner decision 2026-11-20); the toggle hides the canvas
+  outline too, one toggle for both, while the checkerboard still shows where the canvas is
+  (owner decision 2026-11-21). The box is the set's side,
+  **capped at the canvas size on each axis**, so it is never larger than the canvas: a
+  512×439 canvas gets a 512×439 box (owner decision 2026-11-20). It follows the canvas size,
+  staying centred; when the canvas and box sides differ by an odd number, its top-left is
+  rounded down to a whole pixel, so it always covers whole pixels. The Crop button names
+  the actual box size (e.g. **Crop to 512×439**) (owner confirmed 2026-11-21).
 - **Crop** is destructive: everything outside the box (512×512 for stickers, 100×100 for
-  thumbnails) is discarded; the canvas size stays as it is (owner decision 2026-11-20).
+  thumbnails, capped at the canvas size as above) is discarded; the canvas size stays as it
+  is (owner decision 2026-11-20).
+  - A layer inside the box is left exactly as it is. A layer crossing the box edge keeps
+    only the whole pixels it covers inside the box: it becomes an unrotated, unscaled layer
+    at that spot, with its rotation and scale baked into its pixels. It keeps its name and
+    its place in the stack (owner confirmed 2026-11-21).
+  - Layers **entirely outside** the box are discarded in the same single undo step (owner
+    decision 2026-11-20). If every layer is entirely outside, Crop is disabled ("Nothing is
+    inside the box"), because a session always keeps at least one layer.
+  - Crop is disabled, with the reason in its tooltip, when nothing lies outside the box (owner confirmed 2026-11-21).
+  - Crop never moves the view: the canvas origin does not move.
+  - Text layers on Crop are decided with the text tool (SPM-9).
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
   image" = everything on the canvas treated as one layer, exactly like selecting every layer
   and resizing them together (owner decision 2026-11-20). Sides below are Sticker mode's;
@@ -190,11 +211,19 @@ stickers, Missing stickers, and the thumbnail.
   the user left them (owner decision 2026-11-20). The canvas keeps its top-left corner where
   it was on screen, so the outline grows or shrinks by the same factor as the canvas.
   Undo/redo of a sizing tool behaves the same.
+- **Middle-mouse click-and-drag pans the view** without moving any layer (owner decision
+  2026-11-21). It works anywhere on the stage, over layers too, in every tool; it never
+  selects or moves a layer, and it triggers no browser autoscroll. It counts as a manual view
+  change like a left-drag pan or wheel zoom (an automatic fit never overrides it; only Reset
+  view re-fits), and the zoom readout updates.
 - **Reset view** is the only way to re-fit: it re-centres the canvas and zooms to fit it in
   the view (never above 100%), without changing the image. The view is fitted automatically
   only when an editing session opens.
 - **Live readout** of the canvas size against the active constraint set (owner decision
   2026-11-20): Sticker mode means longest side 512; Thumbnail mode means exactly 100×100.
+  It shows the canvas size and either that it meets the set or how many pixels each side is
+  over or under (e.g. "600×400 px · needs longest side 512: 88 px over"), and updates on
+  every change, undo and redo included (owner confirmed 2026-11-21).
 
 ### Layers and tools
 - Session layer model: base image, pasted cutouts, text objects. Undo/redo throughout.
@@ -269,11 +298,13 @@ stickers, Missing stickers, and the thumbnail.
 - Group-drag reorder (moving several stickers at once).
 - Trash/recovery area for deleted stickers.
 - Bulk emoji-set: rejected as unnecessary — not planned.
-- Editor: middle-mouse click-and-drag pans the view without moving the image.
 - Editor: every edge of the selection box is grabbable for resizing, not just the corners.
 - Editor: custom canvas resizing (in v1 only Fit and Longest side change the canvas).
 - Drag and drop an image file to open it in the Editor. (v3 idea: drag and drop onto an
   open session to add it as a layer.)
+- Editor: Crop could also drop a layer that crosses the box edge when its part inside the
+  box is fully transparent. In v1 such a layer is kept; only layers entirely outside the box
+  are discarded (owner, 2026-11-21: may revisit).
 
 ## 10. Draft work packages (for review — not yet filed as issues)
 

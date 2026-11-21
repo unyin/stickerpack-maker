@@ -165,11 +165,6 @@ button.primary {
   cursor: pointer;
 }
 
-button.primary:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
 button.secondary {
   background: var(--panel);
   color: var(--text);
@@ -181,6 +176,18 @@ button.secondary {
 
 button.secondary:hover {
   background: var(--bg);
+}
+
+/* Disabled look for every button. It comes after the button.primary and
+   button.secondary rules on purpose: same specificity, so the later rule's
+   cursor wins. The :hover override stops a disabled button reacting. */
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+button.secondary:disabled:hover {
+  background: var(--panel);
 }
 
 .theme-select {
