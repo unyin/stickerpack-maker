@@ -2,7 +2,6 @@
 // (Reorder toggle, Refresh, Add images), banners, the sticker grid with the
 // thumbnail slot at its end, and the selection panel. Rules live in
 // ../model; this file wires them to the DOM and the commands.
-import { ask } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { editorCanImport } from "../../shared/import-extensions";
 import { el, errorMessage, onActivate, withMessage } from "../../ui";
@@ -50,7 +49,7 @@ import {
 import { emojiCountWarning, emojiWarning } from "../model/emoji";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { dialogOpen } from "./dialog";
-import { confirmGoLive, confirmStickerDelete, invalidFileDialog, sendDialog, statusBadge } from "./dialogs";
+import { confirmBackToDraft, confirmGoLive, confirmStickerDelete, invalidFileDialog, sendDialog, statusBadge } from "./dialogs";
 import { aggregatePanel, detailPanel, emptyPanel, thumbnailPanel, type PanelActions } from "./panels";
 import { previewImage, Previews } from "./previews";
 import { startReorderDrag, type ReorderDragHost } from "./reorder-drag";
@@ -187,7 +186,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       const toLive = view.pack.status === "draft";
       const ok = toLive
         ? await confirmGoLive(DRAFT_TO_LIVE_CONFIRMATION)
-        : await ask(LIVE_TO_DRAFT_WARNING, { title: "Mark as Draft", kind: "warning", okLabel: "Mark as Draft", cancelLabel: "Keep Live" });
+        : await confirmBackToDraft(LIVE_TO_DRAFT_WARNING);
       if (!ok) return;
       view = { ...view, pack: await setPackStatus(packId, toLive ? "live" : "draft") };
     }),

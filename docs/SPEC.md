@@ -39,8 +39,10 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 - **Status**: **Draft** (default for new packs; not yet on Telegram) or **Live** (exists on
   Telegram). v1: manual toggle both ways; each direction asks for confirmation (owner decision
   2026-11-21): Draft→Live confirms that going Live locks the Short Name, Live→Draft warns.
-  The Draft→Live dialog is titled "Go Live?" with exactly two buttons, **Go Live** and **Keep Draft**;
-  Keep Draft is the default (focused, primary), also on Enter, Esc and close (owner decision 2026-11-21).
+  Both are in-app dialogs with exactly two buttons and no Cancel. Draft→Live is titled "Go Live?"
+  with **Go Live** and **Keep Draft**; Live→Draft is titled "Make Draft?" with **Make Draft** and
+  **Keep Live**. The keep button (Keep Draft / Keep Live) is the default (focused, primary), also on
+  Esc and close (owner decision 2026-11-21).
   Live status otherwise changes nothing in v1 beyond the badge and the short-name lock.
 - **Thumbnail**: optional; see §6.
 - Deleting a **Draft** pack deletes its folder and files after confirmation. Deleting a
@@ -144,7 +146,8 @@ stickers, Missing stickers, and the thumbnail.
 - Create pack (Title → auto Short Name, editable while Draft; new packs are Draft).
 - Pack header: Title always editable; Short Name editable only in Draft; Draft/Live manual
   toggle both ways, each direction confirmed (owner decision 2026-11-21); Draft→Live offers
-  Go Live / Keep Draft, Keep Draft by default (owner decision 2026-11-21).
+  Go Live / Keep Draft, Keep Draft by default; Live→Draft offers Make Draft / Keep Live, Keep Live
+  by default (owner decision 2026-11-21).
 - **Bulk import**: drag-drop multiple images onto a pack. Same validity rule as drop-in —
   valid files added as-is in drop order; invalid files rejected per-file with an
   "open in editor" option. Imported stickers get no emoji; empty-emoji stickers are flagged.

@@ -161,24 +161,35 @@ export function confirmStickerDelete(stickers: readonly StickerView[], previews:
 }
 
 /**
- * Draft→Live confirmation (SPEC §3/§5, owner decision 2026-11-21): exactly
- * "Go Live" and "Keep Draft". Keep Draft is the primary, initially focused
- * button, so Enter, Esc and closing the dialog all keep the pack Draft.
- * Resolves true only for Go Live.
+ * Shared shape of the two status confirmations (SPEC §3/§5, owner decision
+ * 2026-11-21): a title, the message, and exactly two buttons. The action
+ * button is secondary; the safe "keep" button is primary and initially
+ * focused, so Enter, Esc and closing the dialog all keep the current status.
+ * Resolves true only for the action.
  */
-export async function confirmGoLive(message: string): Promise<boolean> {
+async function confirmStatusChange(title: string, message: string, actionLabel: string, keepLabel: string): Promise<boolean> {
   return (
-    (await openDialog<"live" | "draft">(
-      "Go Live?",
+    (await openDialog<"action" | "keep">(
+      title,
       [el("p", {}, message)],
       [
-        { label: "Go Live", value: "live", variant: "secondary" },
-        { label: "Keep Draft", value: "draft", variant: "primary" },
+        { label: actionLabel, value: "action", variant: "secondary" },
+        { label: keepLabel, value: "keep", variant: "primary" },
       ],
-      "draft",
-      { defaultChoice: "draft" },
-    ).result) === "live"
+      "keep",
+      { defaultChoice: "keep" },
+    ).result) === "action"
   );
+}
+
+/** Draft→Live confirmation: "Go Live?" with Go Live / Keep Draft (default). */
+export function confirmGoLive(message: string): Promise<boolean> {
+  return confirmStatusChange("Go Live?", message, "Go Live", "Keep Draft");
+}
+
+/** Live→Draft warning: "Make Draft?" with Make Draft / Keep Live (default). */
+export function confirmBackToDraft(message: string): Promise<boolean> {
+  return confirmStatusChange("Make Draft?", message, "Make Draft", "Keep Live");
 }
 
 /** Hard block for a file that is not a valid sticker (SPEC §5 replacement rules). */
