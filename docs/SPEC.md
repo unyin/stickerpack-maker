@@ -37,8 +37,9 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
   `com0`–`com9`, `lpt0`–`lpt9`) are refused; an auto-derived name that would be reserved
   gets a `_pack` suffix (e.g. `con_pack`).
 - **Status**: **Draft** (default for new packs; not yet on Telegram) or **Live** (exists on
-  Telegram). v1: manual toggle both ways; Live→Draft shows a warning. Live status otherwise
-  changes nothing in v1 beyond the badge and the short-name lock.
+  Telegram). v1: manual toggle both ways; each direction asks for confirmation (owner decision
+  2026-11-21): Draft→Live confirms that going Live locks the Short Name, Live→Draft warns.
+  Live status otherwise changes nothing in v1 beyond the badge and the short-name lock.
 - **Thumbnail**: optional; see §6.
 - Deleting a **Draft** pack deletes its folder and files after confirmation. Deleting a
   **Live** pack deletes locally only, warning that the Telegram pack remains and must be
@@ -140,7 +141,7 @@ stickers, Missing stickers, and the thumbnail.
 ### Pack-level
 - Create pack (Title → auto Short Name, editable while Draft; new packs are Draft).
 - Pack header: Title always editable; Short Name editable only in Draft; Draft/Live manual
-  toggle both ways (Live→Draft warned).
+  toggle both ways, each direction confirmed (owner decision 2026-11-21).
 - **Bulk import**: drag-drop multiple images onto a pack. Same validity rule as drop-in —
   valid files added as-is in drop order; invalid files rejected per-file with an
   "open in editor" option. Imported stickers get no emoji; empty-emoji stickers are flagged.

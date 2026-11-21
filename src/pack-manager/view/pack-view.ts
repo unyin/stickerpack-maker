@@ -29,6 +29,7 @@ import {
 import {
   fileNameOf,
   importSummary,
+  DRAFT_TO_LIVE_CONFIRMATION,
   LIVE_TO_DRAFT_WARNING,
   missingSummary,
   SHORT_NAME_LOCKED,
@@ -184,10 +185,10 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   statusButton.addEventListener("click", () =>
     void run(async () => {
       const toLive = view.pack.status === "draft";
-      if (!toLive) {
-        const ok = await ask(LIVE_TO_DRAFT_WARNING, { title: "Mark as Draft", kind: "warning", okLabel: "Mark as Draft", cancelLabel: "Keep Live" });
-        if (!ok) return;
-      }
+      const ok = toLive
+        ? await ask(DRAFT_TO_LIVE_CONFIRMATION, { title: "Mark as Live", kind: "warning", okLabel: "Mark as Live", cancelLabel: "Keep Draft" })
+        : await ask(LIVE_TO_DRAFT_WARNING, { title: "Mark as Draft", kind: "warning", okLabel: "Mark as Draft", cancelLabel: "Keep Live" });
+      if (!ok) return;
       view = { ...view, pack: await setPackStatus(packId, toLive ? "live" : "draft") };
     }),
   );
