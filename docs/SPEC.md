@@ -82,7 +82,7 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
   from orphaned image files is out of scope for v1.
 - An older Library's database is upgraded to the current schema when the app opens it: the
   migrations it lacks are applied once, in order, in one transaction (owner decision
-  2026-11-21).
+  2026-11-21; ADR-0007).
 
 ## 4. Files and order (ADR-0003)
 
