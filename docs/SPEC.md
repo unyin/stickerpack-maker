@@ -187,7 +187,7 @@ stickers, Missing stickers, and the thumbnail.
     inside the box"), because a session always keeps at least one layer.
   - Crop is disabled, with the reason in its tooltip, when nothing lies outside the box (owner confirmed 2026-11-21).
   - Crop never moves the view: the canvas origin does not move.
-  - Text layers on Crop (agent decision SPM-9, pending owner confirmation): a text layer
+  - Text layers on Crop (owner confirmed 2026-11-21): a text layer
     is measured by its rendered box, turned and scaled with the layer, like an image by its
     pixels, so every rule above applies to it unchanged. Inside the box it stays
     editable text; entirely outside it is discarded like an image; crossing the box edge it
@@ -224,8 +224,8 @@ stickers, Missing stickers, and the thumbnail.
 
 ### Layers and tools
 - Session layer model: base image, pasted cutouts, text objects. Undo/redo throughout.
-- **Cut / paste / resize** floating parts. Details below are agent decisions (SPM-9),
-  pending owner confirmation:
+- **Cut / paste / resize** floating parts. Details below are owner
+  confirmed 2026-11-21 (SPM-9):
   - **Move / Rectangle / Lasso** tools: with Rectangle or Lasso, dragging on the canvas draws
     a selection instead of moving layers or panning (wheel zoom still works). The selection
     is not an undo step; it stays until it is used, replaced, or cleared with Esc (Esc
@@ -238,7 +238,8 @@ stickers, Missing stickers, and the thumbnail.
     cutout is trimmed to its visible pixels; a selection holding no visible pixels cuts
     nothing. After a cut the cutout is selected and the Move tool is back, so it can be
     dragged and resized at once. Text layers are not cut (merge them into an image first).
-    Delete still deletes layers, never selected pixels; there is no Ctrl+X/Ctrl+C.
+    Delete still deletes layers, never selected pixels; there is no Ctrl+X/Ctrl+C
+    (open: owner deciding on Ctrl+X/Ctrl+C).
   - **Paste**: Ctrl+V with an image on the clipboard (or the Paste button, where the
     webview allows reading the clipboard) adds it as a new layer named "Pasted image",
     native size, centred on the canvas, on top, with the same 2000×2000 import cap dialog
@@ -250,14 +251,14 @@ stickers, Missing stickers, and the thumbnail.
 - **Outline** and **fuzzy glow**: target the selected layer, or the base image when nothing
   is selected.
 - **Text**: own layer, movable/resizable until save (system fonts, size, color). Details
-  (agent decisions SPM-9, pending owner confirmation):
+  (owner confirmed 2026-11-21, SPM-9):
   - **Add text** opens a text box centred on the canvas; double-click a text layer (or
     **Edit text**) edits it in place. Enter finishes, Shift+Enter starts a new line, Esc
     cancels, clicking elsewhere finishes. A new text layer is centred on the canvas and
     named after its first line. Blank text creates or changes nothing (delete a text layer
     with Delete). While text is typed, every key (Delete, undo/redo, Esc) acts on the text,
     never on the layers.
-  - The font list is the system's installed families; a session's first text uses Arial
+  - The font list is the system's installed families; a session's first text uses Impact
     when installed (else a common sans, else the first family). Size is a whole number of
     px within the range in src/shared/limits.json (1–1000); default 64 px, black. The font,
     size and colour controls restyle the selected text layers (one undo step), or set the
@@ -266,9 +267,10 @@ stickers, Missing stickers, and the thumbnail.
     gives up focus so Ctrl+Z, Delete, Esc and Ctrl+V work at once (typing in the size field
     is not intercepted).
   - Text is laid out and rasterised in Rust (left-aligned lines, the font's own line
-    spacing, kerning; no ligature shaping and no fallback font for missing characters),
-    and the canvas shows exactly that rendering, so the view, merge, Crop, the sizing tools
-    and the save agree on its pixels and its box. Resizing a text layer scales it (it stays
+    spacing, kerning; no ligature shaping and no fallback font for missing characters
+    (open: owner deciding on a fallback font / missing-character box)), and the canvas
+    shows exactly that rendering, so the view, merge, Crop, the sizing tools and the save
+    agree on its pixels and its box. Resizing a text layer scales it (it stays
     text, and is drawn sharp at its size when merged or saved); its font size field keeps
     its typed size.
 - **Merge selected layers**: flatten chosen layers together mid-session so effects can be
@@ -345,6 +347,8 @@ stickers, Missing stickers, and the thumbnail.
 - Editor: Crop could also drop a layer that crosses the box edge when its part inside the
   box is fully transparent. In v1 such a layer is kept; only layers entirely outside the box
   are discarded (owner, 2026-11-21: may revisit).
+- Editor: a "Convert text to image" tool, so a text layer can be edited with pixel tools
+  (e.g. Cut) without merging it onto another layer first (owner, 2026-11-21).
 
 ## 10. Draft work packages (for review — not yet filed as issues)
 

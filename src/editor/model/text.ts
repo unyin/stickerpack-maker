@@ -12,7 +12,7 @@ export const DEFAULT_TEXT_COLOR = "#000000";
  * Families tried, in order, for the first text of a session: common on
  * Windows first (the target), then Linux. Otherwise the first installed one.
  */
-const PREFERRED_FAMILIES = ["Arial", "Segoe UI", "Calibri", "DejaVu Sans", "Liberation Sans", "Noto Sans", "Ubuntu"];
+const PREFERRED_FAMILIES = ["Impact", "Arial", "Segoe UI", "Calibri", "DejaVu Sans", "Liberation Sans", "Noto Sans", "Ubuntu"];
 
 /** The font a session's text starts with, or null when no font is installed. */
 export function defaultFontFamily(installed: readonly string[]): string | null {

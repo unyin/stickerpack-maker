@@ -397,14 +397,22 @@ mod tests {
 
     /// Real system fonts (run with `cargo test -- --ignored`): lists the
     /// installed families and draws a line in the first of a few common ones.
-    /// On Windows this exercises Arial or Segoe UI from C:\Windows\Fonts.
+    /// On Windows this exercises Impact, Arial or Segoe UI from C:\Windows\Fonts.
     #[test]
     #[ignore = "depends on the machine's installed fonts"]
     fn system_fonts_list_and_render() {
         let fonts = system_fonts();
         let names = families(fonts);
         assert!(!names.is_empty(), "no system fonts found");
-        let family = ["Arial", "Segoe UI", "DejaVu Sans", "Liberation Sans", "Noto Sans", "Ubuntu"]
+        let family = [
+            "Impact",
+            "Arial",
+            "Segoe UI",
+            "DejaVu Sans",
+            "Liberation Sans",
+            "Noto Sans",
+            "Ubuntu",
+        ]
             .into_iter()
             .find(|f| names.iter().any(|n| n == f))
             .unwrap_or(&names[0]);

@@ -147,6 +147,7 @@ test("text and font rules come from limits.json", () => {
 });
 
 test("the first font is a common one when installed, else the first installed", () => {
+  expect(defaultFontFamily(["Zapfino", "Arial", "Impact", "Segoe UI"])).toBe("Impact");
   expect(defaultFontFamily(["Zapfino", "Segoe UI", "Arial"])).toBe("Arial");
   expect(defaultFontFamily(["Zapfino", "DejaVu Sans"])).toBe("DejaVu Sans");
   expect(defaultFontFamily(["Zapfino", "Bodoni"])).toBe("Zapfino");
