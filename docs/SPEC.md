@@ -334,5 +334,5 @@ stickers, Missing stickers, and the thumbnail.
     replacement and Missing-slot deletion.
 12. **Thumbnail mode**: 100×100 editor mode + thumbnail CRUD in pack view.
 
-Dependency spine (wired in Trekker): 1 → 2 → 3; 5 → 6/7/8/9 → 10; 2+10 → 11; 5+10 → 12;
+Dependency spine (wired in Trekker): 1 → 2 → 3; 5 → 6/7/8/9; 2+6+9 → 10 (save does not wait for 7/8, owner 2026-11-21); 2+10 → 11; 5+10 → 12;
 4 gated the final shape of 3's per-sticker surface (resolved).
