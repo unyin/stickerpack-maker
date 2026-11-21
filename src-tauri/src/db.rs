@@ -83,6 +83,11 @@ pub fn migrate(conn: &mut Connection) -> Result<(), String> {
 /// True when every embedded migration has been applied to `conn`. A
 /// database from a newer build (more migrations than this one knows) also
 /// counts as current: it is left alone.
+///
+/// Why it exists: `library::open` runs on every command, and checking first
+/// avoids starting a migration transaction on each call. `MAX(version) >= len`
+/// is sufficient because versions are only inserted by `migrate`, in order,
+/// inside one transaction, so a database never has gaps.
 pub fn is_current(conn: &Connection) -> Result<bool, String> {
     let applied: i64 = conn
         .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_migrations", [], |r| r.get(0))

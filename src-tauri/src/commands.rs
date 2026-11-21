@@ -121,7 +121,8 @@ pub fn create_library(
 }
 
 /// Settings: re-point at another INTACT Library (database included), then
-/// persist its path. No auto-migration, no reconstruction (SPEC §3).
+/// persist its path. An older database is upgraded on open; no reconstruction
+/// from loose files (SPEC §3).
 #[tauri::command(async)]
 pub fn repoint_library(
     path: String,

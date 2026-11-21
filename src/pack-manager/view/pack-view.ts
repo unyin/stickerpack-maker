@@ -52,7 +52,7 @@ import { dialogOpen } from "../../dialog";
 import { confirmGoLive, confirmRevertToDraft, confirmStickerDelete, editChoiceDialog, invalidFileDialog, sendDialog, statusBadge } from "./dialogs";
 import { aggregatePanel, detailPanel, emptyPanel, thumbnailPanel, type PanelActions } from "./panels";
 import { previewImage, Previews } from "./previews";
-import { startReorderDrag, type ReorderDragHost } from "./reorder-drag";
+import { cancelReorderDrag, startReorderDrag, type ReorderDragHost } from "./reorder-drag";
 
 export interface PackViewHost {
   /** Back to the pack list. */
@@ -514,6 +514,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     destroy() {
       document.removeEventListener("keydown", onKey);
       unlistenDrop?.();
+      cancelReorderDrag();
       previews.clear();
     },
   };

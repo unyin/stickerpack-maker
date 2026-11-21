@@ -1,11 +1,11 @@
 // The pack list (SPEC §5): create, open, and delete packs, with Draft/Live
 // badges. Reads the database only; no desync checks here (SPEC §4).
+import { explorerLabel } from "../../icons";
 import { el, errorMessage } from "../../ui";
 import { deletePack, listPacks, revealPack, type PackSummary } from "../api";
 import { packCountText, packDeleteMessage } from "../model/messages";
 import { confirmChoice } from "../../dialog";
 import { createPackDialog, statusBadge } from "./dialogs";
-import { explorerLabel } from "./panels";
 
 export function buildPackList(onOpen: (packId: number) => void): {
   element: HTMLElement;
@@ -18,11 +18,11 @@ export function buildPackList(onOpen: (packId: number) => void): {
   const list = el("ul", { class: "pm-pack-list" });
   const newButton = el("button", { class: "primary", type: "button" }, "New pack…") as HTMLButtonElement;
   // How many packs the Library holds; sticker counts live in each pack's view (owner, 2026-11-21).
-  const packCount = el("span", { class: "muted pm-pack-count", "aria-live": "polite" });
+  const packCount = el("span", { class: "pm-pack-count" });
   const element = el(
     "section",
     { class: "view pm-list" },
-    el("div", { class: "pm-list-head" }, el("h1", {}, "Pack Manager", packCount), newButton),
+    el("div", { class: "pm-list-head" }, el("div", { class: "pm-list-title" }, el("h1", {}, "Pack Manager"), packCount), newButton),
     el("p", { class: "muted" }, "Organise stickers into packs. Files are named in pack order, ready to drag into @Stickers."),
     message,
     notice,
@@ -63,7 +63,12 @@ export function buildPackList(onOpen: (packId: number) => void): {
       el("span", { class: "muted pm-mono" }, pack.shortName),
     );
     open.addEventListener("click", () => onOpen(pack.id));
-    const reveal = el("button", { class: "secondary", type: "button", title: "Open this pack's folder in Explorer" }, ...explorerLabel());
+    const folderLabel = `Open the folder of “${pack.title}” in Explorer`;
+    const reveal = el(
+      "button",
+      { class: "secondary", type: "button", title: folderLabel, "aria-label": folderLabel },
+      ...explorerLabel(),
+    );
     reveal.addEventListener("click", () => {
       message.textContent = "";
       revealPack(pack.id).catch((err) => (message.textContent = errorMessage(err)));

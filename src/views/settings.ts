@@ -18,8 +18,8 @@ import { clear, el, withMessage } from "../ui";
 
 /**
  * Settings: show the Library path, re-point at another intact Library, or
- * create a fresh Library in an empty folder (SPEC §3). No auto-migration,
- * no reconstruction from orphaned files.
+ * create a fresh Library in an empty folder (SPEC §3). An older Library's
+ * database is upgraded when opened; no reconstruction from orphaned files.
  */
 export function renderSettings(
   container: HTMLElement,
@@ -107,7 +107,7 @@ export function renderSettings(
           { class: "muted" },
           "Re-pointing expects an intact Library (database included) — for example a moved or restored Library. Select the " +
             LIBRARY_DB_FILE_NAME +
-            " file inside the Library folder; the app uses its folder. A fresh Library can be created in any empty folder. There is no auto-migration, and metadata is never reconstructed from orphaned image files.",
+            " file inside the Library folder; the app uses its folder. A fresh Library can be created in any empty folder. An older Library's database is upgraded to the current version when it is opened, but metadata is never reconstructed from orphaned image files.",
         ),
       ),
       el(

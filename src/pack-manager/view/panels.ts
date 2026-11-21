@@ -1,7 +1,7 @@
 // The pack view's side panel (SPEC §5): one selection -> panel paradigm for
 // stickers, Missing stickers, and the thumbnail. Single selection shows the
 // detail panel, several the aggregate panel, the thumbnail slot its own.
-import { icon } from "../../icons";
+import { explorerLabel, icon } from "../../icons";
 import { el } from "../../ui";
 import type { PackView, StickerView } from "../api";
 import { emojiCount, emojiWarning, EMOJI_MAX } from "../model/emoji";
@@ -17,6 +17,8 @@ import {
 } from "../model/messages";
 import { previewImage, type Previews } from "./previews";
 
+const COPY_TITLE = "Copy to clipboard";
+
 /** What the panels ask the pack view to do. */
 export interface PanelActions {
   edit(sticker: StickerView): void;
@@ -28,8 +30,8 @@ export interface PanelActions {
   revealThumbnail(): void;
 }
 
-function action(label: string | Node[], onClick: () => void, reason: string | null, title: string, variant = "secondary"): HTMLButtonElement {
-  const button = el("button", { class: variant, type: "button" }, ...(typeof label === "string" ? [label] : label)) as HTMLButtonElement;
+function action(label: string | Array<Node | string>, onClick: () => void, reason: string | null, title: string, variant = "secondary"): HTMLButtonElement {
+  const button = el("button", { class: variant, type: "button" }, ...[label].flat()) as HTMLButtonElement;
   button.addEventListener("click", onClick);
   button.disabled = reason !== null;
   button.title = reason ?? title;
@@ -38,11 +40,6 @@ function action(label: string | Node[], onClick: () => void, reason: string | nu
 
 function meta(rows: Array<[string, string]>): HTMLElement {
   return el("dl", { class: "pm-meta" }, ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
-}
-
-/** "Open in explorer" with the opens-another-program icon at the end (owner, 2026-11-21). */
-export function explorerLabel(): Node[] {
-  return [document.createTextNode("Open in explorer"), icon("external")];
 }
 
 /** Empty panel: how selection and import work. */
@@ -64,14 +61,15 @@ export function detailPanel(sticker: StickerView, previews: Previews, actions: P
     ? el("div", { class: "pm-missing-art large" }, "File Missing")
     : previewImage(previews.sticker(sticker.id, sticker.format), `Sticker ${sticker.position}`, "pm-detail-img");
 
-  // A two-row box that shows all 20 emoji at once (owner, 2026-11-21). No
-  // line breaks: Enter finishes, and the core strips every whitespace.
+  // A full-width two-row box (about 11 emoji per row) that shows all 20 emoji
+  // at once (owner, 2026-11-21). No line breaks: Enter finishes, and the core
+  // strips every whitespace.
   const input = el("textarea", {
     class: "pm-input pm-emoji-input",
     rows: "2",
     spellcheck: "false",
     placeholder: "Type emoji, or Win+. for the emoji panel",
-    "aria-label": "Emoji String",
+    id: "pm-emoji-input",
   }) as HTMLTextAreaElement;
   input.value = sticker.emojiString;
   const count = el("span", { class: "pm-emoji-count", "aria-live": "polite" });
@@ -94,13 +92,16 @@ export function detailPanel(sticker: StickerView, previews: Previews, actions: P
   live();
   const copy = el(
     "button",
-    { class: "secondary pm-copy", type: "button", title: "Copy to clipboard", "aria-label": "Copy the Emoji String to the clipboard" },
+    { class: "secondary pm-copy", type: "button", title: COPY_TITLE, "aria-label": "Copy the Emoji String to the clipboard" },
     icon("copy"),
   ) as HTMLButtonElement;
+  // Polite live region: the icon swap alone is invisible to screen readers.
+  const copyStatus = el("span", { class: "sr-only", role: "status" });
+  const flash = copyFlash(copy, copyStatus);
   copy.addEventListener("click", () => {
     void navigator.clipboard.writeText(input.value).then(
-      () => flash(copy, "Copied", true),
-      () => flash(copy, "Copy failed", false),
+      () => flash("Copied", true),
+      () => flash("Copy failed", false),
     );
   });
 
@@ -131,8 +132,13 @@ export function detailPanel(sticker: StickerView, previews: Previews, actions: P
       ["File size", sticker.file ? formatBytes(sticker.file.bytes) : "—"],
       ["File", sticker.fileName],
     ]),
-    el("label", { class: "field-label" }, "Emoji String"),
-    el("div", { class: "pm-emoji-row" }, input, copy),
+    el(
+      "div",
+      { class: "pm-emoji-row" },
+      el("label", { class: "field-label", for: "pm-emoji-input" }, "Emoji String"),
+      el("div", { class: "pm-emoji-actions" }, copyStatus, copy),
+    ),
+    input,
     el("div", { class: "pm-emoji-status" }, count, warning),
     el(
       "div",
@@ -208,13 +214,20 @@ export function thumbnailPanel(view: PackView, previews: Previews, actions: Pane
   return el("div", { class: "pm-thumb-panel" }, ...body);
 }
 
-/** Briefly show the copy result: a check mark on success, and the text as tooltip either way. */
-function flash(button: HTMLButtonElement, text: string, ok: boolean): void {
-  const title = button.title;
-  button.title = text;
-  if (ok) button.replaceChildren(icon("check"));
-  setTimeout(() => {
-    button.title = title;
-    button.replaceChildren(icon("copy"));
-  }, 1200);
+/** Briefly show the copy result: check icon on success, a red button on failure, and a screen-reader announcement. */
+function copyFlash(button: HTMLButtonElement, status: HTMLElement): (text: string, ok: boolean) => void {
+  let restore: ReturnType<typeof setTimeout> | undefined; // per panel, like the button it restores
+  return (text, ok) => {
+    clearTimeout(restore); // a second click restarts the timer instead of leaving "Copied" stuck
+    button.title = text;
+    status.textContent = text;
+    button.classList.toggle("failed", !ok);
+    button.replaceChildren(icon(ok ? "check" : "copy"));
+    restore = setTimeout(() => {
+      button.title = COPY_TITLE;
+      status.textContent = "";
+      button.classList.remove("failed");
+      button.replaceChildren(icon("copy"));
+    }, 1200);
+  };
 }

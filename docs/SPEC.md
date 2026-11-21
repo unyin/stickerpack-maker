@@ -80,7 +80,7 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
   from orphaned image files is out of scope for v1.
 - An older Library's database is upgraded to the current schema when the app opens it: the
   migrations it lacks are applied once, in order, in one transaction (owner decision
-  2026-11-21). The app does not move or relocate a Library by itself.
+  2026-11-21).
 
 ## 4. Files and order (ADR-0003)
 
@@ -117,7 +117,7 @@ stickers, Missing stickers, and the thumbnail.
 - Large preview; metadata: position, format, dimensions, file size.
 - **Emoji String**: inline editable two-row box that shows all 20 emoji at once (type, or
   Win+. for the Windows emoji panel); every space is stripped when it is saved and the count
-  ignores spaces; an adjacent small square icon-only **copy** button; live 1–20 count
+  ignores spaces; a small square icon-only **copy** button beside the field's label; live 1–20 count
   warning (owner decision 2026-11-21).
 - Actions: **Edit** first asks **Edit / Replace… / Cancel** (Cancel is the safe default):
   Edit opens the flattened image in the Editor, Replace runs the Replace flow below (owner
@@ -314,7 +314,7 @@ stickers, Missing stickers, and the thumbnail.
 
 - Bot API sync (model is shaped for it; Draft/Live and short-name lock anticipate it).
 - Custom emoji packs (100×100), animated .TGS, video .WEBM.
-- Automatic Library relocation; DB reconstruction from orphaned files.
+- DB reconstruction from orphaned files.
 - Project files / version history; export/prep folders; scratch saves.
 
 ## 9. Deferred decisions

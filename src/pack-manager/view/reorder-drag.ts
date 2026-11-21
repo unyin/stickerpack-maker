@@ -38,10 +38,16 @@ function dragGhost(tile: HTMLElement | undefined): { move(x: number, y: number):
   };
 }
 
+/** Cleanup of the drag in progress, if any. */
+let activeDrag: (() => void) | null = null;
+
 /** Start dragging a sticker's tile from a pointerdown on it. */
 export function startReorderDrag(e: PointerEvent, stickerId: number, host: ReorderDragHost): void {
   if (!host.enabled() || e.button !== 0) return;
   e.preventDefault();
+  // A stray earlier drag must not leak its listeners. Clean it up BEFORE this
+  // drag takes the pointer capture: a mouse reuses the same pointer id.
+  activeDrag?.();
   const { grid } = host;
   const from = host.indexOf(stickerId);
   const tile = stickerTiles(grid)[from];
@@ -59,17 +65,27 @@ export function startReorderDrag(e: PointerEvent, stickerId: number, host: Reord
     if (slot < current.length) current[slot].classList.add("drop-before");
     else current[current.length - 1]?.classList.add("drop-after");
   };
-  const end = (u: PointerEvent) => {
+  const cleanup = () => {
     grid.removeEventListener("pointermove", move);
     grid.removeEventListener("pointerup", end);
     grid.removeEventListener("pointercancel", end);
-    if (grid.hasPointerCapture(u.pointerId)) grid.releasePointerCapture(u.pointerId);
+    if (grid.hasPointerCapture(e.pointerId)) grid.releasePointerCapture(e.pointerId);
     ghost.remove();
     for (const t of stickerTiles(grid)) t.classList.remove("drop-before", "drop-after", "dragging");
+    activeDrag = null;
+  };
+  const end = (u: PointerEvent) => {
+    cleanup();
     const position = u.type === "pointerup" && slot !== null ? dropPosition(from, slot) : null;
     if (position !== null) host.drop(stickerId, from, position);
   };
   grid.addEventListener("pointermove", move);
   grid.addEventListener("pointerup", end);
   grid.addEventListener("pointercancel", end);
+  activeDrag = cleanup;
+}
+
+/** Abandon a drag in progress (the view was destroyed mid-drag) without dropping. */
+export function cancelReorderDrag(): void {
+  activeDrag?.();
 }

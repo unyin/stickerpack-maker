@@ -100,10 +100,16 @@ button.pm-link {
   gap: 12px;
 }
 
+.pm-list-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
 .pm-pack-count {
-  margin-left: 12px;
   font-size: 15px;
   font-weight: 400;
+  color: var(--muted);
 }
 
 .pm-pack-list {
@@ -339,6 +345,11 @@ button.pm-link {
   border-color: var(--reorder-border);
 }
 
+/* The rule above out-specifies .pm-tile.missing; keep the warning border. */
+.pm-pack.reorder .pm-tile.missing[data-id] {
+  border-color: var(--warn-border);
+}
+
 /* The faded sticker that follows the cursor (reorder-drag.ts). */
 .pm-drag-ghost {
   position: fixed;
@@ -500,14 +511,25 @@ button.pm-link {
 
 .pm-emoji-row {
   display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 6px;
-  align-items: flex-start;
 }
 
-/* Two rows of ten: all 20 emoji show at once (owner, 2026-11-21). */
+.pm-emoji-row .field-label {
+  margin: 0;
+}
+
+.pm-emoji-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Full panel width, two rows of about 11: all 20 emoji show at once (owner, 2026-11-21). */
 .pm-emoji-input {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
   font-size: 18px;
   line-height: 1.4;
   resize: none;
@@ -522,6 +544,11 @@ button.pm-link {
   align-items: center;
   justify-content: center;
   flex: none;
+}
+
+.pm-copy.failed {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
 }
 
 .pm-emoji-status {
