@@ -1,19 +1,18 @@
 //! "Crop" (SPEC §6): discard each layer's content outside the crop box. The
-//! webview plans the crop (src/editor/model/document.ts
-//! `planCrop`): for every layer crossing the box edge it sends the layer and
-//! `clip`, the whole pixels the layer covers inside the box. Here each such
-//! layer is drawn by merge's own placement into a clip-sized pixmap, so crop
-//! and merge sample every pixel identically.
-//! The result is an untransformed image whose top-left is `clip`'s. A text
-//! layer crossing the box edge arrives as text and is rasterised first
-//! (merge.rs `split_layers`), so it is clipped exactly like an image.
+//! webview plans the crop (`planCrop` in src/editor/model/document.ts): for
+//! every layer crossing the box edge it sends the layer and `clip`, the
+//! whole pixels the layer covers inside the box. Here each such layer is
+//! drawn by the shared placement (placement.rs) into a clip-sized pixmap, in
+//! merge's sampling frame (see `crop_layer` for the edge-pixel caveat). The
+//! result is an untransformed image whose top-left is `clip`'s. A text layer
+//! crossing the box edge arrives as text and is rasterised straight into its
+//! clip (text.rs `rasterise_window`), so it is clipped exactly like an image.
 
 use fontdb::Database;
 use serde::Deserialize;
 
-use super::merge::{
-    from_pixmap, place_layers, render_window, split_layers, LayerMeta, LayerTransform, MergeInput, MAX_MERGE_SIDE,
-};
+use super::layers::{decode_layer, finish_body, LayerMeta};
+use super::placement::{check_window, from_pixmap, place_layers, render_window, LayerInput, LayerTransform};
 use super::text::rasterise_window;
 use super::Rgba;
 
@@ -44,48 +43,36 @@ pub fn split_crop_layers(
     meta: &[CropMeta],
     body: &[u8],
     fonts: &Database,
-) -> Result<Vec<(MergeInput, ClipRect)>, String> {
-    let rasters: Vec<LayerMeta> = meta.iter().filter(|m| m.layer.text.is_none()).map(|m| m.layer.clone()).collect();
-    let mut rasters = split_layers(&rasters, body, fonts)?.into_iter();
-    meta.iter()
+) -> Result<Vec<(LayerInput, ClipRect)>, String> {
+    let mut rest = body;
+    let layers = meta
+        .iter()
         .map(|m| {
             let clip = m.clip;
-            let layer = match &m.layer.text {
-                Some(text) => {
-                    check_clip(clip)?;
-                    let image =
-                        rasterise_window(fonts, text, &m.layer.transform, clip.x, clip.y, clip.width, clip.height)?;
-                    let transform = LayerTransform { x: clip.x as f32, y: clip.y as f32, ..LayerTransform::IDENTITY };
-                    MergeInput { image, transform }
-                }
-                None => rasters.next().ok_or_else(|| "crop request lost a raster layer".to_string())?,
-            };
+            let layer = decode_layer(&m.layer, &mut rest, |spec, t| {
+                check_window(clip.width, clip.height, "crop")?;
+                let image = rasterise_window(fonts, spec, t, clip.x, clip.y, clip.width, clip.height)?;
+                let transform = LayerTransform { x: clip.x as f32, y: clip.y as f32, ..LayerTransform::IDENTITY };
+                Ok(LayerInput { image, transform })
+            })?;
             Ok((layer, clip))
         })
-        .collect()
-}
-
-fn check_clip(clip: ClipRect) -> Result<(), String> {
-    if clip.width == 0 || clip.height == 0 {
-        return Err("a crop rectangle has no pixels".to_string());
-    }
-    if clip.width > MAX_MERGE_SIDE || clip.height > MAX_MERGE_SIDE {
-        return Err(format!("a {}x{} crop rectangle is too large", clip.width, clip.height));
-    }
-    Ok(())
+        .collect::<Result<Vec<_>, String>>()?;
+    finish_body(rest)?;
+    Ok(layers)
 }
 
 /// Render one layer into `clip`: the pixels the layer shows there, and
 /// nothing from outside it.
 ///
-/// Sampling uses merge's own placement (bounds floored to whole pixels), but
-/// only a clip-sized pixmap is allocated: the window is moved onto `clip` by a
-/// whole-pixel translation. Pixels visible in both match merge's exactly; the
-/// shifted float translation can flip a silhouette-edge pixel between covered
-/// and uncovered. A layer whose full render would be too large for merge still
-/// crops, and memory follows the clip.
-pub fn crop_layer(layer: &MergeInput, clip: ClipRect) -> Result<Rgba, String> {
-    check_clip(clip)?;
+/// Sampling uses the shared placement (placement.rs, bounds floored to whole
+/// pixels), but only a clip-sized pixmap is allocated: the window is moved
+/// onto `clip` by a whole-pixel translation. Pixels visible in both match
+/// merge's exactly; the shifted float translation can flip a silhouette-edge
+/// pixel between covered and uncovered. A layer whose full render would be
+/// too large for merge still crops, and memory follows the clip.
+pub fn crop_layer(layer: &LayerInput, clip: ClipRect) -> Result<Rgba, String> {
+    check_window(clip.width, clip.height, "crop")?;
     let placed = place_layers(std::slice::from_ref(layer))?;
     let canvas = render_window(&placed, clip.x, clip.y, clip.width, clip.height)?;
     Ok(from_pixmap(&canvas))
@@ -93,7 +80,7 @@ pub fn crop_layer(layer: &MergeInput, clip: ClipRect) -> Result<Rgba, String> {
 
 /// Crop every layer of a request, in order; the response body is their
 /// RGBA bytes concatenated (each clip's size is known to the webview).
-pub fn crop(layers: &[(MergeInput, ClipRect)]) -> Result<Vec<u8>, String> {
+pub fn crop(layers: &[(LayerInput, ClipRect)]) -> Result<Vec<u8>, String> {
     let mut body = Vec::new();
     for (layer, clip) in layers {
         body.extend_from_slice(&crop_layer(layer, *clip)?.pixels);
@@ -103,7 +90,8 @@ pub fn crop(layers: &[(MergeInput, ClipRect)]) -> Result<Vec<u8>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::merge::{merge, PlacedImage};
+    use super::super::merge::merge;
+    use super::super::placement::{PlacedImage, MAX_LAYER_SIDE};
     use super::*;
 
     /// Pixel (x, y) is [x, y, 7, 255]: shows exactly which pixels survived.
@@ -117,8 +105,8 @@ mod tests {
         Rgba { width, height, pixels }
     }
 
-    fn placed(image: Rgba, transform: LayerTransform) -> MergeInput {
-        MergeInput { image, transform }
+    fn placed(image: Rgba, transform: LayerTransform) -> LayerInput {
+        LayerInput { image, transform }
     }
 
     fn px(image: &Rgba, x: u32, y: u32) -> [u8; 4] {
@@ -237,14 +225,14 @@ mod tests {
         // 100x100 scaled 100x is 10000 px a side: merge refuses it, but the
         // clip is small, so crop succeeds and matches the nearby sampling.
         let layer = placed(coords(100, 100), LayerTransform { x: -4000.0, y: -4000.0, scale_x: 100.0, scale_y: 100.0, rotation: 0.0 });
-        assert!(render_layers_err(&layer));
+        assert!(merge_refuses(&layer));
         let out = crop_layer(&layer, ClipRect { x: 0, y: 0, width: 8, height: 8 }).unwrap();
         // Document 0 is layer pixel 40 (4000 / 100).
         assert_eq!(px(&out, 0, 0), [40, 40, 7, 255]);
         assert_eq!(px(&out, 7, 7), [40, 40, 7, 255]);
     }
 
-    fn render_layers_err(layer: &MergeInput) -> bool {
+    fn merge_refuses(layer: &LayerInput) -> bool {
         super::super::merge::render_layers(std::slice::from_ref(layer))
             .err()
             .is_some_and(|e| e.contains("the merged layer would be"))
@@ -363,7 +351,7 @@ mod tests {
     fn empty_or_oversized_clips_and_bad_transforms_are_refused() {
         let layer = placed(coords(2, 2), LayerTransform::IDENTITY);
         assert!(crop_layer(&layer, ClipRect { x: 0, y: 0, width: 0, height: 1 }).is_err());
-        assert!(crop_layer(&layer, ClipRect { x: 0, y: 0, width: MAX_MERGE_SIDE + 1, height: 1 }).is_err());
+        assert!(crop_layer(&layer, ClipRect { x: 0, y: 0, width: MAX_LAYER_SIDE + 1, height: 1 }).is_err());
         let nan = placed(coords(2, 2), LayerTransform { rotation: f32::NAN, ..LayerTransform::IDENTITY });
         assert!(crop_layer(&nan, ClipRect { x: 0, y: 0, width: 1, height: 1 }).is_err());
     }

@@ -262,6 +262,9 @@ stickers, Missing stickers, and the thumbnail.
     px within the range in src/shared/limits.json (1–1000); default 64 px, black. The font,
     size and colour controls restyle the selected text layers (one undo step), or set the
     next new text's style when no text layer is selected.
+    After a committed change on the font list, size field or colour picker, the control
+    gives up focus so Ctrl+Z, Delete, Esc and Ctrl+V work at once (typing in the size field
+    is not intercepted).
   - Text is laid out and rasterised in Rust (left-aligned lines, the font's own line
     spacing, kerning; no ligature shaping and no fallback font for missing characters),
     and the canvas shows exactly that rendering, so the view, merge, Crop, the sizing tools

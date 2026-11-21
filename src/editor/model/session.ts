@@ -1,7 +1,7 @@
 // One editing session: the document history, the layer selection, and
 // change notifications for the view. Selection is NOT an undo step
 // (ADR-0005); undo/redo prunes it to layers that still exist.
-import { layerImage, layerIndex, type Doc } from "./document";
+import { layerImage, layerIndex, textLayersOf, type Doc, type TextLayer } from "./document";
 import { DEFAULT_HISTORY_BUDGET, History } from "./history";
 import type { Region } from "./region";
 
@@ -24,6 +24,11 @@ export class EditorSession {
 
   get doc(): Doc {
     return this.history.present;
+  }
+
+  /** The selected text layers, bottom to top. */
+  get selectedTexts(): TextLayer[] {
+    return textLayersOf(this.doc, this.selected);
   }
 
   /** Selected layer ids, in the order they were selected. */

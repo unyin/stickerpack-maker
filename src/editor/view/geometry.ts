@@ -9,6 +9,7 @@ import {
   resizeLongestSide,
   resizeSideProblem,
   scaleLongestSide,
+  textLayersOf,
   type CropAction,
   type Doc,
   type Rect,
@@ -42,7 +43,10 @@ interface Point {
 
 /**
  * Fit the document into the view with a margin, centred. Never upscales
- * past 100%, so small stickers show their real pixels.
+ * past 100%, so small stickers show their real pixels. The offset is a
+ * whole number of device pixels: a half-pixel origin blurs layer edges and
+ * shows faint seams between adjacent layers (view only, the model is
+ * unaffected).
  */
 export function fitView(view: Size, doc: Size, margin: number): ViewTransform {
   const fit = Math.min(
@@ -52,8 +56,8 @@ export function fitView(view: Size, doc: Size, margin: number): ViewTransform {
   const scale = Math.max(MIN_ZOOM, Math.min(1, fit));
   return {
     scale,
-    x: (view.width - doc.width * scale) / 2,
-    y: (view.height - doc.height * scale) / 2,
+    x: Math.round((view.width - doc.width * scale) / 2),
+    y: Math.round((view.height - doc.height * scale) / 2),
   };
 }
 
@@ -73,7 +77,7 @@ export function zoomAround(view: ViewTransform, pointer: Point, deltaY: number):
  * Why the selection cannot be merged, or null when it can: merging needs
  * two or more layers. Text layers merge too: Rust rasterises them (SPM-9).
  */
-export function mergeBlocker(_doc: Doc, selection: readonly string[]): string | null {
+export function mergeBlocker(selection: readonly string[]): string | null {
   if (selection.length < 2) return "Select two or more layers to merge.";
   return null;
 }
@@ -202,4 +206,66 @@ export function cropBlocker(plan: readonly CropAction[], box: Rect): string | nu
     case "crop":
       return null;
   }
+}
+
+/**
+ * Why the text tool can't be used, or null: the installed fonts are still
+ * loading (`fonts` null) or could not be listed (`problem`).
+ */
+export function textBlocker(fonts: readonly string[] | null, problem: string | null): string | null {
+  return fonts === null ? (problem ?? "Looking for the installed fonts…") : null;
+}
+
+/**
+ * Why Edit text is disabled, or null: the text tool is blocked (`textReason`)
+ * or the selection is not exactly one text layer.
+ */
+export function editTextBlocker(textReason: string | null, doc: Doc, selection: readonly string[]): string | null {
+  if (textReason) return textReason;
+  return selection.length === 1 && textLayersOf(doc, selection).length === 1 ? null : "Select one text layer to edit.";
+}
+
+/**
+ * The font list the select shows: the installed families, plus `family`
+ * when it is set but not installed (a layer in a font that has since gone
+ * still shows its font). Pure: the installed list is never changed, and it
+ * is returned as is when nothing is added.
+ */
+export function fontChoices(installed: readonly string[], family: string): readonly string[] {
+  return family === "" || installed.includes(family) ? installed : [...installed, family];
+}
+
+/** What Esc clears: the cut selection first, then the layer selection (SPEC §6). */
+export function escapeTarget(region: Region | null): "region" | "selection" {
+  return region ? "region" : "selection";
+}
+
+/** The reasons behind the layer panel's disabled actions. */
+export interface LayerReasons {
+  readonly merge: string | null;
+  readonly delete: string | null;
+  readonly cut: string | null;
+  readonly editText: string | null;
+}
+
+/**
+ * The hint under the layer list, explaining disabled actions once something
+ * is selected: merge and delete always; Cut only while a selection is drawn
+ * on the canvas (else it is just not in use); Edit text only when a text
+ * layer is selected.
+ */
+export function layerHint(
+  doc: Doc,
+  selection: readonly string[],
+  region: Region | null,
+  reasons: LayerReasons,
+): string {
+  if (selection.length === 0) return "";
+  const relevant = [
+    reasons.merge,
+    reasons.delete,
+    region ? reasons.cut : null,
+    textLayersOf(doc, selection).length > 0 ? reasons.editText : null,
+  ];
+  return relevant.filter((r) => r !== null).join(" ");
 }

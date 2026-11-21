@@ -22,10 +22,14 @@ import {
   localToDoc,
   mergeLayers,
   newDocument,
+  placedBounds,
   planCrop,
+  restyledTexts,
   scaleLongestSide,
   setTextStyle,
+  setTextStyles,
   setTransform,
+  textLayersOf,
   textStyleOf,
   type Doc,
   type TextRender,
@@ -38,9 +42,20 @@ import {
   fontSizeProblem,
   isBlankText,
   isHexColor,
+  nextStyleAfter,
   textLayerName,
 } from "../src/editor/model/text";
-import { cutBlocker, cropBlocker, mergeBlocker, textOverlayPlacement } from "../src/editor/view/geometry";
+import {
+  cutBlocker,
+  cropBlocker,
+  editTextBlocker,
+  escapeTarget,
+  fontChoices,
+  layerHint,
+  mergeBlocker,
+  textBlocker,
+  textOverlayPlacement,
+} from "../src/editor/view/geometry";
 
 function image(width: number, height: number, fill = 0): RgbaImage {
   return { width, height, pixels: new Uint8ClampedArray(width * height * 4).fill(fill) };
@@ -112,7 +127,7 @@ test("CMT-61: the sizing tools measure text by its rendered box, so Fit gives ex
 
 test("text layers merge: the merge blocker no longer refuses them", () => {
   const doc = withText();
-  expect(mergeBlocker(doc, doc.layers.map((l) => l.id))).toBeNull();
+  expect(mergeBlocker(doc.layers.map((l) => l.id))).toBeNull();
   const merged = mergeLayers(doc, doc.layers.map((l) => l.id), image(260, 250), IDENTITY);
   expect(merged.layers.map((l) => l.kind)).toEqual(["raster"]);
 });
@@ -284,4 +299,101 @@ test("text renderings count toward the history's memory budget", () => {
   session.apply((d) => setTextStyle(d, id, { ...HI, text: "c" }, render(100, 100)));
   session.undo();
   expect(session.canUndo).toBe(false);
+});
+
+// ---- Round-1 review fixes (SPM-9) ----
+
+test("setTextStyles restyles several text layers as ONE undo step", () => {
+  let doc = withText();
+  doc = addTextLayer(doc, { ...HI, text: "yo" }, render(40, 30), { ...IDENTITY, x: 300, y: 300 });
+  const ids = doc.layers.filter((l) => l.kind === "text").map((l) => l.id);
+  const session = new EditorSession(doc);
+  const before = session.doc;
+  const changes = restyledTexts(before, [...ids, "layer-1"], { color: "#00ff00" }).map((c) => ({ ...c, render: render(70, 55) }));
+  expect(changes.map((c) => c.id)).toEqual(ids); // the image layer is not a text layer
+  session.apply((d) => setTextStyles(d, changes));
+  expect(session.doc.layers.filter((l) => l.kind === "text").map((l) => (l.kind === "text" ? l.color : ""))).toEqual([
+    "#00ff00",
+    "#00ff00",
+  ]);
+  expect(session.doc.layers[0]).toBe(before.layers[0]); // untouched layers are reused
+  session.undo();
+  expect(session.doc).toBe(before);
+  // A patch that changes nothing changes nothing.
+  const same = restyledTexts(before, ids, {}).map((c) => ({ ...c, render: render(1, 1) }));
+  expect(setTextStyles(before, same)).toBe(before);
+});
+
+test("the selected text layers come from the model, bottom to top, whatever the selection order", () => {
+  let doc = withText();
+  doc = addTextLayer(doc, { ...HI, text: "yo" }, render(40, 30));
+  const [base, a, b] = doc.layers.map((l) => l.id);
+  expect(textLayersOf(doc, [b, base, a]).map((l) => l.id)).toEqual([a, b]);
+  const session = new EditorSession(doc);
+  session.select(b);
+  session.select(base, "toggle");
+  expect(session.selectedTexts.map((l) => l.id)).toEqual([b]);
+});
+
+test("one textStyleOf serves layers and styles, keeping only the four style fields", () => {
+  const doc = withText();
+  const layer = doc.layers[1];
+  if (layer.kind !== "text") throw new Error("not text");
+  expect(Object.keys(textStyleOf(layer)).sort()).toEqual(["color", "fontFamily", "fontSize", "text"]);
+  expect(textStyleOf({ ...HI, extra: 1 } as TextStyle)).toEqual(HI);
+});
+
+test("localToDoc and placedBounds agree on where a rotated, scaled layer's corners go", () => {
+  const t = { x: 10, y: 20, scaleX: 2, scaleY: 3, rotation: 90 };
+  const corner = localToDoc(t, 4, 5);
+  expect(corner.x).toBeCloseTo(10 - 15);
+  expect(corner.y).toBeCloseTo(20 + 8);
+  const b = placedBounds(4, 5, t);
+  expect([b.x, b.y, b.width, b.height].map((v) => Math.round(v))).toEqual([-5, 20, 15, 8]);
+});
+
+test("the text blocker waits for fonts and shows why there are none", () => {
+  expect(textBlocker(null, null)).toBe("Looking for the installed fonts…");
+  expect(textBlocker(null, "No fonts were found on this computer.")).toBe("No fonts were found on this computer.");
+  expect(textBlocker(["Arial"], null)).toBeNull();
+});
+
+test("Edit text needs exactly one selected text layer, or says why", () => {
+  const doc = withText();
+  const [base, text] = doc.layers.map((l) => l.id);
+  expect(editTextBlocker(null, doc, [text])).toBeNull();
+  expect(editTextBlocker(null, doc, [base])).toBe("Select one text layer to edit.");
+  expect(editTextBlocker(null, doc, [base, text])).toBe("Select one text layer to edit.");
+  expect(editTextBlocker(null, doc, [])).toBe("Select one text layer to edit.");
+  expect(editTextBlocker("Looking for the installed fonts…", doc, [text])).toBe("Looking for the installed fonts…");
+});
+
+test("the font list adds an uninstalled family without changing the installed list", () => {
+  const installed = ["Arial", "Segoe UI"];
+  expect(fontChoices(installed, "Arial")).toBe(installed);
+  expect(fontChoices(installed, "")).toBe(installed);
+  expect(fontChoices(installed, "Gone Sans")).toEqual(["Arial", "Segoe UI", "Gone Sans"]);
+  expect(installed).toEqual(["Arial", "Segoe UI"]);
+});
+
+test("Esc clears the cut selection first, then the layer selection", () => {
+  expect(escapeTarget(rectRegion({ x: 0, y: 0 }, { x: 5, y: 5 }))).toBe("region");
+  expect(escapeTarget(null)).toBe("selection");
+});
+
+test("the layer hint adds cut and text reasons only where they are relevant", () => {
+  const doc = withText();
+  const [base, text] = doc.layers.map((l) => l.id);
+  const reasons = { merge: "M.", delete: null, cut: "C.", editText: "E." };
+  const region = rectRegion({ x: 0, y: 0 }, { x: 5, y: 5 });
+  expect(layerHint(doc, [], region, reasons)).toBe("");
+  expect(layerHint(doc, [base], null, reasons)).toBe("M.");
+  expect(layerHint(doc, [base], region, reasons)).toBe("M. C.");
+  expect(layerHint(doc, [base, text], null, reasons)).toBe("M. E.");
+});
+
+test("text controls set the next text's style only while no text layer is selected (P2)", () => {
+  const next = { fontFamily: "Arial", fontSize: 64, color: "#000000" };
+  expect(nextStyleAfter(next, 0, { fontSize: 30 })).toEqual({ ...next, fontSize: 30 });
+  expect(nextStyleAfter(next, 2, { fontSize: 30 })).toBe(next);
 });

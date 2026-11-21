@@ -27,7 +27,7 @@ test("fitView centres the document and never upscales past 1:1", () => {
   const big = fitView({ width: 800, height: 600 }, { width: 1000, height: 500 }, 20);
   expect(big.scale).toBeCloseTo(0.76);
   expect(big.x).toBeCloseTo((800 - 1000 * 0.76) / 2);
-  expect(big.y).toBeCloseTo((600 - 500 * 0.76) / 2);
+  expect(big.y).toBeCloseTo((600 - 500 * 0.76) / 2, 0);
   // A small doc stays at 100% (no blurry upscaling), centred.
   const small = fitView({ width: 800, height: 600 }, { width: 100, height: 50 }, 20);
   expect(small.scale).toBe(1);
@@ -59,10 +59,10 @@ test("merge needs two or more selected layers, text included, and says why not",
     { image: image(10, 5), metrics: { originX: 0, originY: 0, ascent: 8, descent: 2, lineHeight: 11 } },
   );
   const [base, cutout, text] = doc.layers.map((l) => l.id);
-  expect(mergeBlocker(doc, [])).toBe("Select two or more layers to merge.");
-  expect(mergeBlocker(doc, [base])).toBe("Select two or more layers to merge.");
-  expect(mergeBlocker(doc, [base, cutout])).toBeNull();
-  expect(mergeBlocker(doc, [base, text])).toBeNull();
+  expect(mergeBlocker([])).toBe("Select two or more layers to merge.");
+  expect(mergeBlocker([base])).toBe("Select two or more layers to merge.");
+  expect(mergeBlocker([base, cutout])).toBeNull();
+  expect(mergeBlocker([base, text])).toBeNull();
 });
 
 test("Ctrl, Cmd or Shift turn a click into a toggle", () => {
@@ -123,4 +123,15 @@ test("Longest side is greyed out with a reason when the set needs a square canva
   expect(sizeToolBlocker("longest", thumb, null, NaN, THUMBNAIL)).toBe(reason);
   // Free resize is the same in both modes.
   expect(sizeToolBlocker("free", thumb, content, 50, THUMBNAIL)).toBeNull();
+});
+
+test("fitView offsets are whole device pixels, so adjacent layers show no seams", () => {
+  // 101x100 doc in a 200x193 view: the centred offsets would be 49.5 and 46.5.
+  const v = fitView({ width: 200, height: 193 }, { width: 101, height: 100 }, 0);
+  expect(v.scale).toBe(1);
+  expect(Number.isInteger(v.x)).toBe(true);
+  expect(Number.isInteger(v.y)).toBe(true);
+  expect([v.x, v.y]).toEqual([Math.round(49.5), Math.round(46.5)]);
+  const scaled = fitView({ width: 333, height: 217 }, { width: 1000, height: 700 }, 7);
+  expect(Number.isInteger(scaled.x) && Number.isInteger(scaled.y)).toBe(true);
 });

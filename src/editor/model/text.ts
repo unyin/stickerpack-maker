@@ -2,6 +2,7 @@
 // font a session starts with. Rendering and measuring happen in Rust
 // (src-tauri/src/editor/text.rs); this file has no Konva and no DOM.
 import { TEXT_FONT_SIZE } from "./constraints";
+import type { TextStyle } from "./document";
 
 /** A new text layer's size and colour until the user picks others. */
 export const DEFAULT_FONT_SIZE = 64;
@@ -42,4 +43,16 @@ export function isHexColor(color: string): boolean {
 /** True when there is nothing to draw: an empty or blank text creates or changes nothing. */
 export function isBlankText(text: string): boolean {
   return text.trim() === "";
+}
+
+/** The style the next new text gets (no text: it is typed in the overlay). */
+export type NextStyle = Omit<TextStyle, "text">;
+
+/**
+ * The next new text's style after a text control changed (SPEC §6): the
+ * controls restyle the selected text layers OR, when none is selected, set
+ * the next text's style. So `next` only changes while no text layer is selected.
+ */
+export function nextStyleAfter(next: NextStyle, selectedTexts: number, patch: Partial<NextStyle>): NextStyle {
+  return selectedTexts > 0 ? next : { ...next, ...patch };
 }

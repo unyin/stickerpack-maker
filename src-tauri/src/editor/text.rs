@@ -20,9 +20,9 @@ use std::sync::OnceLock;
 use ab_glyph::{Font, FontRef, GlyphId, OutlineCurve};
 use fontdb::{Database, Family, Query};
 use serde::Deserialize;
-use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, Point, Transform};
+use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, Transform};
 
-use super::merge::{from_pixmap, transform_of, LayerTransform, PlacedImage, MAX_MERGE_SIDE};
+use super::placement::{check_extent, from_pixmap, transform_of, Bounds, LayerTransform, PlacedImage};
 use super::Rgba;
 use crate::limits::{TEXT_MAX_FONT_SIZE, TEXT_MIN_FONT_SIZE};
 
@@ -160,11 +160,7 @@ fn lay_out(font: &FontRef, spec: &TextSpec) -> Result<Laid, String> {
     let (left, top) = (left.floor(), top.floor());
     let width = ((right.ceil() - left) as u32).max(1);
     let height = ((bottom.ceil() - top) as u32).max(1);
-    if width > MAX_MERGE_SIDE || height > MAX_MERGE_SIDE {
-        return Err(format!(
-            "the text would be {width}x{height} px, too large (at most {MAX_MERGE_SIDE} per side)"
-        ));
-    }
+    check_extent(width, height, "text")?;
     // Box coordinates: the layout shifted so the box's top-left is (0, 0).
     let (ox, oy) = (-left, -top);
     let mut path = PathBuilder::new();
@@ -260,21 +256,8 @@ pub fn rasterise_placed(fonts: &Database, spec: &TextSpec, t: &LayerTransform) -
     let color = check(spec)?;
     let transform = transform_of(t)?;
     with_layout(fonts, spec, |laid| {
-        let (w, h) = (laid.width as f32, laid.height as f32);
-        let mut corners =
-            [Point::from_xy(0.0, 0.0), Point::from_xy(w, 0.0), Point::from_xy(0.0, h), Point::from_xy(w, h)];
-        transform.map_points(&mut corners);
-        let snap = |v: f32| if (v - v.round()).abs() < 1e-3 { v.round() } else { v };
-        let left = snap(corners.iter().map(|c| c.x).fold(f32::MAX, f32::min)).floor();
-        let top = snap(corners.iter().map(|c| c.y).fold(f32::MAX, f32::min)).floor();
-        let right = snap(corners.iter().map(|c| c.x).fold(f32::MIN, f32::max)).ceil();
-        let bottom = snap(corners.iter().map(|c| c.y).fold(f32::MIN, f32::max)).ceil();
-        let (width, height) = ((right - left) as u32, (bottom - top) as u32);
-        if width > MAX_MERGE_SIDE || height > MAX_MERGE_SIDE {
-            return Err(format!(
-                "the text would be drawn {width}x{height} px, too large (at most {MAX_MERGE_SIDE} per side)"
-            ));
-        }
+        let (left, top, width, height) = Bounds::of(&transform, laid.width, laid.height).whole_pixels();
+        check_extent(width, height, "text")?;
         let image = draw_window(&laid, color, transform, (left as i32, top as i32), width, height)?;
         Ok(PlacedImage { x: left as i32, y: top as i32, image })
     })
@@ -282,9 +265,10 @@ pub fn rasterise_placed(fonts: &Database, spec: &TextSpec, t: &LayerTransform) -
 
 /// Draw a text layer placed by its transform into just the document window
 /// with top-left (`win_x`, `win_y`) and the given size: Crop's clip-sized
-/// window (merge.rs `render_window`), so a crossing text layer costs only
+/// window (placement.rs `render_window`), so a crossing text layer costs only
 /// its clip's memory, whatever size it is drawn at. Pixels match
-/// `rasterise_placed`'s up to the whole-pixel shift of the window.
+/// `rasterise_placed`'s up to the whole-pixel shift of the window. The caller
+/// has already checked the window (placement.rs `check_window`).
 pub fn rasterise_window(
     fonts: &Database,
     spec: &TextSpec,
@@ -294,9 +278,6 @@ pub fn rasterise_window(
     width: u32,
     height: u32,
 ) -> Result<Rgba, String> {
-    if width > MAX_MERGE_SIDE || height > MAX_MERGE_SIDE {
-        return Err(format!("a {width}x{height} text window is too large (at most {MAX_MERGE_SIDE} per side)"));
-    }
     let color = check(spec)?;
     let transform = transform_of(t)?;
     with_layout(fonts, spec, |laid| draw_window(&laid, color, transform, (win_x, win_y), width, height))

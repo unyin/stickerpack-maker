@@ -151,18 +151,10 @@ pub const MERGE_LAYERS_HEADER: &str = "x-merge-layers";
 /// bytes in the body). Response: `PlacedImage::to_frame` (origin + image).
 #[tauri::command(async)]
 pub fn editor_merge_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
-    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
-        return Err("merge request must carry raw pixel bytes".to_string());
-    };
-    let meta_json = request
-        .headers()
-        .get(MERGE_LAYERS_HEADER)
-        .ok_or_else(|| format!("merge request is missing the {MERGE_LAYERS_HEADER} header"))?
-        .to_str()
-        .map_err(|e| format!("merge layer header is not text: {e}"))?;
-    let meta: Vec<editor::merge::LayerMeta> =
-        serde_json::from_str(meta_json).map_err(|e| format!("merge layer header is invalid: {e}"))?;
-    let layers = editor::merge::split_layers(&meta, body, editor::text::system_fonts())?;
+    let body = raw_body(&request, "merge")?;
+    let meta: Vec<editor::layers::LayerMeta> = serde_json::from_str(header(&request, MERGE_LAYERS_HEADER)?)
+        .map_err(|e| format!("merge layer header is invalid: {e}"))?;
+    let layers = editor::layers::split_layers(&meta, body, editor::text::system_fonts())?;
     let merged = editor::merge::merge(&layers)?;
     Ok(tauri::ipc::Response::new(merged.to_frame()))
 }
@@ -177,17 +169,9 @@ pub const CROP_LAYERS_HEADER: &str = "x-crop-layers";
 /// Response: each clip's RGBA bytes, concatenated.
 #[tauri::command(async)]
 pub fn editor_crop_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
-    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
-        return Err("crop request must carry raw pixel bytes".to_string());
-    };
-    let meta_json = request
-        .headers()
-        .get(CROP_LAYERS_HEADER)
-        .ok_or_else(|| format!("crop request is missing the {CROP_LAYERS_HEADER} header"))?
-        .to_str()
-        .map_err(|e| format!("crop layer header is not text: {e}"))?;
-    let meta: Vec<editor::crop::CropMeta> =
-        serde_json::from_str(meta_json).map_err(|e| format!("crop layer header is invalid: {e}"))?;
+    let body = raw_body(&request, "crop")?;
+    let meta: Vec<editor::crop::CropMeta> = serde_json::from_str(header(&request, CROP_LAYERS_HEADER)?)
+        .map_err(|e| format!("crop layer header is invalid: {e}"))?;
     let layers = editor::crop::split_crop_layers(&meta, body, editor::text::system_fonts())?;
     Ok(tauri::ipc::Response::new(editor::crop::crop(&layers)?))
 }
@@ -258,12 +242,7 @@ pub fn editor_cut_layer(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::
     let body = raw_body(&request, "cut")?;
     let meta: editor::cut::CutMeta = serde_json::from_str(header(&request, CUT_LAYER_HEADER)?)
         .map_err(|e| format!("the cut header is invalid: {e}"))?;
-    if meta.layer.text.is_some() {
-        return Err("text layers cannot be cut".to_string());
-    }
-    let layer = editor::merge::split_layers(std::slice::from_ref(&meta.layer), body, editor::text::system_fonts())?
-        .pop()
-        .ok_or_else(|| "the cut request has no layer".to_string())?;
+    let layer = meta.decode_layer(body)?;
     let cut = editor::cut::cut(&layer, &meta.polygon)?;
     Ok(tauri::ipc::Response::new(cut.to_frame()))
 }

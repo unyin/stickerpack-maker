@@ -3,7 +3,7 @@
 //! a new floating layer. The source keeps a transparent hole.
 //!
 //! The selection is mapped into the layer's own pixel grid through the
-//! inverse of its transform (translate, rotate, scale; merge.rs), so a
+//! inverse of its transform (translate, rotate, scale; placement.rs), so a
 //! rotated or scaled layer is cut where it is drawn. A pixel is selected
 //! when its centre is inside the polygon (even-odd rule, so a lasso that
 //! crosses itself leaves the overlap out), and it moves whole: no
@@ -15,7 +15,8 @@
 use serde::Deserialize;
 use tiny_skia::Point;
 
-use super::merge::{transform_of, LayerMeta, MergeInput, PlacedImage};
+use super::layers::{decode_layer, finish_body, LayerMeta};
+use super::placement::{transform_of, LayerInput, PlacedImage};
 use super::Rgba;
 
 /// Metadata of a cut request: the source layer (as for merge) and the
@@ -25,6 +26,16 @@ pub struct CutMeta {
     #[serde(flatten)]
     pub layer: LayerMeta,
     pub polygon: Vec<[f32; 2]>,
+}
+
+impl CutMeta {
+    /// The source layer from the request body: raster only, text can't be cut.
+    pub fn decode_layer(&self, body: &[u8]) -> Result<LayerInput, String> {
+        let mut rest = body;
+        let layer = decode_layer(&self.layer, &mut rest, |_, _| Err("text layers cannot be cut".to_string()))?;
+        finish_body(rest)?;
+        Ok(layer)
+    }
 }
 
 /// What a cut produces: the source with a hole, and the cutout placed in
@@ -76,7 +87,7 @@ fn spans(polygon: &[Point], width: u32, height: u32) -> Vec<Vec<(u32, u32)>> {
 }
 
 /// Cut `polygon` (document pixels) out of `layer`.
-pub fn cut(layer: &MergeInput, polygon: &[[f32; 2]]) -> Result<Cut, String> {
+pub fn cut(layer: &LayerInput, polygon: &[[f32; 2]]) -> Result<Cut, String> {
     let (width, height) = (layer.image.width, layer.image.height);
     if layer.image.pixels.len() != width as usize * height as usize * 4 {
         return Err("the layer's pixels do not match its size".to_string());
@@ -123,7 +134,7 @@ pub fn cut(layer: &MergeInput, polygon: &[[f32; 2]]) -> Result<Cut, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::merge::LayerTransform;
+    use super::super::placement::LayerTransform;
     use super::*;
 
     /// Pixel (x, y) is [x, y, 7, 255].
@@ -146,8 +157,8 @@ mod tests {
         vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
     }
 
-    fn layer(image: Rgba, transform: LayerTransform) -> MergeInput {
-        MergeInput { image, transform }
+    fn layer(image: Rgba, transform: LayerTransform) -> LayerInput {
+        LayerInput { image, transform }
     }
 
     #[test]

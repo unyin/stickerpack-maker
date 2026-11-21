@@ -6,7 +6,9 @@
 pub mod crop;
 pub mod cut;
 pub mod import;
+pub mod layers;
 pub mod merge;
+pub mod placement;
 #[cfg(test)]
 mod test_font;
 pub mod text;

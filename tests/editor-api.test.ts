@@ -73,6 +73,7 @@ mock.module("@tauri-apps/plugin-dialog", () => ({
 }));
 
 const api = await import("../src/editor/api");
+const { layerInput } = await import("../src/editor/model/document");
 
 test("editor commands and argument keys match the Rust side", async () => {
   const info = await api.probeImage("C:\\pics\\big.png");
@@ -192,10 +193,10 @@ test("merge and crop send text layers as text in the header, with no body bytes"
 test("layerInput turns model layers into merge inputs", () => {
   const image = { width: 1, height: 1, pixels: new Uint8ClampedArray(4) };
   const t = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 };
-  expect(api.layerInput({ kind: "raster", id: "a", name: "a", transform: t, image })).toEqual({ image, transform: t });
+  expect(layerInput({ kind: "raster", id: "a", name: "a", transform: t, image })).toEqual({ image, transform: t });
   const render = { image, metrics: { originX: 0, originY: 0, ascent: 1, descent: 1, lineHeight: 2 } };
   const text = { kind: "text" as const, id: "b", name: "hi", transform: t, text: "hi", fontFamily: "Arial", fontSize: 9, color: "#000000", render };
-  expect(api.layerInput(text)).toEqual({
+  expect(layerInput(text)).toEqual({
     text: { text: "hi", fontFamily: "Arial", fontSize: 9, color: "#000000" },
     render,
     transform: t,

@@ -12,7 +12,6 @@ import {
   IMPORT_MAX_SIDE,
   importImage,
   importPasted,
-  layerInput,
   listFonts,
   mergeImages,
   pickImageFile,
@@ -32,6 +31,7 @@ import {
   deleteLayers,
   fitToBox,
   IDENTITY,
+  layerInput,
   layerIndex,
   resizeLongestSide,
   resizeSideProblem,
@@ -41,12 +41,12 @@ import {
   nextLayerId,
   planCrop,
   scaleLongestSide,
-  setTextStyle,
+  restyledTexts,
+  setTextStyles,
   textStyleOf,
   type CropAction,
   type Doc,
   type Rect,
-  type TextLayer,
   type TextStyle,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
@@ -58,15 +58,22 @@ import {
   fontSizeProblem,
   isBlankText,
   isHexColor,
+  nextStyleAfter,
+  type NextStyle,
 } from "../editor/model/text";
 import { EditorSession } from "../editor/model/session";
 import {
   cropBlocker,
   cutBlocker,
   deleteBlocker,
+  editTextBlocker,
+  escapeTarget,
+  fontChoices,
+  layerHint as layerHintText,
   mergeBlocker,
   selectModeFor,
   sizeToolBlocker,
+  textBlocker,
   textOverlayPlacement,
   type SizeTool,
 } from "../editor/view/geometry";
@@ -94,12 +101,15 @@ function buildEditor(): HTMLElement {
   let showBox = true;
   // What dragging on the canvas does: move layers, or draw the cut selection.
   let tool: CanvasTool = "move";
-  // The system's font families (null while loading) and why there are none.
-  let fonts: string[] | null = null;
+  // The installed font families, loaded once (null while loading), and why
+  // there are none. Never changed after loading.
+  let fonts: readonly string[] | null = null;
   let fontsProblem: string | null = null;
+  // The families the font select currently lists (see fontChoices).
+  let listedFonts: readonly string[] = [];
   // The style the next new text gets: the text controls edit it while no
   // text layer is selected.
-  let nextStyle: Omit<TextStyle, "text"> = { fontFamily: "", fontSize: DEFAULT_FONT_SIZE, color: DEFAULT_TEXT_COLOR };
+  let nextStyle: NextStyle = { fontFamily: "", fontSize: DEFAULT_FONT_SIZE, color: DEFAULT_TEXT_COLOR };
 
   const message = el("p", { class: "message editor-message", role: "alert" });
   const canvasHost = el("div", { class: "editor-canvas" }) as HTMLDivElement;
@@ -167,7 +177,13 @@ function buildEditor(): HTMLElement {
     "aria-label": "Font size in pixels",
   }) as HTMLInputElement;
   const colorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": "Text colour" }) as HTMLInputElement;
-  fontSelect.addEventListener("change", () => restyle({ fontFamily: fontSelect.value }));
+  // After a committed change the control gives up focus, so the editor's
+  // shortcuts (Ctrl+Z, Delete, Esc, Ctrl+V) work at once. Typing in the size
+  // input is not hijacked: it commits only on Enter or when focus leaves.
+  fontSelect.addEventListener("change", () => {
+    restyle({ fontFamily: fontSelect.value });
+    fontSelect.blur();
+  });
   fontSizeInput.addEventListener("change", () => {
     const size = Number(fontSizeInput.value);
     const problem = fontSizeProblem(size);
@@ -177,9 +193,11 @@ function buildEditor(): HTMLElement {
       return;
     }
     restyle({ fontSize: size });
+    fontSizeInput.blur();
   });
   colorInput.addEventListener("change", () => {
     if (isHexColor(colorInput.value)) restyle({ color: colorInput.value.toLowerCase() });
+    colorInput.blur();
   });
   const textTitle = "Type a new text layer in the chosen font, size and colour (Enter to finish, Shift+Enter for a new line)";
   const editTextTitle = "Edit the selected text layer's text (or double-click it)";
@@ -290,6 +308,36 @@ function buildEditor(): HTMLElement {
   }
 
   /**
+   * The async edit pattern: snapshot the document, await Rust on it, and if
+   * the document is still that snapshot commit the result, else refuse with
+   * a message (a result computed from a stale document must not be applied).
+   * `work` resolving null means there is nothing to apply (e.g. cancelled).
+   * `onStale` is either the refusal wording, completing "The layers changed
+   * while {doing}; nothing was {done}." (results computed from the snapshot:
+   * merge, crop, cut, restyle), or "ignore" for work that never reads it
+   * (paste, new text), which commits against the current document.
+   */
+  async function editAsync<T>(
+    current: EditorSession,
+    onStale: { doing: string; done: string } | "ignore",
+    work: (doc: Doc) => Promise<T | null>,
+    commit: (result: T, doc: Doc) => void,
+  ): Promise<void> {
+    const doc = current.doc;
+    const result = await work(doc);
+    if (result === null) return;
+    if (onStale === "ignore") {
+      commit(result, current.doc);
+      return;
+    }
+    if (current.doc !== doc) {
+      message.textContent = `The layers changed while ${onStale.doing}; nothing was ${onStale.done}. Try again.`;
+      return;
+    }
+    commit(result, doc);
+  }
+
+  /**
    * Decode an image with the import cap rule (SPEC §6): an image over the
    * cap needs the OK in the scale-to-fit dialog; Cancel aborts (null).
    */
@@ -346,26 +394,28 @@ function buildEditor(): HTMLElement {
 
   async function mergeSelected(): Promise<void> {
     const current = session;
-    if (!current || mergeBlocker(current.doc, current.selection)) return;
-    const doc = current.doc;
-    // Bottom to top, as they are drawn.
-    const chosen = doc.layers.filter((l) => current.selection.includes(l.id));
-    const id = nextLayerId(doc);
-    // Text layers go as text: Rust rasterises them at their transform (SPM-9).
-    const placed = await mergeImages(chosen.map(layerInput));
-    if (current.doc !== doc) {
-      message.textContent = "The layers changed while merging; nothing was merged. Try again.";
-      return;
-    }
-    current.apply((d) =>
-      mergeLayers(
-        d,
-        chosen.map((l) => l.id),
-        placed.image,
-        { ...IDENTITY, x: placed.x, y: placed.y },
-      ),
+    if (!current || mergeBlocker(current.selection)) return;
+    await editAsync(
+      current,
+      { doing: "merging", done: "merged" },
+      async (doc) => {
+        // Bottom to top, as they are drawn; text goes as text and Rust rasterises it (SPM-9).
+        const chosen = doc.layers.filter((l) => current.selection.includes(l.id));
+        return { chosen, placed: await mergeImages(chosen.map(layerInput)) };
+      },
+      ({ chosen, placed }, doc) => {
+        const id = nextLayerId(doc);
+        current.apply((d) =>
+          mergeLayers(
+            d,
+            chosen.map((l) => l.id),
+            placed.image,
+            { ...IDENTITY, x: placed.x, y: placed.y },
+          ),
+        );
+        current.select(id);
+      },
     );
-    current.select(id);
   }
 
   /**
@@ -375,18 +425,19 @@ function buildEditor(): HTMLElement {
    */
   async function cropToBox(): Promise<void> {
     const current = session;
-    if (!current) return;
-    const doc = current.doc;
-    const { plan, blocker } = cropState(doc);
-    if (blocker) return;
-    // Text crossing the box edge is rasterised and clipped like an image (SPM-9).
-    const clips = cropClipInputs(doc, plan);
-    const images = clips.length > 0 ? await cropImages(clips) : [];
-    if (current.doc !== doc) {
-      message.textContent = "The layers changed while cropping; nothing was cropped. Try again.";
-      return;
-    }
-    current.apply((d) => cropLayers(d, plan, new Map(clips.map((c, i) => [c.id, images[i]]))));
+    if (!current || cropState(current.doc).blocker) return;
+    await editAsync(
+      current,
+      { doing: "cropping", done: "cropped" },
+      async (doc) => {
+        // Text crossing the box edge is rasterised and clipped like an image (SPM-9).
+        const plan = cropState(doc).plan;
+        const clips = cropClipInputs(doc, plan);
+        const images = clips.length > 0 ? await cropImages(clips) : [];
+        return { plan, byId: new Map(clips.map((c, i) => [c.id, images[i]])) };
+      },
+      ({ plan, byId }) => current.apply((d) => cropLayers(d, plan, byId)),
+    );
   }
 
   /**
@@ -441,31 +492,38 @@ function buildEditor(): HTMLElement {
   async function cutSelection(): Promise<void> {
     const current = session;
     if (!current || cutBlocker(current.doc, current.selection, current.region)) return;
-    const doc = current.doc;
     const region = current.region!;
-    const source = doc.layers[layerIndex(doc, current.selection[0])];
-    if (source.kind !== "raster") return;
-    const cut = await cutImage(source.image, source.transform, region.points);
-    if (current.doc !== doc) {
-      message.textContent = "The layers changed while cutting; nothing was cut. Try again.";
-      return;
-    }
-    const id = nextLayerId(doc);
-    current.apply((d) => cutLayer(d, source.id, cut));
-    current.setRegion(null);
-    current.select(id);
-    setTool("move");
+    await editAsync(
+      current,
+      { doing: "cutting", done: "cut" },
+      async (doc) => {
+        const source = doc.layers[layerIndex(doc, current.selection[0])];
+        return source.kind === "raster" ? { source, cut: await cutImage(source.image, source.transform, region.points) } : null;
+      },
+      ({ source, cut }, doc) => {
+        const id = nextLayerId(doc);
+        current.apply((d) => cutLayer(d, source.id, cut));
+        current.setRegion(null);
+        current.select(id);
+        setTool("move");
+      },
+    );
   }
 
   /** Add a pasted image (encoded bytes) as a new layer, centred, under the import cap rule. */
   async function pasteImage(bytes: Uint8Array): Promise<void> {
     const current = session;
     if (!current) return;
-    const image = await importWithCap(await probePasted(bytes), (scale) => importPasted(bytes, scale));
-    if (!image) return;
-    const id = nextLayerId(current.doc);
-    current.apply((doc) => addRasterLayer(doc, image, "Pasted image", centeredPlacement(doc, image)));
-    current.select(id);
+    await editAsync(
+      current,
+      "ignore",
+      () => probePasted(bytes).then((info) => importWithCap(info, (scale) => importPasted(bytes, scale))),
+      (image, doc) => {
+        const id = nextLayerId(doc);
+        current.apply((d) => addRasterLayer(d, image, "Pasted image", centeredPlacement(d, image)));
+        current.select(id);
+      },
+    );
   }
 
   /** The Paste button: read an image from the clipboard where the webview allows it. */
@@ -492,17 +550,6 @@ function buildEditor(): HTMLElement {
 
   // ---- Text (SPM-9) ----
 
-  /** The selected text layers, bottom to top. */
-  function selectedTexts(current: EditorSession): TextLayer[] {
-    return current.doc.layers.filter((l): l is TextLayer => l.kind === "text" && current.selection.includes(l.id));
-  }
-
-  /** Why the text tool can't be used, or null. */
-  function textBlocker(): string | null {
-    if (fonts === null) return fontsProblem ?? "Looking for the installed fonts…";
-    return null;
-  }
-
   /**
    * Open the text overlay: for a new text layer (`id` null) centred on the
    * canvas in the chosen style, or over an existing text layer to edit it.
@@ -512,7 +559,7 @@ function buildEditor(): HTMLElement {
    */
   function editText(id: string | null): void {
     const current = session;
-    if (!current || !stage || busy || textBlocker()) return;
+    if (!current || !stage || busy || textBlocker(fonts, fontsProblem)) return;
     const layer = id === null ? null : current.doc.layers.find((l) => l.id === id);
     if (layer && layer.kind !== "text") return;
     const style: TextStyle = layer ? textStyleOf(layer) : { ...nextStyle, text: "" };
@@ -538,32 +585,41 @@ function buildEditor(): HTMLElement {
   async function addText(style: TextStyle): Promise<void> {
     const current = session;
     if (!current) return;
-    const render = await renderText(style);
-    const id = nextLayerId(current.doc);
-    current.apply((doc) => addTextLayer(doc, style, render, centeredPlacement(doc, render.image)));
-    current.select(id);
+    await editAsync(
+      current,
+      "ignore",
+      () => renderText(style),
+      (render, doc) => {
+        const id = nextLayerId(doc);
+        current.apply((d) => addTextLayer(d, style, render, centeredPlacement(d, render.image)));
+        current.select(id);
+      },
+    );
   }
 
   /** Re-render text layers with a style change, as ONE undo step. */
   async function restyleLayers(ids: readonly string[], patch: Partial<TextStyle>): Promise<void> {
     const current = session;
     if (!current) return;
-    const doc = current.doc;
-    const layers = doc.layers.filter((l): l is TextLayer => l.kind === "text" && ids.includes(l.id));
-    const styles = layers.map((l) => ({ ...textStyleOf(l), ...patch }));
-    const renders = await Promise.all(styles.map(renderText));
-    if (current.doc !== doc) {
-      message.textContent = "The layers changed while drawing the text; nothing was changed. Try again.";
-      return;
-    }
-    current.apply((d) => layers.reduce((acc, l, i) => setTextStyle(acc, l.id, styles[i], renders[i]), d));
+    await editAsync(
+      current,
+      { doing: "drawing the text", done: "changed" },
+      async (doc) => {
+        const styles = restyledTexts(doc, ids, patch);
+        const renders = await Promise.all(styles.map((c) => renderText(c.style)));
+        return styles.map((c, i) => ({ ...c, render: renders[i] }));
+      },
+      (changes) => current.apply((d) => setTextStyles(d, changes)),
+    );
   }
 
-  /** A text control changed: restyle the selected text layers, or the next new text. */
-  function restyle(patch: Partial<Omit<TextStyle, "text">>): void {
-    nextStyle = { ...nextStyle, ...patch };
-    const current = session;
-    const ids = current ? selectedTexts(current).map((l) => l.id) : [];
+  /**
+   * A text control changed (SPEC §6): restyle the selected text layers, or,
+   * when none is selected, set the style of the next new text.
+   */
+  function restyle(patch: Partial<NextStyle>): void {
+    const ids = session ? session.selectedTexts.map((l) => l.id) : [];
+    nextStyle = nextStyleAfter(nextStyle, ids.length, patch);
     if (ids.length > 0) void run(() => restyleLayers(ids, patch));
     else refresh();
   }
@@ -577,7 +633,6 @@ function buildEditor(): HTMLElement {
       else {
         fonts = families;
         nextStyle = { ...nextStyle, fontFamily: first };
-        fontSelect.replaceChildren(...families.map((f) => el("option", { value: f }, f)));
       }
     } catch (err) {
       fontsProblem = `The installed fonts could not be listed: ${errorMessage(err)}`;
@@ -667,7 +722,7 @@ function buildEditor(): HTMLElement {
     const doc = current.doc;
     const single = current.selection.length === 1 ? current.selection[0] : null;
     const index = single ? layerIndex(doc, single) : -1;
-    const blocker = mergeBlocker(doc, current.selection);
+    const blocker = mergeBlocker(current.selection);
     const deleteReason = deleteBlocker(doc, current.selection);
     addButton.disabled = busy;
     // Each sizing tool is disabled when it would change nothing or, for Longest
@@ -723,30 +778,35 @@ function buildEditor(): HTMLElement {
     pasteButton.title = pasteTitle;
     // Text tool (SPM-9): the controls show the first selected text layer's
     // style, else the next new text's.
-    const texts = selectedTexts(current);
+    const texts = current.selectedTexts;
     const shown = texts.length > 0 ? textStyleOf(texts[0]) : nextStyle;
-    const textReason = textBlocker();
+    const textReason = textBlocker(fonts, fontsProblem);
     textButton.disabled = busy || textReason !== null;
     textButton.title = textReason ?? textTitle;
-    const editReason =
-      textReason ?? (texts.length === 1 && current.selection.length === 1 ? null : "Select one text layer to edit.");
+    const editReason = editTextBlocker(textReason, doc, current.selection);
     editTextButton.disabled = busy || editReason !== null;
     editTextButton.title = editReason ?? editTextTitle;
-    if (fonts !== null && !fonts.includes(shown.fontFamily) && shown.fontFamily !== "") {
-      // A layer in a font that is no longer installed still shows its font.
-      fontSelect.append(el("option", { value: shown.fontFamily }, shown.fontFamily));
-      fonts = [...fonts, shown.fontFamily];
+    // The select lists the installed fonts, plus a layer's font that is no longer installed.
+    const choices = fontChoices(fonts ?? [], shown.fontFamily);
+    if (choices.length !== listedFonts.length || choices.some((f, i) => f !== listedFonts[i])) {
+      fontSelect.replaceChildren(...choices.map((f) => el("option", { value: f }, f)));
+      listedFonts = choices;
     }
     fontSelect.value = shown.fontFamily;
     if (document.activeElement !== fontSizeInput) fontSizeInput.value = String(shown.fontSize);
     colorInput.value = shown.color;
     for (const control of [fontSelect, fontSizeInput, colorInput]) control.disabled = busy || textReason !== null;
-    fontSelect.title = textReason ?? (texts.length > 0 ? "Font of the selected text" : "Font of the next text");
-    fontSizeInput.title = `Font size in px (${TEXT_FONT_SIZE.min}–${TEXT_FONT_SIZE.max})`;
-    colorInput.title = texts.length > 0 ? "Colour of the selected text" : "Colour of the next text";
+    const target = texts.length > 0 ? "the selected text" : "the next text";
+    fontSelect.title = textReason ?? `Font of ${target}`;
+    fontSizeInput.title = textReason ?? `Font size of ${target} in px (${TEXT_FONT_SIZE.min}–${TEXT_FONT_SIZE.max})`;
+    colorInput.title = textReason ?? `Colour of ${target}`;
     // Explain disabled actions only once something is selected.
-    layerHint.textContent =
-      current.selection.length > 0 ? [blocker, deleteReason].filter((r) => r !== null).join(" ") : "";
+    layerHint.textContent = layerHintText(doc, current.selection, current.region, {
+      merge: blocker,
+      delete: deleteReason,
+      cut: cutReason,
+      editText: editReason,
+    });
     dirtyLabel.hidden = !current.isDirty;
   }
 
@@ -770,7 +830,7 @@ function buildEditor(): HTMLElement {
     if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) current.undo();
     else if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) current.redo();
     // Esc drops the cut selection first, then the layer selection.
-    else if (e.key === "Escape") current.region ? current.setRegion(null) : current.clearSelection();
+    else if (e.key === "Escape") escapeTarget(current.region) === "region" ? current.setRegion(null) : current.clearSelection();
     else if (e.key === "Delete") deleteSelected();
     else return;
     e.preventDefault();
