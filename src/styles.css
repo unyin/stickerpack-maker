@@ -183,6 +183,14 @@ button.secondary:hover {
   background: var(--bg);
 }
 
+/* After :hover so a disabled button never reacts to the pointer. */
+button.secondary:disabled,
+button.secondary:disabled:hover {
+  background: var(--panel);
+  opacity: 0.6;
+  cursor: default;
+}
+
 .theme-select {
   font: inherit;
   background: var(--panel);

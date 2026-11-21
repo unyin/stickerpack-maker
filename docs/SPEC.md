@@ -169,7 +169,9 @@ stickers, Missing stickers, and the thumbnail.
   draggable/resizable; drawn **above all layers** so it stays visible when layers cover the
   canvas.
   Drag the image to choose what survives. The overlay is **on by default** and the **Crop
-  box** button shows or hides it (owner decision 2026-11-20). The box is the set's side,
+  box** button shows or hides it (owner decision 2026-11-20); the toggle hides the canvas
+  outline too, one toggle for both, while the checkerboard still shows where the canvas is
+  (owner decision 2026-11-21). The box is the set's side,
   **capped at the canvas size on each axis**, so it is never larger than the canvas: a
   512×439 canvas gets a 512×439 box (owner decision 2026-11-20). It follows the canvas size,
   staying centred; when the canvas and box sides differ by an odd number, its top-left is
@@ -207,6 +209,10 @@ stickers, Missing stickers, and the thumbnail.
   the user left them (owner decision 2026-11-20). The canvas keeps its top-left corner where
   it was on screen, so the outline grows or shrinks by the same factor as the canvas.
   Undo/redo of a sizing tool behaves the same.
+- **Middle-mouse click-and-drag pans the view** without moving any layer (owner decision
+  2026-11-21). It works anywhere on the stage, over layers too, in every tool; it never
+  selects or moves a layer, and it counts as a manual view change like a left-drag pan or
+  wheel zoom (a later fit never overrides it).
 - **Reset view** is the only way to re-fit: it re-centres the canvas and zooms to fit it in
   the view (never above 100%), without changing the image. The view is fitted automatically
   only when an editing session opens.
@@ -289,7 +295,6 @@ stickers, Missing stickers, and the thumbnail.
 - Group-drag reorder (moving several stickers at once).
 - Trash/recovery area for deleted stickers.
 - Bulk emoji-set: rejected as unnecessary — not planned.
-- Editor: middle-mouse click-and-drag pans the view without moving the image.
 - Editor: every edge of the selection box is grabbable for resizing, not just the corners.
 - Editor: custom canvas resizing (in v1 only Fit and Longest side change the canvas).
 - Drag and drop an image file to open it in the Editor. (v3 idea: drag and drop onto an

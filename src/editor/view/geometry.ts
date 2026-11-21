@@ -66,6 +66,14 @@ export function zoomAround(view: ViewTransform, pointer: Point, deltaY: number):
 }
 
 /**
+ * Pan by a pointer drag: the view moves by the pointer's travel since the
+ * drag began, scale unchanged. `start` is the view when the drag began.
+ */
+export function panView(start: ViewTransform, startPointer: Point, pointer: Point): ViewTransform {
+  return { scale: start.scale, x: start.x + (pointer.x - startPointer.x), y: start.y + (pointer.y - startPointer.y) };
+}
+
+/**
  * Why the selection cannot be merged, or null when it can: merging needs
  * two or more layers, all raster (text is rasterised by the text tool, SPM-9).
  */

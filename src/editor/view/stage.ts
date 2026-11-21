@@ -5,7 +5,7 @@ import Konva from "konva";
 import type { RgbaImage } from "../model/image";
 import { contentBounds, setTransform, type Doc, type Layer, type Rect, type Transform } from "../model/document";
 import type { EditorSession } from "../model/session";
-import { fitView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
+import { fitView, panView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
 
 /** Canvas per pixel buffer: pixels are immutable, so a buffer draws once. */
 const canvases = new WeakMap<RgbaImage, HTMLCanvasElement>();
@@ -99,6 +99,16 @@ export class EditorStage {
   /** Watches <html data-theme> (set by src/theme.ts) to recolour the canvas. */
   private readonly themeObserver = new MutationObserver(() => this.applyTheme());
   private readonly unsubscribe: () => void;
+  /** The middle-button pan in progress, if any: the view and pointer when it began. */
+  private middlePan: { view: ViewTransform; x: number; y: number } | null = null;
+  private readonly onMiddleDown = (e: MouseEvent): void => this.beginMiddlePan(e);
+  private readonly onMiddleMove = (e: MouseEvent): void => this.moveMiddlePan(e);
+  private readonly onMiddleUp = (e: MouseEvent): void => {
+    if (e.button === 1) this.middlePan = null;
+  };
+  private readonly onAuxClick = (e: MouseEvent): void => {
+    if (e.button === 1) e.preventDefault();
+  };
   private viewChanged?: (view: ViewTransform) => void;
   /**
    * Whether the view is settled: fitted once, or zoomed/panned by the user.
@@ -132,6 +142,12 @@ export class EditorStage {
     this.stage.add(this.content);
     this.stage.add(this.guides);
 
+    // Middle-drag pans anywhere, over layers too. Capture phase on the host
+    // runs before Konva sees the press, so no layer is selected or moved.
+    container.addEventListener("mousedown", this.onMiddleDown, true);
+    container.addEventListener("auxclick", this.onAuxClick, true);
+    window.addEventListener("mousemove", this.onMiddleMove);
+    window.addEventListener("mouseup", this.onMiddleUp);
     this.stage.on("wheel", (e) => this.onWheel(e));
     this.stage.on("dragmove dragend", (e) => {
       if (e.target !== this.stage) return;
@@ -196,8 +212,13 @@ export class EditorStage {
     this.guides.batchDraw();
   }
 
-  /** Show or hide the crop box overlay (it is on when the stage opens). */
+  /**
+   * Show or hide the crop box overlay and the canvas outline together (it is
+   * on when the stage opens). In v1 the box equals the canvas, so they are one
+   * guide; the checkerboard still shows where the canvas is (SPEC §6).
+   */
   setCropBoxVisible(visible: boolean): void {
+    this.outline.visible(visible);
     this.boxHalo.visible(visible);
     this.box.visible(visible);
     this.guides.batchDraw();
@@ -214,6 +235,10 @@ export class EditorStage {
   }
 
   destroy(): void {
+    this.container.removeEventListener("mousedown", this.onMiddleDown, true);
+    this.container.removeEventListener("auxclick", this.onAuxClick, true);
+    window.removeEventListener("mousemove", this.onMiddleMove);
+    window.removeEventListener("mouseup", this.onMiddleUp);
     this.unsubscribe();
     this.themeObserver.disconnect();
     this.resizeObserver.disconnect();
@@ -244,6 +269,25 @@ export class EditorStage {
     if (clientWidth === 0 || clientHeight === 0) return; // detached (other tab)
     this.stage.size({ width: clientWidth, height: clientHeight });
     if (!this.fitted) this.fit(); // later resizes keep the view
+  }
+
+  private beginMiddlePan(e: MouseEvent): void {
+    if (e.button !== 1) return;
+    e.preventDefault(); // no browser autoscroll
+    e.stopPropagation(); // Konva never sees it: no select, no layer drag
+    if (!this.stage.draggable()) return; // interaction is suspended
+    this.middlePan = { view: this.view(), x: e.clientX, y: e.clientY };
+  }
+
+  private moveMiddlePan(e: MouseEvent): void {
+    const pan = this.middlePan;
+    if (!pan) return;
+    if ((e.buttons & 4) === 0) {
+      this.middlePan = null; // released outside the window
+      return;
+    }
+    this.setView(panView(pan.view, pan, { x: e.clientX, y: e.clientY }));
+    this.fitted = true; // a hand pan is never overwritten
   }
 
   private onWheel(e: Konva.KonvaEventObject<WheelEvent>): void {
