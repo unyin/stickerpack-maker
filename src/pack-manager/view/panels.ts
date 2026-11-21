@@ -19,6 +19,19 @@ import { previewImage, type Previews } from "./previews";
 
 const COPY_TITLE = "Copy to clipboard";
 
+/** Ordinary single-codepoint emoji drawn by the emoji font; no flags (two boxed letters in Segoe UI Emoji) or VS16 sequences (text-style base glyph). */
+const EMOJI_WIDTH_SAMPLES = ["😀", "👍", "🤔", "😎"];
+
+/** Box width in glyph widths: five per row fit, six do not, with room for spacing. */
+const EMOJI_BOX_GLYPH_WIDTHS = 5.5;
+
+/** A measured glyph outside these multiples of the font size is not a real measurement (see emojiBoxWidth). */
+const EMOJI_GLYPH_MIN_RATIO = 0.8;
+const EMOJI_GLYPH_MAX_RATIO = 1.6;
+
+/** First-paint width in px: EMOJI_BOX_GLYPH_WIDTHS × 30 px, about Segoe UI Emoji at 24 px. Keep in step with `.pm-emoji-input` in pack-manager.css. */
+const EMOJI_BOX_FALLBACK_WIDTH = 165;
+
 /** What the panels ask the pack view to do. */
 export interface PanelActions {
   edit(sticker: StickerView): void;
@@ -61,12 +74,12 @@ export function detailPanel(sticker: StickerView, previews: Previews, actions: P
     ? el("div", { class: "pm-missing-art large" }, "File Missing")
     : previewImage(previews.sticker(sticker.id, sticker.format), `Sticker ${sticker.position}`, "pm-detail-img");
 
-  // A full-width two-row box (about 11 emoji per row) that shows all 20 emoji
-  // at once (owner, 2026-11-21). No line breaks: Enter finishes, and the core
-  // strips every whitespace.
+  // Four rows of five: all 20 emoji show at once (owner, 2026-11-21); emojiBoxWidth
+  // sizes the box for five per row. No line breaks: Enter finishes, and the
+  // core strips every whitespace.
   const input = el("textarea", {
     class: "pm-input pm-emoji-input",
-    rows: "2",
+    rows: "4",
     spellcheck: "false",
     placeholder: "Type emoji, or Win+. for the emoji panel",
     id: "pm-emoji-input",
@@ -81,7 +94,30 @@ export function detailPanel(sticker: StickerView, previews: Previews, actions: P
     warning.hidden = text === null;
     input.classList.toggle("warn", text !== null);
   };
-  input.addEventListener("input", live);
+  // Grow instead of scrolling past 20 emoji: a scrollbar would narrow the box
+  // and drop the rows to four emoji.
+  const fitHeight = () => {
+    input.style.height = "";
+    if (input.scrollHeight > input.clientHeight) {
+      // content-box: style.height is the content height, so leave out the padding.
+      const cs = getComputedStyle(input);
+      input.style.height = `${input.scrollHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)}px`;
+    }
+  };
+  input.addEventListener("input", () => {
+    live();
+    fitHeight();
+  });
+  // Once on screen (and again when fonts finish loading): size for five per row, then fit the height.
+  const fit = () => {
+    if (!input.isConnected) return;
+    // The font shorthand can compute to "" (a canvas then ignores it), so build it from its parts.
+    const cs = getComputedStyle(input);
+    input.style.width = `${emojiBoxWidth(cs.fontSize, cs.fontFamily)}px`;
+    fitHeight();
+  };
+  requestAnimationFrame(fit);
+  void document.fonts.ready.then(fit);
   input.addEventListener("change", () => void actions.saveEmoji(sticker, input.value));
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -132,14 +168,9 @@ export function detailPanel(sticker: StickerView, previews: Previews, actions: P
       ["File size", sticker.file ? formatBytes(sticker.file.bytes) : "—"],
       ["File", sticker.fileName],
     ]),
-    el(
-      "div",
-      { class: "pm-emoji-row" },
-      el("label", { class: "field-label", for: "pm-emoji-input" }, "Emoji String"),
-      el("div", { class: "pm-emoji-actions" }, copyStatus, copy),
-    ),
-    input,
-    el("div", { class: "pm-emoji-status" }, count, warning),
+    el("label", { class: "field-label pm-emoji-label", for: "pm-emoji-input" }, "Emoji String"),
+    el("div", { class: "pm-emoji-row" }, input, el("div", { class: "pm-emoji-side" }, copy, copyStatus, count)),
+    warning,
     el(
       "div",
       { class: "actions pm-panel-actions" },
@@ -212,6 +243,26 @@ export function thumbnailPanel(view: PackView, previews: Previews, actions: Pane
     ),
   );
   return el("div", { class: "pm-thumb-panel" }, ...body);
+}
+
+/**
+ * Content width of the Emoji String box for five emoji per row (owner,
+ * 2026-11-21). A textarea wraps by width, not by count. An emoji font draws
+ * its glyphs at one width, but the width differs between fonts (Segoe UI
+ * Emoji, Noto, Twemoji), so measure a few ordinary emoji in the box's own font
+ * and take the widest; EMOJI_BOX_GLYPH_WIDTHS glyph widths fit five per row
+ * but not six. A canvas that rejects the font measures in its 10px default,
+ * so a glyph far narrower than the font size (or far wider: it would overflow
+ * the panel) is not a real measurement: fall back.
+ */
+function emojiBoxWidth(fontSize: string, fontFamily: string): number {
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) return EMOJI_BOX_FALLBACK_WIDTH;
+  ctx.font = `${fontSize} ${fontFamily}`;
+  const widest = Math.max(...EMOJI_WIDTH_SAMPLES.map((e) => ctx.measureText(e).width));
+  const size = parseFloat(fontSize);
+  if (!(widest >= size * EMOJI_GLYPH_MIN_RATIO && widest <= size * EMOJI_GLYPH_MAX_RATIO)) return EMOJI_BOX_FALLBACK_WIDTH;
+  return Math.ceil(widest * EMOJI_BOX_GLYPH_WIDTHS);
 }
 
 /** Briefly show the copy result: check icon on success, a red button on failure, and a screen-reader announcement. */

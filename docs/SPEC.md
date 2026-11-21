@@ -115,10 +115,11 @@ stickers, Missing stickers, and the thumbnail.
 
 ### Detail panel (single selection)
 - Large preview; metadata: position, format, dimensions, file size.
-- **Emoji String**: inline editable two-row box that shows all 20 emoji at once (type, or
-  Win+. for the Windows emoji panel); every space is stripped when it is saved and the count
-  ignores spaces; a small square icon-only **copy** button beside the field's label; live 1–20 count
-  warning (owner decision 2026-11-21).
+- **Emoji String**: inline editable box of four rows of five that shows all 20 emoji at once
+  (type, or Win+. for the Windows emoji panel); past 20 it grows a row instead of scrolling.
+  Every space is stripped when it is saved and the count ignores spaces. Beside the box: a
+  small square icon-only **copy** button and the live 1–20 count; the count warning shows
+  below (owner decisions 2026-11-21).
 - Actions: **Edit** first asks **Edit / Replace… / Cancel** (Cancel is the safe default):
   Edit opens the flattened image in the Editor, Replace runs the Replace flow below (owner
   decision 2026-11-21). Opening in the Editor while it has unsaved changes asks first, in the

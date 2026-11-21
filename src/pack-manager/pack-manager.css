@@ -509,30 +509,40 @@ button.pm-link {
   margin: 0;
 }
 
+/* The four-by-five box is narrower than the panel, so Copy and the count sit
+   beside it rather than taking rows above and below. */
 .pm-emoji-row {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pm-emoji-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 6px;
 }
 
-.pm-emoji-row .field-label {
+/* The panel's own 10px gap is enough between the label and the box.
+   Scoped so it outranks .field-label regardless of stylesheet order. */
+.pm-detail .pm-emoji-label {
   margin: 0;
 }
 
-.pm-emoji-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Full panel width, two rows of about 11: all 20 emoji show at once (owner, 2026-11-21). */
+/* Four rows of five (owner, 2026-11-21). panels.ts sets the content width
+   from the measured emoji width (emojiBoxWidth) and grows the height instead
+   of showing a scrollbar; this width is only the first-paint fallback. */
 .pm-emoji-input {
-  width: 100%;
-  box-sizing: border-box;
-  font-size: 18px;
-  line-height: 1.4;
+  box-sizing: content-box;
+  width: 165px; /* matches EMOJI_BOX_FALLBACK_WIDTH in panels.ts; CSS cannot import it */
+  /* .pm-input allows shrinking (min-width: 0); this box must keep its
+     measured width or a row drops to four emoji. */
+  flex-shrink: 0;
+  font-size: 24px;
+  line-height: 1.3;
   resize: none;
+  overflow-y: hidden;
 }
 
 /* Small square icon button. */
@@ -549,12 +559,6 @@ button.pm-link {
 .pm-copy.failed {
   border-color: var(--danger-border);
   color: var(--danger-text);
-}
-
-.pm-emoji-status {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
 }
 
 .pm-emoji-count {
