@@ -1,6 +1,7 @@
-// A small modal built on <dialog>: the Pack Manager's confirmations and
-// forms that need more than a native message box (previews, inputs, lists).
-import { el } from "../../ui";
+// The app's one modal, built on <dialog>: every two-option confirmation and
+// every form that needs more than a native message box. Styles: dialog.css.
+import { CANCEL_CHOICE, confirmButtons, type ConfirmSpec } from "./dialog-model";
+import { el } from "./ui";
 
 export interface DialogButton<T> {
   label: string;
@@ -33,7 +34,7 @@ export function openDialog<T>(
   cancel: T,
   options: { defaultChoice?: T } = {},
 ): DialogHandle<T> {
-  const dialog = el("dialog", { class: "pm-dialog" }) as HTMLDialogElement;
+  const dialog = el("dialog", { class: "app-dialog" }) as HTMLDialogElement;
   const map = new Map<T, HTMLButtonElement>();
   let resolve!: (value: T) => void;
   const result = new Promise<T>((r) => (resolve = r));
@@ -45,7 +46,7 @@ export function openDialog<T>(
     dialog.remove();
     resolve(value);
   };
-  const row = el("div", { class: "actions pm-dialog-actions" });
+  const row = el("div", { class: "actions app-dialog-actions" });
   for (const b of buttons) {
     const btn = el("button", { class: b.variant ?? "secondary", type: "button" }, b.label) as HTMLButtonElement;
     btn.addEventListener("click", async () => {
@@ -60,7 +61,7 @@ export function openDialog<T>(
     map.set(b.value, btn);
     row.append(btn);
   }
-  dialog.append(el("h2", {}, title), el("div", { class: "pm-dialog-body" }, ...body), row);
+  dialog.append(el("h2", {}, title), el("div", { class: "app-dialog-body" }, ...body), row);
   dialog.addEventListener("cancel", (e) => {
     e.preventDefault();
     close(cancel);
@@ -71,25 +72,23 @@ export function openDialog<T>(
   return { dialog, result, close, buttons: map };
 }
 
-/** A yes/no confirmation; resolves true on confirm. */
-export function confirmDialog(
+/**
+ * The two-option confirmation, used for every two-option question in the app
+ * (SPEC §5): title, body, the action and keep labels. The safe choice (keep)
+ * is focused and primary unless `defaultChoice` says otherwise; Esc and close
+ * always keep. Resolves true only for the action.
+ */
+export async function confirmChoice(
   title: string,
   body: Array<Node | string>,
-  confirmLabel: string,
-  danger = false,
+  spec: ConfirmSpec,
 ): Promise<boolean> {
-  return openDialog<boolean>(
-    title,
-    body,
-    [
-      { label: "Cancel", value: false },
-      { label: confirmLabel, value: true, variant: danger ? "danger" : "primary" },
-    ],
-    false,
-  ).result;
+  const defaultChoice = spec.defaultChoice ?? "keep";
+  const chosen = await openDialog(title, body, confirmButtons(spec), CANCEL_CHOICE, { defaultChoice }).result;
+  return chosen === "action";
 }
 
-/** True while any Pack Manager dialog is open (keyboard shortcuts pause). */
+/** True while any dialog is open (keyboard shortcuts pause). */
 export function dialogOpen(): boolean {
-  return document.querySelector("dialog.pm-dialog[open]") !== null;
+  return document.querySelector("dialog.app-dialog[open]") !== null;
 }

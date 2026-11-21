@@ -3,7 +3,7 @@
 import { el, errorMessage } from "../../ui";
 import { deletePack, listPacks, type PackSummary } from "../api";
 import { packDeleteMessage, stickerCountText } from "../model/messages";
-import { confirmDialog } from "./dialog";
+import { confirmChoice } from "../../dialog";
 import { createPackDialog, statusBadge } from "./dialogs";
 
 export function buildPackList(onOpen: (packId: number) => void): {
@@ -33,14 +33,13 @@ export function buildPackList(onOpen: (packId: number) => void): {
 
   async function remove(pack: PackSummary): Promise<void> {
     const live = pack.status === "live";
-    const ok = await confirmDialog(
+    const ok = await confirmChoice(
       live ? "Delete this Live pack locally?" : "Delete this pack?",
       [
         el("p", {}, packDeleteMessage(pack.title, pack.status, pack.stickerCount)),
         ...(live ? [el("p", { class: "pm-warning-text" }, "This does not delete the pack on Telegram.")] : []),
       ],
-      live ? "Delete locally" : "Delete pack",
-      true,
+      { actionLabel: live ? "Delete locally" : "Delete pack", keepLabel: "Cancel", danger: true },
     );
     if (!ok) return;
     message.textContent = "";

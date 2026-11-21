@@ -48,7 +48,7 @@ import {
 } from "../model/selection";
 import { emojiCountWarning, emojiWarning } from "../model/emoji";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
-import { dialogOpen } from "./dialog";
+import { dialogOpen } from "../../dialog";
 import { confirmBackToDraft, confirmGoLive, confirmStickerDelete, invalidFileDialog, sendDialog, statusBadge } from "./dialogs";
 import { aggregatePanel, detailPanel, emptyPanel, thumbnailPanel, type PanelActions } from "./panels";
 import { previewImage, Previews } from "./previews";

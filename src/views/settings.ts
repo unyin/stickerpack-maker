@@ -7,7 +7,7 @@ import {
   resolveLibraryDbSelection,
   type AppState,
 } from "../api";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { confirmChoice } from "../dialog";
 import {
   getThemePreference,
   parseThemePreference,
@@ -50,9 +50,14 @@ export function renderSettings(
     await withMessage(message, async () => {
       const folder = await pickFolder();
       if (!folder) return; // user cancelled
-      const confirmed = await ask(
-        `Create a fresh Library in:\n${folder}\n\nThe folder must be empty. Existing files are never migrated or reconstructed.`,
-        { title: "Create fresh Library", kind: "warning" },
+      const confirmed = await confirmChoice(
+        "Create fresh Library",
+        [
+          el("p", {}, "Create a fresh Library in:"),
+          el("code", { class: "path" }, folder),
+          el("p", {}, "The folder must be empty. Existing files are never migrated or reconstructed."),
+        ],
+        { actionLabel: "Create Library", keepLabel: "Cancel" },
       );
       if (!confirmed) return;
       await createLibrary(folder);

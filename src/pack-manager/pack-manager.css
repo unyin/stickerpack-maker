@@ -516,46 +516,7 @@ button.pm-link {
   padding: 7px 12px;
 }
 
-/* ---- Dialogs ---- */
-
-.pm-dialog {
-  background: var(--panel);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-  width: min(560px, 92vw);
-}
-
-.pm-dialog::backdrop {
-  background: var(--backdrop);
-}
-
-.pm-dialog button:focus-visible {
-  outline: 2px solid var(--accent-ink);
-  outline-offset: 2px;
-}
-
-.pm-dialog h2 {
-  font-size: 18px;
-  margin: 0 0 12px;
-}
-
-.pm-dialog-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: 65vh;
-  overflow: auto;
-}
-
-.pm-dialog-body p {
-  margin: 0;
-}
-
-.pm-dialog-actions {
-  justify-content: flex-end;
-}
+/* ---- Dialog contents (the dialog frame is src/dialog.css) ---- */
 
 .pm-fields {
   display: flex;

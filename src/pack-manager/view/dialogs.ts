@@ -15,7 +15,7 @@ import {
 } from "../api";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { fileNameOf, matchesSearch, sendReportText, STICKER_RULE, statusLabel, stickerCountText } from "../model/messages";
-import { confirmDialog, openDialog, type DialogHandle } from "./dialog";
+import { confirmChoice, openDialog, type DialogHandle } from "../../dialog";
 import { previewImage, type Previews } from "./previews";
 
 export function statusBadge(status: Pack["status"]): HTMLElement {
@@ -143,7 +143,7 @@ function stickerCard(sticker: StickerView, previews: Previews, large: boolean): 
 /** Confirm a permanent sticker delete, showing the affected stickers (SPEC §5). */
 export function confirmStickerDelete(stickers: readonly StickerView[], previews: Previews): Promise<boolean> {
   const single = stickers.length === 1;
-  return confirmDialog(
+  return confirmChoice(
     single ? `Delete sticker #${stickers[0].position}?` : `Delete ${stickers.length} stickers?`,
     [
       el("div", { class: single ? "pm-confirm-one" : "pm-confirm-grid" }, ...stickers.map((s) => stickerCard(s, previews, single))),
@@ -155,57 +155,31 @@ export function confirmStickerDelete(stickers: readonly StickerView[], previews:
           : "These stickers and their files are deleted permanently; the pack is renumbered to fill the gaps.",
       ),
     ],
-    single ? "Delete sticker" : `Delete ${stickers.length} stickers`,
-    true,
-  );
-}
-
-/**
- * Shared shape of the two status confirmations (SPEC §3/§5, owner decision
- * 2026-11-21): a title, the message, and exactly two buttons. The action
- * button is secondary; the safe "keep" button is primary and initially
- * focused, so Enter, Esc and closing the dialog all keep the current status.
- * Resolves true only for the action.
- */
-async function confirmStatusChange(title: string, message: string, actionLabel: string, keepLabel: string): Promise<boolean> {
-  return (
-    (await openDialog<"action" | "keep">(
-      title,
-      [el("p", {}, message)],
-      [
-        { label: actionLabel, value: "action", variant: "secondary" },
-        { label: keepLabel, value: "keep", variant: "primary" },
-      ],
-      "keep",
-      { defaultChoice: "keep" },
-    ).result) === "action"
+    { actionLabel: single ? "Delete sticker" : `Delete ${stickers.length} stickers`, keepLabel: "Cancel", danger: true },
   );
 }
 
 /** Draft→Live confirmation: "Go Live?" with Go Live / Keep Draft (default). */
 export function confirmGoLive(message: string): Promise<boolean> {
-  return confirmStatusChange("Go Live?", message, "Go Live", "Keep Draft");
+  return confirmChoice("Go Live?", [el("p", {}, message)], { actionLabel: "Go Live", keepLabel: "Keep Draft" });
 }
 
-/** Live→Draft warning: "Make Draft?" with Make Draft / Keep Live (default). */
+/** Live→Draft warning: "Revert to Draft?" with Make Draft / Keep Live (default). */
 export function confirmBackToDraft(message: string): Promise<boolean> {
-  return confirmStatusChange("Make Draft?", message, "Make Draft", "Keep Live");
+  return confirmChoice("Revert to Draft?", [el("p", {}, message)], { actionLabel: "Make Draft", keepLabel: "Keep Live" });
 }
 
 /** Hard block for a file that is not a valid sticker (SPEC §5 replacement rules). */
-export function invalidFileDialog(path: string, reason: string): Promise<"editor" | "cancel"> {
-  return openDialog<"editor" | "cancel">(
+export async function invalidFileDialog(path: string, reason: string): Promise<"editor" | "cancel"> {
+  const open = await confirmChoice(
     "Not a valid sticker",
     [
       el("p", {}, el("strong", {}, fileNameOf(path)), ` ${reason}.`),
       el("p", { class: "muted" }, `A sticker must be ${STICKER_RULE}. Open it in the Editor to make it one.`),
     ],
-    [
-      { label: "Cancel", value: "cancel" },
-      { label: "Open in editor", value: "editor", variant: "primary" },
-    ],
-    "cancel",
-  ).result;
+    { actionLabel: "Open in editor", keepLabel: "Cancel" },
+  );
+  return open ? "editor" : "cancel";
 }
 
 /**

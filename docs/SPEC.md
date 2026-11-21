@@ -40,7 +40,7 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
   Telegram). v1: manual toggle both ways; each direction asks for confirmation (owner decision
   2026-11-21): Draft→Live confirms that going Live locks the Short Name, Live→Draft warns.
   Both are in-app dialogs with exactly two buttons and no Cancel. Draft→Live is titled "Go Live?"
-  with **Go Live** and **Keep Draft**; Live→Draft is titled "Make Draft?" with **Make Draft** and
+  with **Go Live** and **Keep Draft**; Live→Draft is titled "Revert to Draft?" with **Make Draft** and
   **Keep Live**. The keep button (Keep Draft / Keep Live) is the default (focused, primary), also on
   Esc and close (owner decision 2026-11-21).
   Live status otherwise changes nothing in v1 beyond the badge and the short-name lock.
@@ -143,6 +143,9 @@ stickers, Missing stickers, and the thumbnail.
   slot at the end of the list; unnumbered file (§4).
 
 ### Pack-level
+- **UI convention**: every two-option confirmation in the app (deletes, Draft/Live, invalid
+  import, creating a Library) uses the one shared in-app dialog: the safe choice is the default
+  (focused, primary), and Esc and close cancel (owner decision 2026-11-21).
 - Create pack (Title → auto Short Name, editable while Draft; new packs are Draft).
 - Pack header: Title always editable; Short Name editable only in Draft; Draft/Live manual
   toggle both ways, each direction confirmed (owner decision 2026-11-21); Draft→Live offers
