@@ -177,6 +177,30 @@ pub fn editor_merge_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ip
     Ok(tauri::ipc::Response::new(merged.to_frame()))
 }
 
+/// Header carrying the crop request's per-layer sizes, transforms and clip
+/// rectangles (JSON array of `CropMeta`); the pixels travel as the raw body.
+pub const CROP_LAYERS_HEADER: &str = "x-crop-layers";
+
+/// Crop raster layers to the crop box (SPEC §6). Request: raw body = the
+/// layers' RGBA bytes concatenated, header `x-crop-layers` = their sizes,
+/// transforms and clips. Response: each clip's RGBA bytes, concatenated.
+#[tauri::command(async)]
+pub fn editor_crop_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let tauri::ipc::InvokeBody::Raw(body) = request.body() else {
+        return Err("crop request must carry raw pixel bytes".to_string());
+    };
+    let meta_json = request
+        .headers()
+        .get(CROP_LAYERS_HEADER)
+        .ok_or_else(|| format!("crop request is missing the {CROP_LAYERS_HEADER} header"))?
+        .to_str()
+        .map_err(|e| format!("crop layer header is not text: {e}"))?;
+    let meta: Vec<editor::crop::CropMeta> =
+        serde_json::from_str(meta_json).map_err(|e| format!("crop layer header is invalid: {e}"))?;
+    let layers = editor::crop::split_crop_layers(&meta, body)?;
+    Ok(tauri::ipc::Response::new(editor::crop::crop(&layers)?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

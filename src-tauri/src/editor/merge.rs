@@ -87,7 +87,7 @@ pub fn split_layers(meta: &[LayerMeta], body: &[u8]) -> Result<Vec<MergeInput>, 
 }
 
 /// The view's transform: translate, then rotate (degrees), then scale.
-fn transform_of(p: &LayerTransform) -> Result<Transform, String> {
+pub(super) fn transform_of(p: &LayerTransform) -> Result<Transform, String> {
     let finite = [p.x, p.y, p.scale_x, p.scale_y, p.rotation].iter().all(|v| v.is_finite());
     if !finite {
         return Err("a layer's transform is not a finite number".to_string());
@@ -96,7 +96,7 @@ fn transform_of(p: &LayerTransform) -> Result<Transform, String> {
 }
 
 /// Straight RGBA8 -> tiny-skia's premultiplied pixmap.
-fn to_pixmap(image: &Rgba) -> Result<Pixmap, String> {
+pub(super) fn to_pixmap(image: &Rgba) -> Result<Pixmap, String> {
     let expected = image.width as usize * image.height as usize * 4;
     if image.pixels.len() != expected {
         return Err(format!(
@@ -121,7 +121,7 @@ fn to_pixmap(image: &Rgba) -> Result<Pixmap, String> {
 /// with the leftover (near-1) scale. tiny-skia's bilinear filter samples only
 /// neighbouring pixels, so shrinking with it aliases; enlarging and rotating
 /// stay with tiny-skia, where bilinear is fine.
-fn shrink_to_drawn_size(layer: &MergeInput) -> Result<MergeInput, String> {
+pub(super) fn shrink_to_drawn_size(layer: &MergeInput) -> Result<MergeInput, String> {
     let t = layer.transform;
     transform_of(&t)?; // reject non-finite transforms before sizing anything
     let (w, h) = (layer.image.width, layer.image.height);
@@ -152,7 +152,7 @@ fn snap(v: f32) -> f32 {
 
 /// True when drawing needs no resampling (integer translation only), so
 /// pixels copy exactly.
-fn is_pixel_aligned(p: &LayerTransform) -> bool {
+pub(super) fn is_pixel_aligned(p: &LayerTransform) -> bool {
     p.scale_x == 1.0 && p.scale_y == 1.0 && p.rotation == 0.0 && p.x.fract() == 0.0 && p.y.fract() == 0.0
 }
 
@@ -162,6 +162,34 @@ pub fn merge(layers: &[MergeInput]) -> Result<PlacedImage, String> {
     if layers.len() < 2 {
         return Err("merging needs at least two layers".to_string());
     }
+    render_layers(layers)
+}
+
+/// Merge's rendering for any number of layers (one is fine).
+pub(super) fn render_layers(layers: &[MergeInput]) -> Result<PlacedImage, String> {
+    let placed = place_layers(layers)?;
+    if placed.width > MAX_MERGE_SIDE || placed.height > MAX_MERGE_SIDE {
+        return Err(format!(
+            "the merged layer would be {}x{}, too large (at most {MAX_MERGE_SIDE} per side)",
+            placed.width, placed.height
+        ));
+    }
+    let canvas = render_window(&placed, placed.left as i32, placed.top as i32, placed.width, placed.height)?;
+    Ok(PlacedImage { x: placed.left as i32, y: placed.top as i32, image: from_pixmap(&canvas) })
+}
+
+/// Layers prepared for drawing, with merge's sampling frame: the integer
+/// document origin (`left`, `top`) and size of their union's bounds.
+pub(super) struct PlacedLayers {
+    layers: Vec<(Pixmap, Transform, bool)>,
+    pub(super) left: f32,
+    pub(super) top: f32,
+    pub(super) width: u32,
+    pub(super) height: u32,
+}
+
+/// Prepare layers (shrink, convert, measure) and fix merge's frame.
+pub(super) fn place_layers(layers: &[MergeInput]) -> Result<PlacedLayers, String> {
     let mut prepared = Vec::with_capacity(layers.len());
     let (mut min_x, mut min_y, mut max_x, mut max_y) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for layer in layers {
@@ -181,30 +209,41 @@ pub fn merge(layers: &[MergeInput]) -> Result<PlacedImage, String> {
     }
     let (left, top) = (snap(min_x).floor(), snap(min_y).floor());
     let (width, height) = ((snap(max_x).ceil() - left) as u32, (snap(max_y).ceil() - top) as u32);
-    if width > MAX_MERGE_SIDE || height > MAX_MERGE_SIDE {
-        return Err(format!(
-            "the merged layer would be {width}x{height}, too large (at most {MAX_MERGE_SIDE} per side)"
-        ));
-    }
+    Ok(PlacedLayers { layers: prepared, left, top, width, height })
+}
+
+/// Draw the layers, bottom to top, into a pixmap covering the document
+/// window with top-left (`win_x`, `win_y`) and the given size. Only a
+/// whole-pixel translation distinguishes windows, so a pixel is sampled the
+/// same whichever window shows it. Merge's window is its whole bounds
+/// (`left`, `top`); crop's is just its clip.
+pub(super) fn render_window(placed: &PlacedLayers, win_x: i32, win_y: i32, width: u32, height: u32) -> Result<Pixmap, String> {
     let mut canvas = Pixmap::new(width.max(1), height.max(1))
-        .ok_or_else(|| "cannot allocate the merged layer".to_string())?;
-    for (pixmap, transform, aligned) in &prepared {
-        let paint = PixmapPaint {
-            quality: if *aligned { FilterQuality::Nearest } else { FilterQuality::Bilinear },
-            ..PixmapPaint::default()
-        };
-        canvas.draw_pixmap(0, 0, pixmap.as_ref(), &paint, transform.post_translate(-left, -top), None);
+        .ok_or_else(|| "cannot allocate the rendered layer".to_string())?;
+    for (pixmap, transform, aligned) in &placed.layers {
+        draw_placed(&mut canvas, pixmap, *transform, *aligned, (win_x as f32, win_y as f32));
     }
+    Ok(canvas)
+}
+
+/// Draw a layer source-over onto `canvas`, whose top-left sits at `origin`
+/// (whole document pixels): the one placement merge and crop share.
+pub(super) fn draw_placed(canvas: &mut Pixmap, pixmap: &Pixmap, transform: Transform, aligned: bool, origin: (f32, f32)) {
+    let paint = PixmapPaint {
+        quality: if aligned { FilterQuality::Nearest } else { FilterQuality::Bilinear },
+        ..PixmapPaint::default()
+    };
+    canvas.draw_pixmap(0, 0, pixmap.as_ref(), &paint, transform.post_translate(-origin.0, -origin.1), None);
+}
+
+/// tiny-skia's premultiplied pixmap -> straight RGBA8.
+pub(super) fn from_pixmap(canvas: &Pixmap) -> Rgba {
     let mut pixels = Vec::with_capacity(canvas.pixels().len() * 4);
     for px in canvas.pixels() {
         let c = px.demultiply();
         pixels.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
     }
-    Ok(PlacedImage {
-        x: left as i32,
-        y: top as i32,
-        image: Rgba { width: canvas.width(), height: canvas.height(), pixels },
-    })
+    Rgba { width: canvas.width(), height: canvas.height(), pixels }
 }
 
 #[cfg(test)]

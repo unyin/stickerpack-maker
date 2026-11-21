@@ -56,6 +56,7 @@ pub fn run() {
             commands::editor_probe_image,
             commands::editor_import_image,
             commands::editor_merge_layers,
+            commands::editor_crop_layers,
             pack_commands::list_packs,
             pack_commands::suggest_short_name,
             pack_commands::create_pack,

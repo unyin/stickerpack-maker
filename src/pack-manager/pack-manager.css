@@ -48,22 +48,6 @@
   font-size: 14px;
 }
 
-button.danger {
-  background: var(--danger-bg);
-  color: var(--danger-text);
-  border: 1px solid var(--danger-border);
-  padding: 8px 18px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-button.secondary:disabled,
-button.danger:disabled {
-  color: var(--muted);
-  cursor: default;
-  opacity: 0.7;
-}
-
 button.pm-link {
   background: none;
   border: none;
