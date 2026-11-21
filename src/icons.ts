@@ -13,6 +13,8 @@ const PATHS = {
   copy: ["M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1z", "M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"],
   /** Done: a check mark. */
   check: ["M5 12l5 5L20 7"],
+  /** Close: an X. */
+  close: ["M6 6l12 12", "M18 6L6 18"],
 } as const;
 
 /** "Open in explorer" with the opens-another-program icon at the end (owner, 2026-11-21); used by every Open in explorer button. */

@@ -422,14 +422,30 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
 
   // ---- Render ----
 
-  /** A banner's Dismiss button: `clear` resets its state, then re-render. */
-  function dismissButton(clear: () => void): HTMLElement {
-    const close = el("button", { class: "pm-link", type: "button" }, "Dismiss");
-    close.addEventListener("click", () => {
+  /**
+   * A dismissible banner: an X on the left (owner, 2026-11-22: the Dismiss
+   * link alone sits far away on the right), the message, then Dismiss.
+   * Either one runs `clear` to reset the banner's state, then re-renders.
+   * The live-region role sits on the message only, so a screen reader
+   * announces the message, not the two Dismiss controls.
+   */
+  function dismissibleBanner(
+    kind: "info" | "warn",
+    role: "status" | "alert",
+    body: Array<Node | string>,
+    clear: () => void,
+    extraClass = "",
+  ): HTMLElement {
+    const dismiss = () => {
       clear();
       render();
-    });
-    return close;
+    };
+    const close = el("button", { class: "pm-banner-close", type: "button", title: "Dismiss", "aria-label": "Dismiss this message" }, icon("close"));
+    const link = el("button", { class: "pm-link", type: "button" }, "Dismiss");
+    close.addEventListener("click", dismiss);
+    link.addEventListener("click", dismiss);
+    const classes = ["pm-banner", `pm-banner-${kind}`, extraClass].filter(Boolean).join(" ");
+    return el("div", { class: classes }, close, el("div", { class: "pm-banner-body", role }, ...body), link);
   }
 
   function renderBanners(): void {
@@ -439,31 +455,32 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     const missing = missingSummary(view.stickers.filter((s) => s.missing).length);
     if (missing) items.push(el("div", { class: "pm-banner pm-banner-warn", role: "status" }, missing));
     if (notice) {
-      items.push(
-        el("div", { class: "pm-banner pm-banner-info", role: "status" }, el("span", {}, notice), dismissButton(() => (notice = ""))),
-      );
+      items.push(dismissibleBanner("info", "status", [notice], () => (notice = "")));
     }
     if (rejected.length) {
       items.push(
-        el(
-          "div",
-          { class: "pm-banner pm-banner-warn pm-rejected", role: "alert" },
-          el("strong", {}, "Not added:"),
-          el(
-            "ul",
-            {},
-            ...rejected.map((r) => {
-              const row = el("li", {}, el("span", { class: "pm-mono" }, fileNameOf(r.path)), ` ${r.reason}. `);
-              // Only files the Editor can import get the button.
-              if (editorCanImport(r.path)) {
-                const open = el("button", { class: "pm-link", type: "button" }, "Open in editor");
-                open.addEventListener("click", () => host.openInEditor(r.path));
-                row.append(open);
-              }
-              return row;
-            }),
-          ),
-          dismissButton(() => (rejected = [])),
+        dismissibleBanner(
+          "warn",
+          "alert",
+          [
+            el("strong", {}, "Not added:"),
+            el(
+              "ul",
+              {},
+              ...rejected.map((r) => {
+                const row = el("li", {}, el("span", { class: "pm-mono" }, fileNameOf(r.path)), ` ${r.reason}. `);
+                // Only files the Editor can import get the button.
+                if (editorCanImport(r.path)) {
+                  const open = el("button", { class: "pm-link", type: "button" }, "Open in editor");
+                  open.addEventListener("click", () => host.openInEditor(r.path));
+                  row.append(open);
+                }
+                return row;
+              }),
+            ),
+          ],
+          () => (rejected = []),
+          "pm-rejected",
         ),
       );
     }
@@ -485,7 +502,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     if (document.activeElement !== shortInput) shortInput.value = pack.shortName;
     shortInput.disabled = live;
     shortInput.title = live ? SHORT_NAME_LOCKED : "Editable while Draft; renames the pack folder";
-    shortNote.textContent = live ? "🔒 Locked while Live" : "";
+    shortNote.textContent = live ? "🔒 Locked" : ""; // short label (owner, 2026-11-22); the tooltip has the reason
     shortNote.title = live ? SHORT_NAME_LOCKED : ""; // the full reason, even if the note is ever cut off
     badgeHost.replaceChildren(statusBadge(pack.status));
     // Labels match the dialogs they open ("Go Live?" / "Revert to Draft?").

@@ -181,11 +181,11 @@ stickers, Missing stickers, and the thumbnail.
   pack's view shows its own); each pack has **Open in explorer**, which opens the pack's
   folder (owner decisions 2026-11-21).
 - Pack header: **← Pack list** back button; Title always editable; Short Name editable only
-  in Draft, with "🔒 Locked while Live" beside its label so the header never changes height
-  (owner decision 2026-11-22); the Draft/Live badge and its button sit right after the Short
-  Name, labelled **Go Live** / **Revert to Draft** like the dialogs they open (owner decision
-  2026-11-21). Draft/Live manual
-  toggle both ways, each direction confirmed (owner decision 2026-11-21); Draft→Live offers
+  in Draft, with "🔒 Locked" beside its label (the full reason as its tooltip) so the header
+  never changes height (owner decisions 2026-11-22); the Draft/Live badge and its button sit
+  right after the Short Name, labelled **Go Live** / **Revert to Draft** like the dialogs they
+  open (owner decision 2026-11-21). Draft/Live manual toggle both ways, each direction
+  confirmed (owner decision 2026-11-21); Draft→Live offers
   Go Live / Keep Draft, Keep Draft by default; Live→Draft offers Make Draft / Keep Live, Keep Live
   by default (owner decision 2026-11-21).
 - **Bulk import**: drag-drop multiple images onto a pack, or pick them with Add images. Same
@@ -193,6 +193,9 @@ stickers, Missing stickers, and the thumbnail.
   before "sticker10"), because Windows hands dropped files over in its own drag order, not
   Explorer's view order (owner decision 2026-11-21); invalid files rejected per-file with an
   "open in editor" option. Imported stickers get no emoji; empty-emoji stickers are flagged.
+- Pack-view messages that stay until dismissed (notices such as "Checked the pack folder…",
+  and the "Not added" list) have an **X** on the left as well as **Dismiss** on the right
+  (owner decision 2026-11-22).
 - Desync checks on pack open + manual refresh only, never on app start (§4).
 - 120-sticker warning; pack deletion semantics per §3.
 
