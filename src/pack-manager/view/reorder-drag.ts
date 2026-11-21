@@ -20,16 +20,38 @@ function stickerTiles(grid: HTMLElement): HTMLElement[] {
   return Array.from(grid.querySelectorAll<HTMLElement>(".pm-tile[data-id]"));
 }
 
+/**
+ * A faded copy of the sticker's image that follows the cursor while dragging
+ * (owner, 2026-11-21), so the sticker feels picked up. Never hit-tested.
+ */
+function dragGhost(tile: HTMLElement | undefined): { move(x: number, y: number): void; remove(): void } {
+  const art = tile?.querySelector<HTMLElement>(".pm-tile-img, .pm-missing-art");
+  const ghost = document.createElement("div");
+  ghost.className = "pm-drag-ghost";
+  ghost.setAttribute("aria-hidden", "true");
+  if (art) ghost.append(art.cloneNode(true));
+  document.body.append(ghost);
+  return {
+    // Centred under the cursor.
+    move: (x, y) => (ghost.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`),
+    remove: () => ghost.remove(),
+  };
+}
+
 /** Start dragging a sticker's tile from a pointerdown on it. */
 export function startReorderDrag(e: PointerEvent, stickerId: number, host: ReorderDragHost): void {
   if (!host.enabled() || e.button !== 0) return;
   e.preventDefault();
   const { grid } = host;
   const from = host.indexOf(stickerId);
-  stickerTiles(grid)[from]?.classList.add("dragging");
+  const tile = stickerTiles(grid)[from];
+  tile?.classList.add("dragging");
+  const ghost = dragGhost(tile);
+  ghost.move(e.clientX, e.clientY);
   let slot: number | null = null;
   grid.setPointerCapture(e.pointerId);
   const move = (m: PointerEvent) => {
+    ghost.move(m.clientX, m.clientY);
     const current = stickerTiles(grid);
     slot = slotAt(current.map((t) => t.getBoundingClientRect()), m.clientX, m.clientY);
     for (const t of current) t.classList.remove("drop-before", "drop-after");
@@ -42,6 +64,7 @@ export function startReorderDrag(e: PointerEvent, stickerId: number, host: Reord
     grid.removeEventListener("pointerup", end);
     grid.removeEventListener("pointercancel", end);
     if (grid.hasPointerCapture(u.pointerId)) grid.releasePointerCapture(u.pointerId);
+    ghost.remove();
     for (const t of stickerTiles(grid)) t.classList.remove("drop-before", "drop-after", "dragging");
     const position = u.type === "pointerup" && slot !== null ? dropPosition(from, slot) : null;
     if (position !== null) host.drop(stickerId, from, position);

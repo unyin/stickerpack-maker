@@ -23,6 +23,7 @@ import {
   thumbnailFormat,
 } from "../src/pack-manager/model/messages";
 import { dropPosition, escapeAction, selectionActive, slotAt, toggleMode } from "../src/pack-manager/model/modes";
+import { importOrder } from "../src/pack-manager/model/import-order";
 import {
   clickSticker,
   clickThumbnail,
@@ -258,4 +259,19 @@ test("the status toggle is confirmed both ways, and each text names the Short Na
   expect(GO_LIVE_CONFIRMATION).toContain("exists on Telegram");
   expect(REVERT_TO_DRAFT_WARNING).toContain("unlocks the Short Name");
   expect(GO_LIVE_CONFIRMATION).not.toBe(REVERT_TO_DRAFT_WARNING);
+});
+
+test("importOrder: natural filename order whatever order Windows hands the files over", () => {
+  const dropped = ["C:\\in\\sticker10.png", "C:\\in\\sticker2.png", "C:\\in\\Sticker1.webp", "C:\\in\\a.png"];
+  expect(importOrder(dropped)).toEqual(["C:\\in\\a.png", "C:\\in\\Sticker1.webp", "C:\\in\\sticker2.png", "C:\\in\\sticker10.png"]);
+});
+
+test("importOrder: sorts by file name, not by folder", () => {
+  expect(importOrder(["C:\\z\\01.png", "C:\\a\\02.png"])).toEqual(["C:\\z\\01.png", "C:\\a\\02.png"]);
+});
+
+test("importOrder: leaves the input untouched", () => {
+  const input = ["b.png", "a.png"];
+  importOrder(input);
+  expect(input).toEqual(["b.png", "a.png"]);
 });

@@ -75,6 +75,7 @@ pub fn run() {
             pack_commands::send_to_pack,
             pack_commands::sticker_file_path,
             pack_commands::reveal_sticker,
+            pack_commands::reveal_pack,
             pack_commands::reveal_thumbnail,
             pack_commands::sticker_image,
             pack_commands::thumbnail_image,

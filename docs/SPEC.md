@@ -103,15 +103,29 @@ stickers, Missing stickers, and the thumbnail.
   selection. One selected → detail panel; several → aggregate panel.
 - **Reorder** (toggle button in the pack toolbar): drag to reorder, one sticker at a time;
   selection shortcuts inactive; Esc or the toggle exits. Reorder renames files on disk (§4).
+  Reorder mode is obvious at a glance: every sticker tile turns a theme-matched green, and a
+  faded copy of the dragged sticker follows the cursor (owner decision 2026-11-21).
 - The two modes are mutually exclusive; the toggle is always visible.
+- Sticker tiles have one fixed size and show position, preview and warning flags only; the
+  Emoji String shows in the detail panel, not on the tile (owner decision 2026-11-21).
+- The side panel is full-height and always beside the grid, at every window width; the grid
+  scrolls on its own (owner decision 2026-11-21).
 
 ### Detail panel (single selection)
 - Large preview; metadata: position, format, dimensions, file size.
-- **Emoji String**: inline editable field (type, or Win+. for the Windows emoji panel),
-  adjacent one-click **copy** button, live 1–20 count warning.
-- Actions: **Edit** (opens the flattened image in the Editor); **Replace** (preserves
+- **Emoji String**: inline editable two-row box that shows all 20 emoji at once (type, or
+  Win+. for the Windows emoji panel); every space is stripped when it is saved and the count
+  ignores spaces; an adjacent small square icon-only **copy** button; live 1–20 count
+  warning (owner decision 2026-11-21).
+- Actions: **Edit** first asks **Edit / Replace… / Cancel** (Cancel is the safe default):
+  Edit opens the flattened image in the Editor, Replace runs the Replace flow below (owner
+  decision 2026-11-21). Opening in the Editor while it has unsaved changes asks first, in the
+  shared dialog: "The editor has unsaved changes. Do you want to discard these or continue
+  editing?" (Discard / Keep editing, Keep editing by default); either way the view then
+  switches to the Editor, which opens the sticker only after Discard. **Replace** (preserves
   position + emoji; validated drop-in or via Editor, §5 replacement rules below);
-  **Send to pack…**; **Open in explorer** (folder opens with the file selected);
+  **Send to pack…**; **Open in explorer** (folder opens with the file selected; the button
+  ends with an "opens in another program" icon, as every Open in explorer button does);
   **Delete** (confirmation dialog showing preview + emoji, then permanent; Delete key
   shortcut). No double-click behavior in v1.
 
@@ -152,12 +166,19 @@ stickers, Missing stickers, and the thumbnail.
 ### Pack-level
 - **UI conventions**: the app-wide dialog rule is in §2.
 - Create pack (Title → auto Short Name, editable while Draft; new packs are Draft).
-- Pack header: Title always editable; Short Name editable only in Draft; Draft/Live manual
+- Pack list: each pack has **Open in explorer**, which opens the pack's folder (owner
+  decision 2026-11-21).
+- Pack header: **← Pack list** back button; Title always editable; Short Name editable only
+  in Draft; the Draft/Live badge and its button sit right after the Short Name, labelled
+  **Go Live** / **Revert to Draft** like the dialogs they open (owner decision 2026-11-21);
+  **Refresh** has a refresh icon before its label. Draft/Live manual
   toggle both ways, each direction confirmed (owner decision 2026-11-21); Draft→Live offers
   Go Live / Keep Draft, Keep Draft by default; Live→Draft offers Make Draft / Keep Live, Keep Live
   by default (owner decision 2026-11-21).
-- **Bulk import**: drag-drop multiple images onto a pack. Same validity rule as drop-in —
-  valid files added as-is in drop order; invalid files rejected per-file with an
+- **Bulk import**: drag-drop multiple images onto a pack, or pick them with Add images. Same
+  validity rule as drop-in — valid files added as-is in natural filename order ("sticker2"
+  before "sticker10"), because Windows hands dropped files over in its own drag order, not
+  Explorer's view order (owner decision 2026-11-21); invalid files rejected per-file with an
   "open in editor" option. Imported stickers get no emoji; empty-emoji stickers are flagged.
 - Desync checks on pack open + manual refresh only, never on app start (§4).
 - 120-sticker warning; pack deletion semantics per §3.
@@ -323,6 +344,10 @@ stickers, Missing stickers, and the thumbnail.
 - Editor: hold Shift while moving a layer to snap to whole pixels or to a grid. Note:
   Shift+click already toggles a layer in or out of the selection, so a Shift-drag must
   not also toggle it; and the Editor has no grid yet (owner, 2026-11-21).
+- Pack Manager: a button next to the Emoji String field that opens an emoji picker for easy
+  selection (owner, 2026-11-21).
+- v3 idea: in Reorder mode the sticker images wiggle (as on phone home screens), instead of
+  or as well as the green tint (owner, 2026-11-21: animations are a bigger job).
 
 ## 10. Draft work packages (for review — not yet filed as issues)
 

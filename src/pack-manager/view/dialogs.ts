@@ -178,6 +178,31 @@ export function confirmRevertToDraft(): Promise<boolean> {
   return confirmChoice("Revert to Draft?", [el("p", {}, REVERT_TO_DRAFT_WARNING)], { actionLabel: "Make Draft", keepLabel: "Keep Live" });
 }
 
+/** What a sticker's Edit button does next (owner decision 2026-11-21). */
+export type EditChoice = "edit" | "replace" | "cancel";
+
+/**
+ * Edit asks first: open the sticker in the Editor, run the Replace flow
+ * (pick a file for this slot, no Editor), or cancel. Cancel is the safe
+ * choice: focused and primary, and what Esc chooses (SPEC §2 conventions).
+ */
+export function editChoiceDialog(position: number): Promise<EditChoice> {
+  return openDialog<EditChoice>(
+    `Edit sticker #${position}?`,
+    [
+      el("p", {}, "Edit opens this sticker in the Editor."),
+      el("p", {}, "Replace puts another image file in this slot, keeping its position and emoji."),
+    ],
+    [
+      { label: "Edit", value: "edit" },
+      { label: "Replace…", value: "replace" },
+      { label: "Cancel", value: "cancel", variant: "primary" },
+    ],
+    "cancel",
+    { defaultChoice: "cancel" },
+  ).result;
+}
+
 /** Hard block for a file that is not a valid sticker (SPEC §5 replacement rules). Resolves true to open it in the Editor. */
 export function invalidFileDialog(path: string, reason: string): Promise<boolean> {
   return confirmChoice(

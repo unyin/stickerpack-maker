@@ -318,6 +318,17 @@ pub fn reveal_sticker(sticker_id: i64, config: State<'_, SharedConfig>, lock: St
     reveal(with_library(&config, &lock, |conn, dir| desync::sticker_file_path(conn, dir, sticker_id))?)
 }
 
+/// Open a pack's folder in the file explorer (pack list, SPEC §5). Reads
+/// the database only, like the rest of the pack list.
+#[tauri::command(async)]
+pub fn reveal_pack(pack_id: i64, config: State<'_, SharedConfig>, lock: State<'_, LibraryLock>) -> Result<(), String> {
+    let dir = with_library(&config, &lock, |conn, dir| {
+        library::schema::load_pack(conn, pack_id).map(|pack| packs::pack_dir(dir, &pack))
+    })?;
+    tauri_plugin_opener::open_path(&dir, None::<&str>)
+        .map_err(|e| format!("cannot open {} in the file explorer: {e}", dir.display()))
+}
+
 #[tauri::command(async)]
 pub fn reveal_thumbnail(pack_id: i64, config: State<'_, SharedConfig>, lock: State<'_, LibraryLock>) -> Result<(), String> {
     reveal(with_library(&config, &lock, |conn, dir| desync::thumbnail_file_path(conn, dir, pack_id))?)

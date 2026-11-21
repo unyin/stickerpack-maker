@@ -111,7 +111,7 @@ button.pm-link {
 
 .pm-pack-row {
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  grid-template-columns: 1fr auto auto auto auto;
   align-items: center;
   gap: 14px;
   padding: 10px 14px;
@@ -145,10 +145,18 @@ button.pm-link {
 
 /* ---- Pack view ---- */
 
+/* The open pack fills the content area: the grid scrolls on its own and the
+   panel stays full-height beside it at every window width (owner,
+   2026-11-21). The window's minimum width (900 px) fits both. */
+.pm:has(> .pm-pack) {
+  height: 100%;
+}
+
 .pm-pack {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  height: 100%;
 }
 
 .pm-pack.busy {
@@ -178,11 +186,12 @@ button.pm-link {
   min-width: 260px;
 }
 
+/* Right after the Short Name it belongs with (owner, 2026-11-21). */
 .pm-header-status {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
+  min-height: 38px;
 }
 
 .pm-toolbar {
@@ -196,6 +205,13 @@ button.pm-link {
   background: var(--accent);
   color: var(--accent-text);
   border-color: var(--accent);
+}
+
+/* Without this, button.secondary:hover (more specific) swaps in --bg and the
+   text vanishes in the dark theme. */
+.pm-toggle[aria-pressed="true"]:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 .pm-mode-hint {
@@ -250,10 +266,12 @@ button.pm-link {
 }
 
 .pm-body {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-rows: minmax(0, 1fr);
   gap: 16px;
-  align-items: start;
   border-radius: 12px;
   outline: 2px dashed transparent;
   outline-offset: 4px;
@@ -265,13 +283,18 @@ button.pm-link {
 
 /* ---- Grid ---- */
 
+/* Tiles have one fixed size (owner, 2026-11-21); the padding leaves room for
+   the drop markers beside the edge tiles. */
 .pm-grid {
   list-style: none;
-  padding: 0;
+  padding: 4px 10px 10px;
   margin: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fill, 132px);
+  grid-auto-rows: 164px;
+  align-content: start;
   gap: 10px;
+  overflow-y: auto;
   user-select: none;
 }
 
@@ -286,7 +309,6 @@ button.pm-link {
   border: 2px solid var(--border);
   border-radius: 10px;
   cursor: default;
-  min-height: 150px;
 }
 
 .pm-tile.selected {
@@ -303,9 +325,22 @@ button.pm-link {
   border-color: var(--accent-ink);
 }
 
+/* Reorder mode is obvious at a glance: every sticker tile turns green. */
 .pm-pack.reorder .pm-tile[data-id] {
   cursor: grab;
   touch-action: none;
+  background: var(--reorder-bg);
+  border-color: var(--reorder-border);
+}
+
+/* The faded sticker that follows the cursor (reorder-drag.ts). */
+.pm-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 10;
+  pointer-events: none;
+  opacity: 0.6;
 }
 
 .pm-tile.dragging {
@@ -344,20 +379,13 @@ button.pm-link {
   object-fit: contain;
 }
 
-.pm-tile-emoji {
-  font-size: 16px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-height: 1.2em;
-}
-
 .pm-flags {
   display: flex;
   gap: 4px;
-  flex-wrap: wrap;
   justify-content: center;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .pm-missing-art,
@@ -405,8 +433,7 @@ button.pm-link {
 /* ---- Panel ---- */
 
 .pm-panel {
-  position: sticky;
-  top: 0;
+  overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -468,16 +495,33 @@ button.pm-link {
 .pm-emoji-row {
   display: flex;
   gap: 6px;
-  align-items: center;
+  align-items: flex-start;
 }
 
+/* Two rows of ten: all 20 emoji show at once (owner, 2026-11-21). */
 .pm-emoji-input {
   flex: 1;
+  min-width: 0;
   font-size: 18px;
+  line-height: 1.4;
+  resize: none;
 }
 
+/* Small square icon button. */
 .pm-copy {
-  padding: 7px 12px;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.pm-emoji-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .pm-emoji-count {
@@ -599,16 +643,6 @@ button.pm-link {
 
 .pm-new-pack > button {
   align-self: flex-start;
-}
-
-@media (max-width: 980px) {
-  .pm-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .pm-panel {
-    position: static;
-  }
 }
 
 .pm .message:empty,

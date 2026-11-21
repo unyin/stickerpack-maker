@@ -121,6 +121,7 @@ export const sendToPack = (stickerIds: number[], targetPackId: number, deleteOri
 export const stickerFilePath = (stickerId: number) => invoke<string>("sticker_file_path", { stickerId });
 export const revealSticker = (stickerId: number) => invoke<void>("reveal_sticker", { stickerId });
 export const revealThumbnail = (packId: number) => invoke<void>("reveal_thumbnail", { packId });
+export const revealPack = (packId: number) => invoke<void>("reveal_pack", { packId });
 export const stickerImage = (stickerId: number) => invoke<ArrayBuffer>("sticker_image", { stickerId });
 export const thumbnailImage = (packId: number) => invoke<ArrayBuffer>("thumbnail_image", { packId });
 

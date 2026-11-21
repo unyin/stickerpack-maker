@@ -1,6 +1,7 @@
 // The pack view's side panel (SPEC §5): one selection -> panel paradigm for
 // stickers, Missing stickers, and the thumbnail. Single selection shows the
 // detail panel, several the aggregate panel, the thumbnail slot its own.
+import { icon } from "../../icons";
 import { el } from "../../ui";
 import type { PackView, StickerView } from "../api";
 import { emojiCount, emojiWarning, EMOJI_MAX } from "../model/emoji";
@@ -27,8 +28,8 @@ export interface PanelActions {
   revealThumbnail(): void;
 }
 
-function action(label: string, onClick: () => void, reason: string | null, title: string, variant = "secondary"): HTMLButtonElement {
-  const button = el("button", { class: variant, type: "button" }, label) as HTMLButtonElement;
+function action(label: string | Node[], onClick: () => void, reason: string | null, title: string, variant = "secondary"): HTMLButtonElement {
+  const button = el("button", { class: variant, type: "button" }, ...(typeof label === "string" ? [label] : label)) as HTMLButtonElement;
   button.addEventListener("click", onClick);
   button.disabled = reason !== null;
   button.title = reason ?? title;
@@ -37,6 +38,11 @@ function action(label: string, onClick: () => void, reason: string | null, title
 
 function meta(rows: Array<[string, string]>): HTMLElement {
   return el("dl", { class: "pm-meta" }, ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+}
+
+/** "Open in explorer" with the opens-another-program icon at the end (owner, 2026-11-21). */
+export function explorerLabel(): Node[] {
+  return [document.createTextNode("Open in explorer"), icon("external")];
 }
 
 /** Empty panel: how selection and import work. */
@@ -58,13 +64,16 @@ export function detailPanel(sticker: StickerView, previews: Previews, actions: P
     ? el("div", { class: "pm-missing-art large" }, "File Missing")
     : previewImage(previews.sticker(sticker.id, sticker.format), `Sticker ${sticker.position}`, "pm-detail-img");
 
-  const input = el("input", {
+  // A two-row box that shows all 20 emoji at once (owner, 2026-11-21). No
+  // line breaks: Enter finishes, and the core strips every whitespace.
+  const input = el("textarea", {
     class: "pm-input pm-emoji-input",
-    type: "text",
-    value: sticker.emojiString,
+    rows: "2",
+    spellcheck: "false",
     placeholder: "Type emoji, or Win+. for the emoji panel",
     "aria-label": "Emoji String",
-  }) as HTMLInputElement;
+  }) as HTMLTextAreaElement;
+  input.value = sticker.emojiString;
   const count = el("span", { class: "pm-emoji-count", "aria-live": "polite" });
   const warning = el("p", { class: "pm-warning-text", "aria-live": "polite" });
   const live = () => {
@@ -77,14 +86,21 @@ export function detailPanel(sticker: StickerView, previews: Previews, actions: P
   input.addEventListener("input", live);
   input.addEventListener("change", () => void actions.saveEmoji(sticker, input.value));
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") input.blur();
+    if (e.key === "Enter") {
+      e.preventDefault(); // no line breaks in an Emoji String
+      input.blur();
+    }
   });
   live();
-  const copy = el("button", { class: "secondary pm-copy", type: "button", title: "Copy the Emoji String exactly" }, "Copy") as HTMLButtonElement;
+  const copy = el(
+    "button",
+    { class: "secondary pm-copy", type: "button", title: "Copy to clipboard", "aria-label": "Copy the Emoji String to the clipboard" },
+    icon("copy"),
+  ) as HTMLButtonElement;
   copy.addEventListener("click", () => {
     void navigator.clipboard.writeText(input.value).then(
-      () => flash(copy, "Copied"),
-      () => flash(copy, "Copy failed"),
+      () => flash(copy, "Copied", true),
+      () => flash(copy, "Copy failed", false),
     );
   });
 
@@ -116,15 +132,15 @@ export function detailPanel(sticker: StickerView, previews: Previews, actions: P
       ["File", sticker.fileName],
     ]),
     el("label", { class: "field-label" }, "Emoji String"),
-    el("div", { class: "pm-emoji-row" }, input, copy, count),
-    warning,
+    el("div", { class: "pm-emoji-row" }, input, copy),
+    el("div", { class: "pm-emoji-status" }, count, warning),
     el(
       "div",
       { class: "actions pm-panel-actions" },
       action("Edit", () => actions.edit(sticker), missingReason, "Open this sticker's image in the Editor"),
       action("Replace…", () => actions.replace(sticker), null, "Replace the image with a valid sticker file; position and emoji stay"),
       action("Send to pack…", () => actions.send([sticker]), sendBlocker([sticker]), "Copy or move this sticker to another pack"),
-      action("Open in explorer", () => actions.reveal(sticker), missingReason, "Open the pack folder with this file selected"),
+      action(explorerLabel(), () => actions.reveal(sticker), missingReason, "Open the pack folder in Explorer with this file selected"),
       action("Delete", () => actions.remove([sticker]), null, "Delete this sticker (Delete key)", "danger"),
     ),
   );
@@ -186,14 +202,19 @@ export function thumbnailPanel(view: PackView, previews: Previews, actions: Pane
       { class: "actions pm-panel-actions" },
       action(name ? "Replace…" : "Create…", () => {}, THUMBNAIL_SEAM, ""),
       ...(name ? [action("Delete", () => {}, THUMBNAIL_SEAM, "", "danger")] : []),
-      action("Open in explorer", () => actions.revealThumbnail(), file ? null : "There is no thumbnail file to show", "Open the pack folder with the thumbnail selected"),
+      action(explorerLabel(), () => actions.revealThumbnail(), file ? null : "There is no thumbnail file to show", "Open the pack folder in Explorer with the thumbnail selected"),
     ),
   );
   return el("div", { class: "pm-thumb-panel" }, ...body);
 }
 
-function flash(button: HTMLButtonElement, text: string): void {
-  const label = button.textContent;
-  button.textContent = text;
-  setTimeout(() => (button.textContent = label), 1200);
+/** Briefly show the copy result: a check mark on success, and the text as tooltip either way. */
+function flash(button: HTMLButtonElement, text: string, ok: boolean): void {
+  const title = button.title;
+  button.title = text;
+  if (ok) button.replaceChildren(icon("check"));
+  setTimeout(() => {
+    button.title = title;
+    button.replaceChildren(icon("copy"));
+  }, 1200);
 }

@@ -40,6 +40,7 @@ import {
   type SizeTool,
 } from "../editor/view/geometry";
 import { EditorStage } from "../editor/view/stage";
+import { confirmChoice } from "../dialog";
 import { el, errorMessage, withMessage } from "../ui";
 
 let root: HTMLElement | null = null;
@@ -95,7 +96,7 @@ function buildEditor(): HTMLElement {
   // Labelled with the actual box size in refresh(): it is capped at the canvas.
   const cropButton = button("Crop", () => run(cropToBox));
   const resetViewButton = button("Reset view", () => stage?.fit());
-  const closeButton = button("Close", () => run(closeSession));
+  const closeButton = button("Close", () => run(async () => void (await closeSession())));
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
@@ -291,20 +292,18 @@ function buildEditor(): HTMLElement {
     refresh();
   }
 
-  async function closeSession(): Promise<void> {
-    if (!session) return;
-    if (session.isDirty) {
-      const discard = await ask("Close the editor and discard your unsaved changes?", {
-        title: "Unsaved changes",
-        kind: "warning",
-        okLabel: "Discard",
-        cancelLabel: "Keep editing",
-      });
-      if (!discard) return;
-    }
+  /**
+   * End the session, asking first when it has unsaved changes (Close, and
+   * opening another image from the Pack Manager). Resolves false when the
+   * user keeps editing, so the session stays.
+   */
+  async function closeSession(): Promise<boolean> {
+    if (!session) return true;
+    if (session.isDirty && !(await confirmDiscard())) return false;
     stage?.destroy();
     stage = null;
     session = null;
+    return true;
   }
 
   /**
@@ -451,28 +450,40 @@ function buildEditor(): HTMLElement {
   });
 
   // Pack Manager hook (SPM-3), see openFileInEditor below.
-  openFileHook = (path) =>
+  openFileHook = (path, showEditor) =>
     run(async () => {
-      if (session) await closeSession(); // warns on unsaved changes
-      if (!session) await openImage(path);
+      const closed = await closeSession(); // warns on unsaved changes
+      showEditor(); // either way: Keep editing shows the open image
+      if (closed) await openImage(path);
     });
 
   refresh();
   return view;
 }
 
-let openFileHook: ((path: string) => Promise<void>) | null = null;
+let openFileHook: ((path: string, showEditor: () => void) => Promise<void>) | null = null;
 
 /**
  * Open the image at `path` in the Editor, as Open image would (import cap
  * dialog included): the Pack Manager's Edit and "open in editor" (SPM-3).
- * One session at a time: an open session is closed first, which warns on
- * unsaved changes; keeping it cancels the open. Show the Editor view first
- * so the canvas can measure itself.
+ * One session at a time. In order (owner decision 2026-11-21): an open
+ * session with unsaved changes asks first, while the caller's view is still
+ * showing; then `showEditor` switches to the Editor either way (the canvas
+ * must be on screen to measure itself); then, unless the user kept editing,
+ * the file opens.
  */
-export function openFileInEditor(path: string): Promise<void> {
-  renderEditor();
-  return openFileHook ? openFileHook(path) : Promise.resolve();
+export function openFileInEditor(path: string, showEditor: () => void): Promise<void> {
+  renderEditor(); // builds the Editor once, which installs the hook
+  return openFileHook ? openFileHook(path, showEditor) : Promise.resolve();
+}
+
+/** The unsaved-changes question, worded for both Close and opening another image. */
+function confirmDiscard(): Promise<boolean> {
+  return confirmChoice(
+    "Unsaved changes",
+    [el("p", {}, "The editor has unsaved changes. Do you want to discard these or continue editing?")],
+    { actionLabel: "Discard", keepLabel: "Keep editing", danger: true },
+  );
 }
 
 function button(label: string, onClick: () => void, variant?: "primary"): HTMLButtonElement {

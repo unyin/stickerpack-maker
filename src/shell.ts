@@ -36,10 +36,9 @@ export function renderShell(
     else renderSettings(content, state, onChanged);
   }
 
-  /** Pack Manager -> Editor: switch tabs, then open the file there. */
+  /** Pack Manager -> Editor: the Editor asks about unsaved changes, then switches tabs and opens the file. */
   function openInEditor(path: string): void {
-    show("editor");
-    void openFileInEditor(path);
+    void openFileInEditor(path, () => show("editor"));
   }
 
   for (const item of NAV) {

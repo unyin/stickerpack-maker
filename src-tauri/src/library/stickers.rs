@@ -392,13 +392,16 @@ pub fn delete_stickers(
     load_stickers(conn, pack_id)
 }
 
-/// Set a sticker's Emoji String exactly as given (one-click copy must
-/// reproduce it). Never blocks: check `emoji_warning` for the emoji count rule.
+/// Set a sticker's Emoji String with every whitespace character removed
+/// (owner decision 2026-11-21: Telegram takes a plain run of emoji); the
+/// stored string is what one-click copy reproduces. Never blocks: check
+/// `emoji_warning` for the emoji count rule.
 pub fn set_emoji_string(conn: &Connection, sticker_id: i64, emoji_string: &str) -> Result<Sticker, String> {
+    let stripped: String = emoji_string.chars().filter(|c| !c.is_whitespace()).collect();
     let changed = conn
         .execute(
             "UPDATE stickers SET emoji_string = ?1 WHERE id = ?2",
-            params![emoji_string, sticker_id],
+            params![stripped, sticker_id],
         )
         .map_err(|e| format!("cannot update sticker {sticker_id}: {e}"))?;
     if changed == 0 {
@@ -1032,6 +1035,18 @@ mod tests {
         assert_eq!(emoji_warning(&edited.emoji_string), None);
         assert_eq!(set_emoji_string(&lib.conn, s[0].id, "").unwrap().emoji_string, "");
         assert!(set_emoji_string(&lib.conn, 999, "😀").is_err());
+    }
+
+    #[test]
+    fn emoji_string_drops_every_whitespace_but_keeps_zwj_sequences() {
+        let mut lib = Lib::new();
+        let pack = lib.pack("p");
+        let s = lib.seed(pack.id, &["A"]);
+        // Spaces, a tab, a newline and a no-break space go; the ZWJ family,
+        // the flag and the VS16 heart stay intact.
+        let edited = set_emoji_string(&lib.conn, s[0].id, " 👨‍👩‍👧 🇫🇷\t❤️\n\u{a0}🎉 ").unwrap();
+        assert_eq!(edited.emoji_string, "👨‍👩‍👧🇫🇷❤️🎉");
+        assert_eq!(emoji_count(&edited.emoji_string), 4);
     }
 
     // ---- Replace ----

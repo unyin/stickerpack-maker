@@ -9,6 +9,8 @@
   --accent-text: #052430;
   /* Accent as TEXT on --bg/--panel: --accent itself is only 2.4:1 there. */
   --accent-ink: #0b6ea8;
+  /* A pressed toggle on hover: --accent-text stays 5.2:1 on it. */
+  --accent-hover: #1f9bdc;
   --danger-bg: #fdf0ef;
   --danger-border: #e5a3a0;
   --danger-text: #8a2c26;
@@ -16,6 +18,10 @@
   --warn-bg: #fff6e0;
   --warn-border: #a87b0e;
   --warn-text: #6b4a00;
+  /* Pack Manager Reorder mode tiles (owner, 2026-11-21): a green tint that
+     still reads as this theme; --text 14:1, --muted 5.2:1 on it. */
+  --reorder-bg: #e4f4e9;
+  --reorder-border: #6fb487;
   /* Behind modal dialogs. */
   --backdrop: rgb(0 0 0 / 45%);
 }
@@ -36,6 +42,9 @@
   --warn-bg: #33290f;
   --warn-border: #9c7a22;
   --warn-text: #f3d58a;
+  /* --text 11.9:1, --muted 6.2:1 on it. */
+  --reorder-bg: #17302a;
+  --reorder-border: #3f8a5e;
   --backdrop: rgb(0 0 0 / 60%);
 }
 
@@ -213,6 +222,27 @@ button:disabled {
 
 button.secondary:disabled:hover {
   background: var(--panel);
+}
+
+/* Inline icons (src/icons.ts) sit on the text baseline in buttons. */
+.icon {
+  flex: none;
+  width: 1.05em;
+  height: 1.05em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* A gap between an icon and its label, on either side. (:only-child cannot
+   do this: it ignores the text node.) */
+button:has(> .icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .theme-select {

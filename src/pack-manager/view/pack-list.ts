@@ -1,10 +1,11 @@
 // The pack list (SPEC §5): create, open, and delete packs, with Draft/Live
 // badges. Reads the database only; no desync checks here (SPEC §4).
 import { el, errorMessage } from "../../ui";
-import { deletePack, listPacks, type PackSummary } from "../api";
+import { deletePack, listPacks, revealPack, type PackSummary } from "../api";
 import { packDeleteMessage, stickerCountText } from "../model/messages";
 import { confirmChoice } from "../../dialog";
 import { createPackDialog, statusBadge } from "./dialogs";
+import { explorerLabel } from "./panels";
 
 export function buildPackList(onOpen: (packId: number) => void): {
   element: HTMLElement;
@@ -60,6 +61,11 @@ export function buildPackList(onOpen: (packId: number) => void): {
       el("span", { class: "muted pm-mono" }, pack.shortName),
     );
     open.addEventListener("click", () => onOpen(pack.id));
+    const reveal = el("button", { class: "secondary", type: "button", title: "Open this pack's folder in Explorer" }, ...explorerLabel());
+    reveal.addEventListener("click", () => {
+      message.textContent = "";
+      revealPack(pack.id).catch((err) => (message.textContent = errorMessage(err)));
+    });
     const del = el("button", { class: "secondary", type: "button", title: "Delete this pack" }, "Delete");
     del.addEventListener("click", () => void remove(pack));
     return el(
@@ -68,6 +74,7 @@ export function buildPackList(onOpen: (packId: number) => void): {
       open,
       el("span", { class: "muted" }, stickerCountText(pack.stickerCount)),
       statusBadge(pack.status),
+      reveal,
       del,
     );
   }

@@ -4,6 +4,7 @@
 // ../model; this file wires them to the DOM and the commands.
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { editorCanImport } from "../../shared/import-extensions";
+import { icon } from "../../icons";
 import { el, errorMessage, onActivate, withMessage } from "../../ui";
 import {
   checkStickerFile,
@@ -45,9 +46,10 @@ import {
   type SelectionState,
 } from "../model/selection";
 import { emojiCountWarning, emojiWarning } from "../model/emoji";
+import { importOrder } from "../model/import-order";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { dialogOpen } from "../../dialog";
-import { confirmGoLive, confirmRevertToDraft, confirmStickerDelete, invalidFileDialog, sendDialog, statusBadge } from "./dialogs";
+import { confirmGoLive, confirmRevertToDraft, confirmStickerDelete, editChoiceDialog, invalidFileDialog, sendDialog, statusBadge } from "./dialogs";
 import { aggregatePanel, detailPanel, emptyPanel, thumbnailPanel, type PanelActions } from "./panels";
 import { previewImage, Previews } from "./previews";
 import { startReorderDrag, type ReorderDragHost } from "./reorder-drag";
@@ -85,9 +87,9 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   const shortNote = el("span", { class: "muted pm-hint" });
   const badgeHost = el("span", {});
   const statusButton = el("button", { class: "secondary", type: "button" }) as HTMLButtonElement;
-  const backButton = el("button", { class: "secondary", type: "button" }, "← Packs") as HTMLButtonElement;
+  const backButton = el("button", { class: "secondary", type: "button", title: "Back to the list of packs" }, "← Pack list") as HTMLButtonElement;
   const reorderButton = el("button", { class: "secondary pm-toggle", type: "button", "aria-pressed": "false" }, "Reorder") as HTMLButtonElement;
-  const refreshButton = el("button", { class: "secondary", type: "button", title: "Check the pack folder for files changed outside the app" }, "Refresh") as HTMLButtonElement;
+  const refreshButton = el("button", { class: "secondary", type: "button", title: "Check the pack folder for files changed outside the app" }, icon("refresh"), "Refresh") as HTMLButtonElement;
   const addButton = el("button", { class: "secondary", type: "button", title: "Add sticker files at the end of the pack (or drop them onto the pack)" }, "Add images…") as HTMLButtonElement;
   const modeHint = el("span", { class: "muted pm-mode-hint" });
   const banners = el("div", { class: "pm-banners" });
@@ -217,8 +219,9 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
 
   // ---- Bulk import (SPEC §5) ----
 
+  /** Import in natural filename order, whatever order the files came in (owner decision 2026-11-21). */
   async function importPaths(paths: string[]): Promise<void> {
-    const result = await importStickers(packId, paths);
+    const result = await importStickers(packId, importOrder(paths));
     setView(result.view);
     rejected = result.rejected;
     notice = importSummary(result.addedIds.length, result.rejected.length);
@@ -263,9 +266,12 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   }
 
   const actions: PanelActions = {
+    // Edit first asks Edit / Replace / Cancel (owner decision 2026-11-21).
     edit: (s) =>
       void run(async () => {
-        host.openInEditor(await stickerFilePath(s.id));
+        const choice = await editChoiceDialog(s.position);
+        if (choice === "edit") host.openInEditor(await stickerFilePath(s.id));
+        else if (choice === "replace") await replace(s);
       }),
     replace: (s) => void run(() => replace(s)),
     send: (stickers) =>
@@ -330,7 +336,6 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       },
       el("span", { class: "pm-pos" }, String(sticker.position)),
       art,
-      el("span", { class: "pm-tile-emoji" }, sticker.emojiString),
       el("span", { class: "pm-flags" }, ...flags),
     );
     item.addEventListener("click", (e) => {
@@ -475,7 +480,8 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     shortInput.title = live ? SHORT_NAME_LOCKED : "Editable while Draft; renames the pack folder";
     shortNote.textContent = live ? "🔒 Locked while Live" : "";
     badgeHost.replaceChildren(statusBadge(pack.status));
-    statusButton.textContent = live ? "Mark as Draft" : "Mark as Live";
+    // Labels match the dialogs they open ("Go Live?" / "Revert to Draft?").
+    statusButton.textContent = live ? "Revert to Draft" : "Go Live";
     statusButton.title = live
       ? "The pack does not exist on Telegram (unlocks the Short Name)"
       : "The pack now exists on Telegram (locks the Short Name)";
@@ -498,7 +504,8 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     else if (thumbFocused) grid.querySelector<HTMLElement>(".pm-thumb-slot")?.focus();
     renderBanners();
     // Rebuilding the panel would drop a half-typed Emoji String: keep it while editing.
-    if (!panel.contains(document.activeElement) || !(document.activeElement instanceof HTMLInputElement)) renderPanel();
+    const editing = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement;
+    if (!panel.contains(document.activeElement) || !editing) renderPanel();
   }
 
   render();
