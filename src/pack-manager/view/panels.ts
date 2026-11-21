@@ -61,7 +61,7 @@ export function emptyPanel(reorder: boolean): HTMLElement {
     "div",
     { class: "pm-panel-empty" },
     reorder
-      ? el("p", {}, "Reorder mode: drag a sticker to its new place, one at a time. Files are renamed to match. Press Esc or Done to finish.")
+      ? el("p", {}, "Reorder mode: drag a sticker to its new place, one at a time. Selection is off. Files are renamed to match. Press Esc or Done to finish.")
       : el("p", {}, "Click a sticker to see its details. Ctrl+click adds or removes one, Shift+click selects a range, Esc clears."),
     el("p", { class: "muted" }, "Drop PNG or WEBP stickers onto the pack to add them at the end."),
   );

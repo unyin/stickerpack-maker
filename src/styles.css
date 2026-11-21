@@ -24,6 +24,13 @@
   --reorder-border: #6fb487;
   /* Behind modal dialogs. */
   --backdrop: rgb(0 0 0 / 45%);
+  /* The app's text font, one definition for the body and for text shown
+     inside emoji fields (their placeholder). */
+  --font-ui: system-ui, "Segoe UI", sans-serif;
+  /* Emoji fields put a colour emoji font FIRST: with the text font first,
+     Windows draws text-default emoji (☺ ❤ ✌ ...) as monochrome Segoe UI
+     Symbol glyphs (owner, 2026-11-22). SPM-17 switches the style here. */
+  --font-emoji: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", var(--font-ui);
 }
 
 /* Dark tokens (SPM-14). src/theme.ts sets data-theme on <html>: the stored
@@ -59,7 +66,7 @@ body {
 }
 
 body {
-  font-family: system-ui, "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
   background: var(--bg);
   color: var(--text);
 }

@@ -4,7 +4,7 @@
 // ../model; this file wires them to the DOM and the commands.
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { editorCanImport } from "../../shared/import-extensions";
-import { icon } from "../../icons";
+import { explorerLabel, icon } from "../../icons";
 import { el, errorMessage, onActivate, withMessage } from "../../ui";
 import {
   checkStickerFile,
@@ -15,6 +15,7 @@ import {
   pickStickerFiles,
   reorderSticker,
   replaceSticker,
+  revealPack,
   revealSticker,
   revealThumbnail,
   setEmojiString,
@@ -84,14 +85,17 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     spellcheck: "false",
     "aria-label": "Short Name",
   }) as HTMLInputElement;
-  const shortNote = el("span", { class: "muted pm-hint" });
+  // Beside the "Short Name" label, so showing it never changes the header's height (owner, 2026-11-22).
+  const shortNote = el("span", { class: "muted pm-lock-note" });
   const badgeHost = el("span", {});
   const statusButton = el("button", { class: "secondary", type: "button" }) as HTMLButtonElement;
   const backButton = el("button", { class: "secondary", type: "button", title: "Back to the list of packs" }, "← Pack list") as HTMLButtonElement;
   const reorderButton = el("button", { class: "secondary pm-toggle", type: "button", "aria-pressed": "false" }, "Reorder") as HTMLButtonElement;
   const refreshButton = el("button", { class: "secondary", type: "button", title: "Check the pack folder for files changed outside the app" }, icon("refresh"), "Refresh") as HTMLButtonElement;
   const addButton = el("button", { class: "secondary", type: "button", title: "Add sticker files at the end of the pack (or drop them onto the pack)" }, "Add images…") as HTMLButtonElement;
-  const modeHint = el("span", { class: "muted pm-mode-hint" });
+  // Fixed width so nothing after it moves (why that width: .pm-sticker-count in pack-manager.css).
+  const stickerCount = el("span", { class: "muted pm-sticker-count" });
+  const revealButton = el("button", { class: "secondary", type: "button", title: "Open this pack's folder in Explorer" }, ...explorerLabel()) as HTMLButtonElement;
   const banners = el("div", { class: "pm-banners" });
   const grid = el("ol", { class: "pm-grid", "aria-label": "Stickers in pack order" });
   const panel = el("aside", { class: "pm-panel", "aria-label": "Selection" });
@@ -102,10 +106,11 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     { class: "pm-header" },
     backButton,
     el("label", { class: "pm-header-field" }, el("span", { class: "field-label" }, "Title"), titleInput),
-    el("label", { class: "pm-header-field" }, el("span", { class: "field-label" }, "Short Name"), shortInput, shortNote),
+    el("label", { class: "pm-header-field pm-short-field" }, el("span", { class: "pm-field-head" }, el("span", { class: "field-label" }, "Short Name"), shortNote), shortInput),
     el("div", { class: "pm-header-status" }, badgeHost, statusButton),
   );
-  const toolbar = el("div", { class: "pm-toolbar", role: "toolbar" }, reorderButton, refreshButton, addButton, modeHint);
+  // Reorder last: its label changes ("Done reordering"), so nothing may come after it (owner, 2026-11-22).
+  const toolbar = el("div", { class: "pm-toolbar", role: "toolbar" }, refreshButton, addButton, stickerCount, revealButton, reorderButton);
   const root = el("section", { class: "view pm-pack" }, header, toolbar, message, banners, dropZone);
 
   /** Run one Library action at a time, routing errors into the message line. */
@@ -192,6 +197,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     }),
   );
   backButton.addEventListener("click", () => host.back());
+  revealButton.addEventListener("click", () => void run(() => revealPack(packId)));
 
   // ---- Toolbar ----
 
@@ -314,9 +320,10 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     const art = sticker.missing
       ? el("div", { class: "pm-missing-art" }, "Missing")
       : previewImage(previews.sticker(sticker.id, sticker.format), `Sticker ${sticker.position}`, "pm-tile-img");
+    // One flag per tile, Missing first: two don't fit on a tile (owner, 2026-11-22).
     const flags: HTMLElement[] = [];
     if (sticker.missing) flags.push(el("span", { class: "pm-flag pm-flag-missing", title: "The file is not in the pack folder" }, "⚠ Missing"));
-    if (sticker.emojiWarning) {
+    else if (sticker.emojiWarning) {
       flags.push(
         el(
           "span",
@@ -479,6 +486,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     shortInput.disabled = live;
     shortInput.title = live ? SHORT_NAME_LOCKED : "Editable while Draft; renames the pack folder";
     shortNote.textContent = live ? "🔒 Locked while Live" : "";
+    shortNote.title = live ? SHORT_NAME_LOCKED : ""; // the full reason, even if the note is ever cut off
     badgeHost.replaceChildren(statusBadge(pack.status));
     // Labels match the dialogs they open ("Go Live?" / "Revert to Draft?").
     statusButton.textContent = live ? "Revert to Draft" : "Go Live";
@@ -490,9 +498,9 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     reorderButton.setAttribute("aria-pressed", String(reorder));
     reorderButton.disabled = view.stickers.length < 2 && !reorder;
     reorderButton.title = reorderButton.disabled ? "Reordering needs at least two stickers" : "Drag stickers into a new order (Esc to finish)";
-    modeHint.textContent = reorder ? "Reorder mode: drag a sticker to move it. Selection is off." : stickerCountText(view.stickers.length);
+    stickerCount.textContent = stickerCountText(view.stickers.length);
     root.classList.toggle("reorder", reorder);
-    for (const b of [refreshButton, addButton, statusButton, backButton]) b.disabled = busy;
+    for (const b of [refreshButton, addButton, revealButton, statusButton, backButton]) b.disabled = busy;
     titleInput.disabled = busy;
     if (busy) shortInput.disabled = true;
 

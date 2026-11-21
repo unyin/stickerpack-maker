@@ -188,8 +188,45 @@ button.pm-link {
   min-width: 180px;
 }
 
+/* One fixed line height for every header label, so a taller glyph (the 🔒
+   in the lock note comes from the emoji font) can't change the header's
+   height. The field labels, the Short Name label row and the note all use it. */
+.pm-header {
+  --pm-label-line: 18px;
+}
+
 .pm-header-field .field-label {
   margin-bottom: 4px;
+  line-height: var(--pm-label-line);
+}
+
+/* "Short Name" with the lock note on the same line. The field has a fixed
+   width that fits both (about 230px of content, so 260px leaves room for
+   wider fonts), so the note appearing never moves anything (owner,
+   2026-11-22). */
+.pm-short-field {
+  width: 260px;
+}
+
+.pm-field-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--pm-label-line);
+  margin-bottom: 4px;
+}
+
+.pm-header-field .pm-field-head .field-label {
+  margin: 0;
+}
+
+.pm-lock-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  line-height: var(--pm-label-line);
+  white-space: nowrap;
 }
 
 .pm-title-input {
@@ -226,8 +263,14 @@ button.pm-link {
   border-color: var(--accent-hover);
 }
 
-.pm-mode-hint {
+/* Fixed width up to "999 stickers", so the buttons after it never move
+   (owner, 2026-11-22). The owner expects the count never to exceed 3
+   digits; 120 stickers is only a warning (shared/limits.json), not a cap. */
+.pm-sticker-count {
+  width: 13ch;
   font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .pm-banners {
@@ -307,6 +350,7 @@ button.pm-link {
   align-content: start;
   gap: 10px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   user-select: none;
 }
 
@@ -449,8 +493,11 @@ button.pm-link {
 
 /* ---- Panel ---- */
 
+/* scrollbar-gutter keeps the scrollbar's space reserved, so content never
+   narrows or jumps when it appears (owner, 2026-11-22); same for the grid. */
 .pm-panel {
   overflow-y: auto;
+  scrollbar-gutter: stable;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -539,10 +586,17 @@ button.pm-link {
   /* .pm-input allows shrinking (min-width: 0); this box must keep its
      measured width or a row drops to four emoji. */
   flex-shrink: 0;
+  font-family: var(--font-emoji);
   font-size: 24px;
   line-height: 1.3;
   resize: none;
   overflow-y: hidden;
+}
+
+/* The hint is text, not emoji. */
+.pm-emoji-input::placeholder {
+  font-family: var(--font-ui);
+  font-size: 14px;
 }
 
 /* Small square icon button. */
@@ -633,6 +687,7 @@ button.pm-link {
 }
 
 .pm-emoji {
+  font-family: var(--font-emoji);
   font-size: 16px;
 }
 

@@ -108,10 +108,17 @@ stickers, Missing stickers, and the thumbnail.
   Reorder mode is obvious at a glance: every sticker tile turns a theme-matched green, and a
   faded copy of the dragged sticker follows the cursor (owner decision 2026-11-21).
 - The two modes are mutually exclusive; the toggle is always visible.
-- Sticker tiles have one fixed size and show position, preview and warning flags only; the
-  Emoji String shows in the detail panel, not on the tile (owner decision 2026-11-21).
+- Sticker tiles have one fixed size and show position, preview and at most one warning
+  flag: **Missing** takes priority over the emoji-count flag. The Emoji String shows in the
+  detail panel, not on the tile (owner decisions 2026-11-21 and 2026-11-22).
 - The side panel is full-height and always beside the grid, at every window width; the grid
-  scrolls on its own (owner decision 2026-11-21).
+  scrolls on its own (owner decision 2026-11-21). Both reserve their scrollbar's space, so
+  nothing narrows or jumps when a scrollbar appears (owner decision 2026-11-22).
+- Pack toolbar, in this order: **Refresh** (refresh icon before the label), **Add images…**,
+  the sticker count (fixed width), **Open in explorer** (opens the pack's folder), and
+  **Reorder** last, so its "Done reordering" label never moves another control (owner
+  decision 2026-11-22). The Reorder-mode instructions (including that selection is off)
+  show in the side panel, not the toolbar, so the toolbar never changes.
 
 ### Detail panel (single selection)
 - Large preview; metadata: position, format, dimensions, file size.
@@ -119,7 +126,8 @@ stickers, Missing stickers, and the thumbnail.
   (type, or Win+. for the Windows emoji panel); past 20 it grows a row instead of scrolling.
   Every space is stripped when it is saved and the count ignores spaces. Beside the box: a
   small square icon-only **copy** button and the live 1–20 count; the count warning shows
-  below (owner decisions 2026-11-21).
+  below (owner decisions 2026-11-21). Emoji are drawn with the colour emoji font first, never
+  as monochrome text glyphs (owner decision 2026-11-22; SPM-17 makes the style selectable).
 - Actions: **Edit** first asks **Edit / Replace… / Cancel** (Cancel is the safe default):
   Edit opens the flattened image in the Editor, Replace runs the Replace flow below (owner
   decision 2026-11-21). Opening in the Editor while it has unsaved changes asks first, in the
@@ -173,9 +181,10 @@ stickers, Missing stickers, and the thumbnail.
   pack's view shows its own); each pack has **Open in explorer**, which opens the pack's
   folder (owner decisions 2026-11-21).
 - Pack header: **← Pack list** back button; Title always editable; Short Name editable only
-  in Draft; the Draft/Live badge and its button sit right after the Short Name, labelled
-  **Go Live** / **Revert to Draft** like the dialogs they open (owner decision 2026-11-21);
-  **Refresh** has a refresh icon before its label. Draft/Live manual
+  in Draft, with "🔒 Locked while Live" beside its label so the header never changes height
+  (owner decision 2026-11-22); the Draft/Live badge and its button sit right after the Short
+  Name, labelled **Go Live** / **Revert to Draft** like the dialogs they open (owner decision
+  2026-11-21). Draft/Live manual
   toggle both ways, each direction confirmed (owner decision 2026-11-21); Draft→Live offers
   Go Live / Keep Draft, Keep Draft by default; Live→Draft offers Make Draft / Keep Live, Keep Live
   by default (owner decision 2026-11-21).

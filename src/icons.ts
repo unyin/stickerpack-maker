@@ -15,7 +15,7 @@ const PATHS = {
   check: ["M5 12l5 5L20 7"],
 } as const;
 
-/** "Open in explorer" with the opens-another-program icon at the end (owner, 2026-11-21); shared by the pack list and the panels. */
+/** "Open in explorer" with the opens-another-program icon at the end (owner, 2026-11-21); used by every Open in explorer button. */
 export function explorerLabel(): Array<Node | string> {
   return ["Open in explorer", icon("external")];
 }
