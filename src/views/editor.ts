@@ -301,8 +301,8 @@ function buildEditor(): HTMLElement {
     zoomLabel,
     dirtyLabel,
     el("span", { class: "editor-spacer" }),
-    saveButton,
-    closeButton,
+    // Save and Close stay together when the toolbar wraps.
+    el("span", { class: "editor-session-actions" }, saveButton, closeButton),
   );
 
   const layersPanel = el(

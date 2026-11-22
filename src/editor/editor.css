@@ -46,6 +46,11 @@
   flex: 1;
 }
 
+.editor-session-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
 .editor-zoom {
   min-width: 48px;
   text-align: right;
