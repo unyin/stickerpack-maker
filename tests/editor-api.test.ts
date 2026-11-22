@@ -263,23 +263,27 @@ test("pasted images are probed and imported from their bytes with the scale-to-f
 test("background removal: model status, download with progress, cancel, and the raw removal request", async () => {
   calls.length = 0;
   options.length = 0;
-  expect(await api.backgroundModelStatus()).toEqual({ downloaded: false, sizeBytes: 178648008 });
+  expect(await api.backgroundModelStatus("isnet-anime")).toEqual({ downloaded: false, sizeBytes: 178648008 });
   const seen: unknown[] = [];
-  expect(await api.downloadBackgroundModel((p) => seen.push(p))).toBe("done");
+  expect(await api.downloadBackgroundModel("isnet-anime", (p) => seen.push(p))).toBe("done");
   expect(seen).toEqual([{ received: 5, total: 10 }]);
   await api.cancelBackgroundDownload();
   const layer = { width: 2, height: 1, pixels: new Uint8ClampedArray([1, 2, 3, 4, 5, 6, 7, 8]) };
-  const out = await api.removeImageBackground(layer);
+  const out = await api.removeImageBackground(layer, "isnet-anime");
   expect(calls.map((c) => c.cmd)).toEqual([
     "editor_background_model_status",
     "editor_download_background_model",
     "editor_cancel_background_download",
     "editor_remove_background",
   ]);
+  expect(calls[0].args).toEqual({ model: "isnet-anime" });
   // Rust's parameter is on_progress: Tauri maps the camelCase key.
-  expect(Object.keys(calls[1].args ?? {})).toEqual(["onProgress"]);
+  expect(Object.keys(calls[1].args ?? {})).toEqual(["model", "onProgress"]);
+  expect(calls[1].args?.model).toBe("isnet-anime");
   expect(Array.from(calls[3].args as unknown as Uint8Array)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-  expect(options[3]).toEqual({ headers: { [api.REMOVE_BACKGROUND_HEADER]: JSON.stringify({ width: 2, height: 1 }) } });
+  expect(options[3]).toEqual({ headers: { [api.REMOVE_BACKGROUND_HEADER]: JSON.stringify({ width: 2, height: 1, model: "isnet-anime" }) } });
+  // The UI's models mirror Rust's MODELS (src-tauri/src/ml/model.rs), default first.
+  expect(api.BACKGROUND_MODELS.map((m) => m.id)).toEqual(["isnet-general-use", "isnet-anime"]);
   expect(api.REMOVE_BACKGROUND_HEADER).toBe("x-remove-background");
   expect(out.width).toBe(2);
   expect(out.height).toBe(1);

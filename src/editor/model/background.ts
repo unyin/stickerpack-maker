@@ -32,11 +32,21 @@ export function backgroundTarget(doc: Doc, selection: readonly string[]): Backgr
   return { layer };
 }
 
+/**
+ * Why Restore has nothing to paint back. A layer has no restore source either
+ * because neither removal nor Erase touched it, or because its pixels were
+ * replaced since (owner decision 2026-11-22): the wording covers both, and any
+ * pixel-replacing step, effects included.
+ */
+export const RESTORE_NOTHING =
+  "Nothing to restore on this layer. Restore brings back what Remove background or the Erase brush took away, " +
+  "until the layer's pixels are replaced (a crop across it, a merge, a cut or an effect). If that happened since, undo it first.";
+
 /** Why the Restore brush cannot paint on `layer`, or null when it can. */
 export function restoreBlocker(layer: RasterLayer): string | null {
   return layer.restoreSource
     ? null
-    : "Nothing to restore on this layer yet: Restore brings back what Remove background or the Erase brush took away.";
+    : RESTORE_NOTHING;
 }
 
 /**

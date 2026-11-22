@@ -20,6 +20,7 @@ import {
   backgroundTarget,
   refineLayerPixels,
   restoreBlocker,
+  RESTORE_NOTHING,
 } from "../src/editor/model/background";
 import { downloadProgressText, megabytes } from "../src/editor/view/download-text";
 import { beginStroke, BRUSH_SIZE, brushSizeProblem, docToLocal, finishStroke, strokeTo } from "../src/editor/model/brush";
@@ -104,8 +105,14 @@ test("the same pixels change nothing, and pixels of another size are refused", (
   expect(() => refineLayerPixels(doc, "layer-1", solid(3, 4, [0, 0, 0, 0]))).toThrow();
 });
 
-test("a layer that was never refined has nothing to restore", () => {
-  expect(restoreBlocker(raster(docWith(solid(2, 2, [0, 0, 0, 255]))))).not.toBeNull();
+test("a layer that was never refined, or whose pixels were replaced since, has nothing to restore", () => {
+  expect(restoreBlocker(raster(docWith(solid(2, 2, [0, 0, 0, 255]))))).toBe(RESTORE_NOTHING);
+  const refined = refineLayerPixels(docWith(solid(4, 4, [9, 8, 7, 255])), "layer-1", solid(4, 4, [9, 8, 7, 0]));
+  const replaced = setLayerImage(refined, "layer-1", solid(4, 4, [1, 1, 1, 255]));
+  expect(restoreBlocker(raster(replaced))).toBe(RESTORE_NOTHING);
+  // The reason names the replacing steps generally (effects too) and says to undo first.
+  expect(RESTORE_NOTHING).toContain("undo it first");
+  expect(RESTORE_NOTHING).toContain("an effect");
 });
 
 test("moving the layer keeps its restore source; other pixel operations drop it", () => {
