@@ -53,7 +53,8 @@ pub const ISNET_ANIME: ModelSpec = ModelSpec {
 /// The models the Editor offers; the first is the default.
 pub const MODELS: [ModelSpec; 2] = [ISNET_GENERAL_USE, ISNET_ANIME];
 
-/// The default model (general subjects).
+/// The default model (general subjects); the webview's list starts with it too.
+#[cfg(test)]
 pub const DEFAULT_MODEL: ModelSpec = MODELS[0];
 
 /// The model the webview names by `id`.
@@ -77,8 +78,14 @@ mod tests {
 
     #[test]
     fn models_have_distinct_ids_and_cache_files() {
-        assert_ne!(MODELS[0].id, MODELS[1].id);
-        assert_ne!(MODELS[0].file_name, MODELS[1].file_name);
+        for (i, a) in MODELS.iter().enumerate() {
+            for b in &MODELS[i + 1..] {
+                assert_ne!(a.id, b.id);
+                assert_ne!(a.file_name, b.file_name);
+            }
+        }
+        // The webview's BACKGROUND_MODELS (src/editor/api.ts) lists these ids in this order.
+        assert_eq!(MODELS.map(|m| m.id), ["isnet-general-use", "isnet-anime"]);
         assert_eq!(DEFAULT_MODEL.id, "isnet-general-use");
     }
 

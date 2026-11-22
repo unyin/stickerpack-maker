@@ -58,7 +58,7 @@ mock.module("@tauri-apps/api/core", () => ({
       return out.buffer;
     }
     if (cmd === "editor_probe_pasted") return { width: 30, height: 20, exceedsCap: false };
-    if (cmd === "editor_background_model_status") return { downloaded: false, sizeBytes: 178648008 };
+    if (cmd === "editor_background_model_status") return { downloaded: false, sizeBytes: 176069933 };
     if (cmd === "editor_download_background_model") {
       (args?.onProgress as { onmessage: (p: unknown) => void }).onmessage({ received: 5, total: 10 });
       return "done";
@@ -263,7 +263,7 @@ test("pasted images are probed and imported from their bytes with the scale-to-f
 test("background removal: model status, download with progress, cancel, and the raw removal request", async () => {
   calls.length = 0;
   options.length = 0;
-  expect(await api.backgroundModelStatus("isnet-anime")).toEqual({ downloaded: false, sizeBytes: 178648008 });
+  expect(await api.backgroundModelStatus("isnet-anime")).toEqual({ downloaded: false, sizeBytes: 176069933 });
   const seen: unknown[] = [];
   expect(await api.downloadBackgroundModel("isnet-anime", (p) => seen.push(p))).toBe("done");
   expect(seen).toEqual([{ received: 5, total: 10 }]);
@@ -282,7 +282,7 @@ test("background removal: model status, download with progress, cancel, and the 
   expect(calls[1].args?.model).toBe("isnet-anime");
   expect(Array.from(calls[3].args as unknown as Uint8Array)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   expect(options[3]).toEqual({ headers: { [api.REMOVE_BACKGROUND_HEADER]: JSON.stringify({ width: 2, height: 1, model: "isnet-anime" }) } });
-  // The UI's models mirror Rust's MODELS (src-tauri/src/ml/model.rs), default first.
+  // The UI's models mirror Rust's MODELS (src-tauri/src/ml/model.rs, whose test pins the same list), default first.
   expect(api.BACKGROUND_MODELS.map((m) => m.id)).toEqual(["isnet-general-use", "isnet-anime"]);
   expect(api.REMOVE_BACKGROUND_HEADER).toBe("x-remove-background");
   expect(out.width).toBe(2);

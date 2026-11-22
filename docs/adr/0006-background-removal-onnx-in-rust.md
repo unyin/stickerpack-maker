@@ -1,9 +1,9 @@
 # Background removal: ISNet on ONNX Runtime in Rust, models downloaded once
 
-Status: **Accepted** (SPM-7; owner decisions 2026-11-22, CMT-242: ISNet general use as the
-default plus ISNet anime as a second model, rembg's release as the download host until both
-are mirrored to the project's own release, static ONNX Runtime). The Windows packaging check
-is still to come (an owner test step).
+Status: **Proposed — awaiting owner approval** (SPM-7). The owner's decisions of 2026-11-22
+(CMT-242) are built in: ISNet general use as the default plus ISNet anime as a second model,
+rembg's release as the download host until both are mirrored to the project's own release,
+static ONNX Runtime. The Windows packaging check is still to come (an owner test step).
 
 Background removal (SPEC §6) is one click on an image layer, offline after a one-time model
 download (ADR-0001, SPEC §2), followed by a refine brush that erases or restores alpha by hand.

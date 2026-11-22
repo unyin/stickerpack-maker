@@ -128,7 +128,7 @@ impl RemovalMeta {
         model::model_by_id(&self.model)
     }
 
-
+    /// The layer from the request's body, which must be exactly its size in RGBA bytes.
     pub fn decode(&self, body: &[u8]) -> Result<Rgba, String> {
         let expected = self.width as usize * self.height as usize * 4;
         if self.width == 0 || self.height == 0 || body.len() != expected {
@@ -159,7 +159,9 @@ fn environment() -> Result<&'static ort::environment::Environment, String> {
 }
 
 /// Load a model into ONNX Runtime (CPU, all cores, full graph optimisation).
-pub fn load_session(path: &Path) -> Result<Session, String> {
+/// Called only under the remover's session lock, which keeps `environment()`
+/// from being built twice at once.
+fn load_session(path: &Path) -> Result<Session, String> {
     let failed = |e: &dyn std::fmt::Display| format!("cannot load the background removal model: {e}");
     Session::builder(environment()?)
         .map_err(|e| failed(&e))?
@@ -230,6 +232,14 @@ mod tests {
         assert_eq!(serde_json::to_value(DownloadOutcome::Cancelled).unwrap(), "cancelled");
     }
 
+    /// Where the ignored real-model tests keep the models: `SPM_MODEL_DIR`,
+    /// else `target/test-models`.
+    fn test_model_dir() -> PathBuf {
+        std::env::var_os("SPM_MODEL_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-models"))
+    }
+
     /// A cartoon-like face (a flat disc with a dark outline and two eyes) on
     /// a white background: the general model must keep the face and drop the
     /// corners, and every model must load and run (each is downloaded into
@@ -240,9 +250,7 @@ mod tests {
     #[test]
     #[ignore = "downloads and runs the real background removal models"]
     fn the_real_models_keep_a_subject_and_drop_a_plain_background() {
-        let dir = std::env::var_os("SPM_MODEL_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-models"));
+        let dir = test_model_dir();
         let remover = BackgroundRemover::new(dir);
         let (width, height) = (300u32, 200u32);
         let mut pixels = Vec::with_capacity((width * height * 4) as usize);
@@ -294,9 +302,7 @@ mod tests {
         let Some(sample) = std::env::var_os("SPM_SAMPLE_IMAGE") else {
             panic!("set SPM_SAMPLE_IMAGE to a PNG with a transparent background");
         };
-        let dir = std::env::var_os("SPM_MODEL_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("target/test-models"));
+        let dir = test_model_dir();
         let cutout = image::open(&sample).expect("readable PNG").to_rgba8();
         let (width, height) = cutout.dimensions();
         let truth: Vec<bool> = cutout.pixels().map(|p| p[3] > 128).collect();

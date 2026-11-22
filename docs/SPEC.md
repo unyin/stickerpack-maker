@@ -450,10 +450,10 @@ stickers, Missing stickers, and the thumbnail.
 
 - **UX**: decided — see the §5 command map (SPM-4, 2026-11-19).
 - **Engineering (each gets an ADR at implementation time)**: ONNX runtime placement
-  (Rust vs webview) — decided in ADR-0006 (SPM-7): Rust `ort` with ISNet; canvas library
-  choice — decided, see ADR-0005 (SPM-5: Konva in the webview for interaction, Rust
-  crates for one-shot pixel work and encoding); crash-safe rename mechanics — decided,
-  see ADR-0004 (SPM-2).
+  (Rust vs webview) — ADR-0006 (SPM-7, proposed; owner decisions built in): Rust `ort`
+  with ISNet; canvas library choice — decided, see ADR-0005 (SPM-5: Konva in the webview
+  for interaction, Rust crates for one-shot pixel work and encoding); crash-safe rename
+  mechanics — decided, see ADR-0004 (SPM-2).
 - Small UX defaults assumed unless preferences emerge: system fonts + size/color for text;
   color/width for outline; color/radius/softness for glow; strength/radius for warp.
 

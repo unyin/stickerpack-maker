@@ -333,7 +333,7 @@ function buildEditor(): HTMLElement {
       "span",
       { class: "editor-tool-group", role: "group", "aria-label": "Background" },
       removeBackgroundButton,
-      modelSelect,
+      el("label", { class: "editor-side" }, "Model ", modelSelect),
       cancelDownloadButton,
       eraseToolButton,
       restoreToolButton,
@@ -1081,7 +1081,8 @@ function confirmDiscard(): Promise<boolean> {
 
 /** A model's name in the UI. */
 function modelLabel(id: BackgroundModelId): string {
-  return BACKGROUND_MODELS.find((m) => m.id === id)?.label ?? id;
+  // Every BackgroundModelId is in the list (tests/editor-api.test.ts mirrors it against Rust).
+  return BACKGROUND_MODELS.find((m) => m.id === id)!.label;
 }
 
 /** Each model's first Remove background asks before its one-time download (ADR-0006); Cancel is the safe choice. */
