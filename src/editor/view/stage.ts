@@ -50,7 +50,7 @@ export interface BrushGesture {
 
 /**
  * What a layer shows instead of its own pixels for a while: an effect
- * preview (pixels plus where they go) or a brush stroke in progress (its
+ * preview (pixels plus where they go) or a warp press in progress (its
  * live canvas). Never part of the model (ADR-0005, CMT-186).
  */
 export interface LayerOverride {
@@ -60,7 +60,7 @@ export interface LayerOverride {
 }
 
 /** The effect tools with a preview, where the canvas only pans (SPM-8). */
-function previews(tool: CanvasTool): boolean {
+function hasPreview(tool: CanvasTool): boolean {
   return effectKindOf(tool) !== null;
 }
 
@@ -375,14 +375,14 @@ export class EditorStage {
     this.guides.batchDraw();
   }
 
-  /** Show other pixels for one layer (an effect preview, a stroke), or (null) every layer as it is. */
+  /** Show other pixels for one layer (an effect preview, a warp press), or (null) every layer as it is. */
   setOverride(override: LayerOverride | null): void {
     if (override === this.override) return;
     this.override = override;
     this.render();
   }
 
-  /** Redraw after a stroke painted into the override's canvas. */
+  /** Redraw after a warp press painted into the override's canvas. */
   redraw(): void {
     this.content.batchDraw();
   }
@@ -439,9 +439,8 @@ export class EditorStage {
 
   /** Layers listen only with the Move tool; empty space pans with it and the effect tools; nothing while not interactive. */
   private applyListening(): void {
-    // Layers listen only to the Move tool; empty space pans in the effect tools too.
     this.content.listening(this.interactive && this.tool === "move");
-    this.stage.draggable(this.interactive && (this.tool === "move" || previews(this.tool)));
+    this.stage.draggable(this.interactive && (this.tool === "move" || hasPreview(this.tool)));
     this.content.batchDraw();
   }
 
@@ -507,7 +506,7 @@ export class EditorStage {
   }
 
   private pressRegion(shift: boolean): void {
-    if (this.tool === "move" || previews(this.tool) || !this.interactive) return;
+    if (this.tool === "move" || hasPreview(this.tool) || !this.interactive) return;
     const at = this.pointer();
     if (!at) return;
     if (this.tool === "warp") {
@@ -668,7 +667,7 @@ export class EditorStage {
       // skew is reset so the view can never hold skew the model lacks
       // (ADR-0005). Text shows its Rust rendering (SPM-9), so the view draws
       // the pixels merge, Crop and the save produce, in the same box. An
-      // override (effect preview, brush stroke) shows instead, never stored.
+      // override (effect preview, warp press) shows instead, never stored.
       const o = this.override?.id === layer.id ? this.override : null;
       const image = o ? (o.image instanceof HTMLCanvasElement ? o.image : canvasFor(o.image)) : canvasFor(layerImage(layer));
       node.setAttrs({ ...(o ? o.transform : layer.transform), skewX: 0, skewY: 0, image });
@@ -681,7 +680,7 @@ export class EditorStage {
     // No handles in the effect tools: the node shows the preview's grown
     // box, which is not the layer's to resize.
     this.transformer.nodes(
-      previews(this.tool) ? [] : this.session.selection.flatMap((id) => {
+      hasPreview(this.tool) ? [] : this.session.selection.flatMap((id) => {
         const node = this.nodes.get(id);
         return node && id !== this.editing ? [node] : [];
       }),

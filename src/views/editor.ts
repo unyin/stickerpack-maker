@@ -89,7 +89,7 @@ import { TextEditOverlay } from "../editor/view/text-edit";
 import { FontPicker } from "../editor/view/font-picker";
 import { EffectControls } from "../editor/view/effect-controls";
 import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
-import { WarpStroke } from "../editor/view/warp-brush";
+import { WarpPress } from "../editor/view/warp-brush";
 import { moveWarpGesture, startWarpGesture, warpReadout, type WarpGesture } from "../editor/model/warp";
 import { confirmChoice } from "../dialog";
 import { el, errorMessage, withMessage } from "../ui";
@@ -198,8 +198,8 @@ function buildEditor(): HTMLElement {
     (req, result) => stage?.setOverride(req && result ? { id: req.layerId, ...result } : null),
     (err) => say(errorMessage(err)),
   );
-  // The warp press being painted, if any: its pixels and its gesture.
-  let stroke: { brush: WarpStroke; gesture: WarpGesture } | null = null;
+  // The warp press in progress, if any.
+  let warp: WarpInProgress | null = null;
   // What the Outline/Glow tool was chosen on: the document and the selected
   // layers. Any change to either discards the preview AND returns to Move
   // (owner decision 2026-11-22, CMT-243).
@@ -434,7 +434,7 @@ function buildEditor(): HTMLElement {
     stage.setCropGuidesVisible(showBox);
     stage.setTool(tool);
     stage.onEditText((id) => editText(id));
-    stage.onBrush({ press: beginStroke, move: continueStroke, release: endStroke });
+    stage.onBrush({ press: beginWarp, move: continueWarp, release: endWarp });
     refresh(); // place the crop box overlay
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
@@ -534,7 +534,8 @@ function buildEditor(): HTMLElement {
     // An unapplied effect preview alone is not a change (CMT-186): it is dropped.
     if (session.isDirty && !(await confirmDiscard())) return false;
     preview.request(null);
-    stroke = null;
+    warp = null;
+    effectBasis = null;
     textOverlay.close();
     stage?.destroy();
     stage = null;
@@ -658,13 +659,15 @@ function buildEditor(): HTMLElement {
   }
 
   /**
-   * A warp press (SPM-8, CMT-243): ONE bulge at the press point, painted
-   * live into a copy of the target layer. A click keeps the bar's values; a
-   * drag sets the radius (Shift held: the strength) from the pointer.
+   * A warp press starts (SPM-8, CMT-243): ONE bulge at the press point,
+   * painted live into a copy of the target layer. Nothing is painted until
+   * it is clear what the press is: a drag grows the bulge from the pointer's
+   * distance (so it never jumps from the bar's size), a click gets the bar's
+   * values on release.
    */
-  function beginStroke(at: Point, shift: boolean): void {
+  function beginWarp(at: Point, shift: boolean): void {
     const current = session;
-    if (!current || !stage || busy || stroke) return;
+    if (!current || !stage || busy || warp) return;
     const target = warpTarget(current.doc, current.selection);
     if ("blocker" in target) {
       say(target.blocker);
@@ -673,48 +676,42 @@ function buildEditor(): HTMLElement {
     const layer = current.doc.layers[layerIndex(current.doc, target.id)];
     if (layer.kind !== "raster") return; // narrows the type: warpTarget already refused text
     say("");
-    stroke = { brush: new WarpStroke(layer), gesture: startWarpGesture(at, effectControls.warp, shift) };
-    placeBulge(stroke);
-    stage.setOverride({ id: layer.id, image: stroke.brush.canvas, transform: layer.transform });
+    warp = { press: new WarpPress(layer), gesture: startWarpGesture(at, effectControls.warp, shift) };
+    stage.setOverride({ id: layer.id, image: warp.press.canvas, transform: layer.transform });
   }
 
-  function continueStroke(at: Point, shift: boolean): void {
-    if (!stroke || !stage) return;
-    const before = stroke.gesture;
-    stroke.gesture = moveWarpGesture(before, at, shift, stage.view().scale);
-    const g = stroke.gesture;
+  /** The pointer moved during a warp press: a drag sets the radius, or with Shift the strength. */
+  function continueWarp(at: Point, shift: boolean): void {
+    if (!warp || !stage) return;
+    const before = warp.gesture;
+    const g = moveWarpGesture(before, at, shift, stage.view().scale);
+    warp.gesture = g;
     if (!g.dragged) return;
     stage.setBrushGesture({ center: g.center, radius: g.radius, readout: warpReadout(g) });
-    if (g.radius !== before.radius || g.strength !== before.strength) {
-      placeBulge(stroke);
+    if (!before.dragged || g.radius !== before.radius || g.strength !== before.strength) {
+      warp.press.place(g.center, g.radius, g.strength);
       stage.redraw();
     }
   }
 
-  function placeBulge(s: { brush: WarpStroke; gesture: WarpGesture }): void {
-    s.brush.place(s.gesture.center, s.gesture.radius, s.gesture.strength);
-  }
-
   /** A warp press ends: its pixels become the layer's as ONE undo step (CMT-148). */
-  function endStroke(): void {
-    const finished = stroke;
-    stroke = null;
+  function endWarp(): void {
+    const finished = warp;
+    warp = null;
     const current = session;
     if (!finished || !current) return;
     stage?.setOverride(null);
     stage?.setBrushGesture(null);
-    // A drag's radius and strength become the bar's, for the next click.
-    const g = finished.gesture;
-    if (g.dragged) effectControls.setWarp({ radius: g.radius, strength: g.strength });
-    const image = finished.brush.finish();
-    if (!image) return refresh(); // the bulge missed the layer
+    const { press, gesture: g } = finished;
+    if (g.dragged) effectControls.setWarp({ radius: g.radius, strength: g.strength }); // for the next click
+    else press.place(g.center, g.radius, g.strength); // a click: the bar's values
+    const image = press.finish();
+    const layer = press.layer;
     // The target layer changed mid-press (e.g. Ctrl+Z): the bulge was painted on old pixels, so it is dropped.
-    const layer = finished.brush.layer;
-    if (current.doc.layers.find((l) => l.id === layer.id) !== layer) {
-      say("The layers changed while warping; the bulge was dropped. Try again.");
-      return refresh();
-    }
-    current.apply((d) => setLayerImage(d, layer.id, image));
+    const stale = current.doc.layers.find((l) => l.id === layer.id) !== layer;
+    if (image && stale) say("The layers changed while warping; the bulge was dropped. Try again.");
+    if (image && !stale) current.apply((d) => setLayerImage(d, layer.id, image));
+    else refresh(); // no new state to redraw from, but the bar's values may have changed
   }
 
   // ---- Text (SPM-9) ----
@@ -1081,6 +1078,12 @@ function buildEditor(): HTMLElement {
 
   refresh();
   return view;
+}
+
+/** A warp press being painted: its pixels and its gesture. */
+interface WarpInProgress {
+  readonly press: WarpPress;
+  gesture: WarpGesture;
 }
 
 let openFileHook: ((path: string, showEditor: () => void) => Promise<void>) | null = null;

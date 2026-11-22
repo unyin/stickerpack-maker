@@ -26,7 +26,7 @@ import {
   type Effect,
   type EffectResult,
 } from "../src/editor/model/effects";
-import { bulgeDab, moveWarpGesture, startWarpGesture, warpAmount, warpReadout, WARP_DEFAULTS, WARP_RADIUS } from "../src/editor/model/warp";
+import { bulgeDab, moveWarpGesture, restoreRect, startWarpGesture, warpAmount, warpReadout, WARP_DEFAULTS, WARP_RADIUS } from "../src/editor/model/warp";
 import { EffectPreview, type PreviewRequest } from "../src/editor/view/effect-preview";
 import { EditorSession } from "../src/editor/model/session";
 
@@ -259,6 +259,18 @@ test("a dab past the image edge only touches the image", () => {
   const image = coords(20, 20);
   expect(bulgeDab(image, -5, 10, 8, 0.5)).toEqual({ x: 0, y: 2, width: 3, height: 16 });
   expect(bulgeDab(image, -50, 10, 8, 0.5)).toBeNull();
+});
+
+test("re-placing a bulge restores the original first, so bulges never stack", () => {
+  const original = coords(64, 64);
+  const working = { ...original, pixels: original.pixels.slice() };
+  const first = bulgeDab(working, 30, 30, 12, 0.6)!;
+  restoreRect(working, original, first);
+  expect(working.pixels).toEqual(original.pixels);
+  bulgeDab(working, 30, 30, 20, 0.3);
+  const fresh = { ...original, pixels: original.pixels.slice() };
+  bulgeDab(fresh, 30, 30, 20, 0.3);
+  expect(working.pixels).toEqual(fresh.pixels);
 });
 
 test("a click is one bulge with the slider values", () => {

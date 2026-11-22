@@ -114,6 +114,17 @@ export function bulgeDab(image: RgbaImage, cx: number, cy: number, radius: numbe
   return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
 
+/**
+ * Copy `source`'s pixels in `rect` back into `target` (same size): undoes a
+ * bulge before it is placed again with other settings, so bulges never stack.
+ */
+export function restoreRect(target: RgbaImage, source: RgbaImage, rect: Rect): void {
+  for (let y = rect.y; y < rect.y + rect.height; y++) {
+    const start = (y * target.width + rect.x) * 4;
+    target.pixels.set(source.pixels.subarray(start, start + rect.width * 4), start);
+  }
+}
+
 /** Which setting a press-drag changes: the radius, or (holding Shift) the strength. */
 export type WarpControl = "radius" | "strength";
 
@@ -136,7 +147,8 @@ export interface WarpGesture {
   readonly dragged: boolean;
 }
 
-function clamp(value: number, range: Range): number {
+/** `value` rounded to a whole number within `range`. */
+function clampWhole(value: number, range: Range): number {
   return Math.max(range.min, Math.min(range.max, Math.round(value)));
 }
 
@@ -177,8 +189,8 @@ export function moveWarpGesture(g: WarpGesture, at: Point, shift: boolean, zoom:
   if (!dragged) return { ...g, mode, anchor };
   const travel = distance - anchor.distance;
   return mode === "radius"
-    ? { ...g, mode, anchor, dragged, radius: clamp(anchor.value + travel, WARP_RADIUS) }
-    : { ...g, mode, anchor, dragged, strength: clamp(anchor.value + travel * zoom * STRENGTH_PER_PX, WARP_STRENGTH) };
+    ? { ...g, mode, anchor, dragged, radius: clampWhole(anchor.value + travel, WARP_RADIUS) }
+    : { ...g, mode, anchor, dragged, strength: clampWhole(anchor.value + travel * zoom * STRENGTH_PER_PX, WARP_STRENGTH) };
 }
 
 /** The readout beside the pointer while dragging. */
