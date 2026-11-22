@@ -9,9 +9,28 @@
   --accent-text: #052430;
   /* Accent as TEXT on --bg/--panel: --accent itself is only 2.4:1 there. */
   --accent-ink: #0b6ea8;
+  /* A pressed toggle on hover: --accent-text stays 5.2:1 on it. */
+  --accent-hover: #1f9bdc;
   --danger-bg: #fdf0ef;
   --danger-border: #e5a3a0;
   --danger-text: #8a2c26;
+  /* Warn-only conditions (Missing, emoji count, pack size): SPM-3. */
+  --warn-bg: #fff6e0;
+  --warn-border: #a87b0e;
+  --warn-text: #6b4a00;
+  /* Pack Manager Reorder mode tiles (owner, 2026-11-21): a green tint that
+     still reads as this theme; --text 14:1, --muted 5.2:1 on it. */
+  --reorder-bg: #e4f4e9;
+  --reorder-border: #6fb487;
+  /* Behind modal dialogs. */
+  --backdrop: rgb(0 0 0 / 45%);
+  /* The app's text font, one definition for the body and for text shown
+     inside emoji fields (their placeholder). */
+  --font-ui: system-ui, "Segoe UI", sans-serif;
+  /* Emoji fields put a colour emoji font FIRST: with the text font first,
+     Windows draws text-default emoji (☺ ❤ ✌ ...) as monochrome Segoe UI
+     Symbol glyphs (owner, 2026-11-22). SPM-17 switches the style here. */
+  --font-emoji: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", var(--font-ui);
 }
 
 /* Dark tokens (SPM-14). src/theme.ts sets data-theme on <html>: the stored
@@ -27,6 +46,13 @@
   --danger-bg: #38201e;
   --danger-border: #8a4a44;
   --danger-text: #f0b9b6;
+  --warn-bg: #33290f;
+  --warn-border: #9c7a22;
+  --warn-text: #f3d58a;
+  /* --text 11.9:1, --muted 6.2:1 on it. */
+  --reorder-bg: #17302a;
+  --reorder-border: #3f8a5e;
+  --backdrop: rgb(0 0 0 / 60%);
 }
 
 * {
@@ -40,7 +66,7 @@ body {
 }
 
 body {
-  font-family: system-ui, "Segoe UI", sans-serif;
+  font-family: var(--font-ui);
   background: var(--bg);
   color: var(--text);
 }
@@ -156,18 +182,18 @@ button {
   font: inherit;
 }
 
+/* The --accent fill alone is 2.57:1 on a light panel, so primary buttons
+   get an --accent-ink boundary (5.5:1) to meet 3:1 there; in the dark
+   theme --accent-ink equals --accent, so the border blends into the fill.
+   Same padding and 1px border as button.secondary/.danger, so paired
+   buttons line up. */
 button.primary {
   background: var(--accent);
   color: var(--accent-text);
-  border: none;
+  border: 1px solid var(--accent-ink);
   padding: 8px 18px;
   border-radius: 8px;
   cursor: pointer;
-}
-
-button.primary:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 
 button.secondary {
@@ -181,6 +207,49 @@ button.secondary {
 
 button.secondary:hover {
   background: var(--bg);
+}
+
+/* Used by the shared dialog and the Pack Manager, so it lives here. */
+button.danger {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  border: 1px solid var(--danger-border);
+  padding: 8px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* Disabled look for every button. It comes after the button.primary,
+   button.secondary and button.danger rules on purpose: same specificity,
+   so the later rule's cursor wins. The :hover override stops a disabled button reacting. */
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+button.secondary:disabled:hover {
+  background: var(--panel);
+}
+
+/* Inline icons (src/icons.ts) sit on the text baseline in buttons. */
+.icon {
+  flex: none;
+  width: 1.05em;
+  height: 1.05em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* A gap between an icon and its label, on either side. (:only-child cannot
+   do this: it ignores the text node.) */
+button:has(> .icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .theme-select {
@@ -215,4 +284,17 @@ button.secondary:hover {
   max-width: 640px;
   margin: 10vh auto;
   padding: 0 20px;
+}
+
+/* Text for screen readers only (live-region announcements). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }

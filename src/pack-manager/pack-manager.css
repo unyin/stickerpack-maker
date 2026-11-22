@@ -1,0 +1,770 @@
+/* Pack Manager layout (SPM-3). Colours come only from the tokens in
+   src/styles.css (light and dark); selection and focus use --accent-ink,
+   which meets 3:1 against --panel and --bg in both themes. */
+
+.pm .view {
+  max-width: 1200px;
+}
+
+.pm-input {
+  font: inherit;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  min-width: 0;
+}
+
+.pm-input:focus-visible,
+.pm-tile:focus-visible,
+.pm-pack-open:focus-visible,
+.pm-target-list li:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
+}
+
+.pm-input:disabled {
+  color: var(--muted);
+  background: var(--bg);
+}
+
+.pm-input.warn {
+  border-color: var(--warn-border);
+}
+
+.pm-mono {
+  font-family: Consolas, monospace;
+  font-size: 13px;
+}
+
+.pm-hint {
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.pm-notice {
+  min-height: 1em;
+  font-size: 14px;
+}
+
+button.pm-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: inherit;
+}
+
+/* ---- Badges and flags ---- */
+
+.pm-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.pm-badge-draft {
+  color: var(--muted);
+  background: var(--bg);
+}
+
+.pm-badge-live {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.pm-flag {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border: 1px solid var(--warn-border);
+  white-space: nowrap;
+}
+
+/* ---- Pack list ---- */
+
+.pm-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pm-list-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.pm-pack-count {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.pm-pack-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pm-pack-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.pm-pack-open {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+
+.pm-pack-title {
+  font-weight: 600;
+}
+
+.pm-empty-item {
+  padding: 16px;
+  list-style: none;
+}
+
+/* ---- Pack view ---- */
+
+/* The open pack fills the content area: the grid scrolls on its own and the
+   panel stays full-height beside it at every window width (owner,
+   2026-11-21). The window's minimum width (900 px) fits both. */
+.pm:has(> .pm-pack) {
+  height: 100%;
+}
+
+.pm-pack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+}
+
+.pm-pack.busy {
+  cursor: progress;
+}
+
+.pm-header {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.pm-header-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+}
+
+/* One fixed line height for every header label, so a taller glyph (the 🔒
+   in the lock note comes from the emoji font) can't change the header's
+   height. The field labels, the Short Name label row and the note all use it. */
+.pm-header {
+  --pm-label-line: 18px;
+}
+
+.pm-header-field .field-label {
+  margin-bottom: 4px;
+  line-height: var(--pm-label-line);
+}
+
+/* "Short Name" with the lock note on the same line. The field has a fixed
+   width that fits both (about 230px of content, so 260px leaves room for
+   wider fonts), so the note appearing never moves anything (owner,
+   2026-11-22). */
+.pm-short-field {
+  width: 260px;
+}
+
+.pm-field-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--pm-label-line);
+  margin-bottom: 4px;
+}
+
+.pm-header-field .pm-field-head .field-label {
+  margin: 0;
+}
+
+.pm-lock-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  line-height: var(--pm-label-line);
+  white-space: nowrap;
+}
+
+.pm-title-input {
+  font-size: 18px;
+  font-weight: 600;
+  min-width: 260px;
+}
+
+/* Right after the Short Name it belongs with (owner, 2026-11-21). */
+.pm-header-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+}
+
+.pm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pm-toggle[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+/* Without this, button.secondary:hover (more specific) swaps in --bg and the
+   text vanishes in the dark theme. */
+.pm-toggle[aria-pressed="true"]:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* Fixed width up to "999 stickers", so the buttons after it never move
+   (owner, 2026-11-22). The owner expects the count never to exceed 3
+   digits; 120 stickers is only a warning (shared/limits.json), not a cap. */
+.pm-sticker-count {
+  width: 13ch;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pm-banners {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pm-banners:empty {
+  display: none;
+}
+
+.pm-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.pm-banner p {
+  margin: 0;
+}
+
+.pm-banner ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.pm-banner-warn {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border: 1px solid var(--warn-border);
+}
+
+.pm-banner-warn button.pm-link {
+  color: var(--warn-text);
+}
+
+/* A dismissible banner: X | message | Dismiss. The message takes the space
+   between, so both close controls stay at the edges. */
+.pm-banner-body {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* The X on the left (owner, 2026-11-22). Inherits the banner's text colour,
+   so it matches in the info and warning banners and in both themes. */
+.pm-banner-close {
+  flex: none;
+  background: none;
+  border: none;
+  padding: 2px;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.pm-banner-close:focus-visible {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 1px;
+}
+
+.pm-banner-info {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.pm-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 16px;
+  border-radius: 12px;
+  outline: 2px dashed transparent;
+  outline-offset: 4px;
+}
+
+.pm-body.drop-target {
+  outline-color: var(--accent-ink);
+}
+
+/* ---- Grid ---- */
+
+/* Tiles have one fixed size (owner, 2026-11-21); the padding leaves room for
+   the drop markers beside the edge tiles. */
+.pm-grid {
+  list-style: none;
+  padding: 4px 10px 10px;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 132px);
+  grid-auto-rows: 164px;
+  align-content: start;
+  gap: 10px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  user-select: none;
+}
+
+.pm-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  background: var(--panel);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  cursor: default;
+}
+
+.pm-tile.selected {
+  border-color: var(--accent-ink);
+  box-shadow: 0 0 0 1px var(--accent-ink);
+}
+
+.pm-tile.missing {
+  border-style: dashed;
+  border-color: var(--warn-border);
+}
+
+.pm-tile.missing.selected {
+  border-color: var(--accent-ink);
+}
+
+/* Reorder mode is obvious at a glance: every sticker tile turns green. */
+.pm-pack.reorder .pm-tile[data-id] {
+  cursor: grab;
+  touch-action: none;
+  background: var(--reorder-bg);
+  border-color: var(--reorder-border);
+}
+
+/* The rule above out-specifies .pm-tile.missing; keep the warning border. */
+.pm-pack.reorder .pm-tile.missing[data-id] {
+  border-color: var(--warn-border);
+}
+
+/* The faded sticker that follows the cursor (reorder-drag.ts). */
+.pm-drag-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 10;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.pm-tile.dragging {
+  opacity: 0.45;
+}
+
+.pm-tile.drop-before::before,
+.pm-tile.drop-after::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 4px;
+  border-radius: 2px;
+  background: var(--accent-ink);
+}
+
+.pm-tile.drop-before::before {
+  left: -8px;
+}
+
+.pm-tile.drop-after::after {
+  right: -8px;
+}
+
+.pm-pos {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.pm-tile-img {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+}
+
+.pm-flags {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.pm-missing-art,
+.pm-thumb-empty {
+  width: 96px;
+  height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+.pm-missing-art {
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.pm-missing-art.large {
+  width: 240px;
+  height: 240px;
+}
+
+/* The thumbnail slot: unnumbered, visually distinct from stickers. */
+.pm-thumb-slot {
+  background: var(--bg);
+  border-style: dashed;
+}
+
+.pm-thumb-label {
+  align-self: flex-start;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.pm-pack.reorder .pm-thumb-slot {
+  opacity: 0.6;
+}
+
+/* ---- Panel ---- */
+
+/* scrollbar-gutter keeps the scrollbar's space reserved, so content never
+   narrows or jumps when it appears (owner, 2026-11-22); same for the grid. */
+.pm-panel {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pm-panel h2 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.pm-panel-empty p {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.pm-detail,
+.pm-aggregate,
+.pm-thumb-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pm-detail-preview {
+  display: flex;
+  justify-content: center;
+  padding: 8px;
+  background: var(--bg);
+  border-radius: 8px;
+}
+
+.pm-detail-img {
+  max-width: 100%;
+  width: 256px;
+  height: 256px;
+  object-fit: contain;
+}
+
+.pm-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.pm-meta dt {
+  color: var(--muted);
+}
+
+.pm-meta dd {
+  margin: 0;
+}
+
+/* The four-by-five box is narrower than the panel, so Copy and the count sit
+   beside it rather than taking rows above and below. */
+.pm-emoji-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pm-emoji-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* The panel's own 10px gap is enough between the label and the box.
+   Scoped so it outranks .field-label regardless of stylesheet order. */
+.pm-detail .pm-emoji-label {
+  margin: 0;
+}
+
+/* Four rows of five (owner, 2026-11-21). panels.ts sets the content width
+   from the measured emoji width (emojiBoxWidth) and grows the height instead
+   of showing a scrollbar; this width is only the first-paint fallback. */
+.pm-emoji-input {
+  box-sizing: content-box;
+  width: 165px; /* matches EMOJI_BOX_FALLBACK_WIDTH in panels.ts; CSS cannot import it */
+  /* .pm-input allows shrinking (min-width: 0); this box must keep its
+     measured width or a row drops to four emoji. */
+  flex-shrink: 0;
+  font-family: var(--font-emoji);
+  font-size: 24px;
+  line-height: 1.3;
+  resize: none;
+  overflow-y: hidden;
+}
+
+/* The hint is text, not emoji. */
+.pm-emoji-input::placeholder {
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+/* Small square icon button. */
+.pm-copy {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.pm-copy.failed {
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.pm-emoji-count {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pm-warning-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--warn-text);
+}
+
+.pm-panel-actions {
+  margin-top: 4px;
+}
+
+.pm-panel-actions button {
+  padding: 7px 12px;
+}
+
+/* ---- Dialog contents (the dialog frame is src/dialog.css) ---- */
+
+.pm-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pm-fields .field-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pm-confirm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+  gap: 8px;
+}
+
+.pm-confirm-one {
+  display: flex;
+  justify-content: center;
+}
+
+.pm-confirm-card {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.pm-confirm-card .pm-missing-art {
+  width: 72px;
+  height: 72px;
+}
+
+.pm-confirm-img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+}
+
+.pm-confirm-card.large .pm-confirm-img,
+.pm-confirm-card.large .pm-missing-art {
+  width: 200px;
+  height: 200px;
+}
+
+.pm-emoji {
+  font-family: var(--font-emoji);
+  font-size: 16px;
+}
+
+.pm-target-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.pm-target-list li[role="option"] {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+
+.pm-target-list li[aria-selected="true"] {
+  box-shadow: inset 3px 0 0 var(--accent-ink);
+  background: var(--bg);
+}
+
+.pm-target-title {
+  font-weight: 600;
+}
+
+.pm-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.pm-new-pack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pm-new-pack > button {
+  align-self: flex-start;
+}
+
+.pm .message:empty,
+.pm .pm-notice:empty {
+  display: none;
+}
+
+.pm .message {
+  margin: 0;
+}

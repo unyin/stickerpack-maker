@@ -1,4 +1,5 @@
 import "./styles.css";
+import "./dialog.css";
 import { getAppState } from "./api";
 import { renderShell } from "./shell";
 import { initTheme } from "./theme";

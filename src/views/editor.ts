@@ -80,6 +80,7 @@ import {
 } from "../editor/view/geometry";
 import { EditorStage, type CanvasTool } from "../editor/view/stage";
 import { TextEditOverlay } from "../editor/view/text-edit";
+import { confirmChoice } from "../dialog";
 import { el, errorMessage, withMessage } from "../ui";
 
 let root: HTMLElement | null = null;
@@ -146,7 +147,7 @@ function buildEditor(): HTMLElement {
   // Labelled with the actual box size in refresh(): it is capped at the canvas.
   const cropButton = button("Crop", () => run(cropToBox));
   const resetViewButton = button("Reset view", () => stage?.fit());
-  const closeButton = button("Close", () => run(closeSession));
+  const closeButton = button("Close", () => run(async () => void (await closeSession())));
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
@@ -359,21 +360,21 @@ function buildEditor(): HTMLElement {
   }
 
   /** Pick an image and decode it, asking first when it exceeds the import cap. */
-  async function pickAndImport(): Promise<{ image: RgbaImage; name: string } | null> {
-    const path = await pickImageFile();
+  async function pickAndImport(given?: string): Promise<{ image: RgbaImage; name: string } | null> {
+    const path = given ?? (await pickImageFile());
     if (!path) return null;
     const image = await importWithCap(await probeImage(path), (scale) => importImage(path, scale));
     return image ? { image, name: baseName(path) } : null;
   }
 
-  async function openImage(): Promise<void> {
+  async function openImage(path?: string): Promise<void> {
     if (session) return; // one session at a time: Close first
-    const picked = await pickAndImport();
+    const picked = await pickAndImport(path);
     if (!picked) return;
     session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(constraints)));
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
-    stage.setCropBoxVisible(showBox);
+    stage.setCropGuidesVisible(showBox);
     stage.setTool(tool);
     stage.onEditText((id) => editText(id));
     refresh(); // place the crop box overlay
@@ -454,26 +455,24 @@ function buildEditor(): HTMLElement {
 
   function toggleBox(): void {
     showBox = !showBox;
-    stage?.setCropBoxVisible(showBox);
+    stage?.setCropGuidesVisible(showBox);
     refresh();
   }
 
-  async function closeSession(): Promise<void> {
-    if (!session) return;
-    if (session.isDirty) {
-      const discard = await ask("Close the editor and discard your unsaved changes?", {
-        title: "Unsaved changes",
-        kind: "warning",
-        okLabel: "Discard",
-        cancelLabel: "Keep editing",
-      });
-      if (!discard) return;
-    }
+  /**
+   * End the session, asking first when it has unsaved changes (Close, and
+   * opening another image from the Pack Manager). Resolves false when the
+   * user keeps editing, so the session stays.
+   */
+  async function closeSession(): Promise<boolean> {
+    if (!session) return true;
+    if (session.isDirty && !(await confirmDiscard())) return false;
     textOverlay.close();
     stage?.destroy();
     stage = null;
     session = null;
     tool = "move";
+    return true;
   }
 
   // ---- Cut and paste (SPM-9) ----
@@ -857,8 +856,42 @@ function buildEditor(): HTMLElement {
   });
 
   void loadFonts();
+
+  // Pack Manager hook (SPM-3), see openFileInEditor below.
+  openFileHook = (path, showEditor) =>
+    run(async () => {
+      const closed = await closeSession(); // warns on unsaved changes
+      showEditor(); // either way: Keep editing shows the open image
+      if (closed) await openImage(path);
+    });
+
   refresh();
   return view;
+}
+
+let openFileHook: ((path: string, showEditor: () => void) => Promise<void>) | null = null;
+
+/**
+ * Open the image at `path` in the Editor, as Open image would (import cap
+ * dialog included): the Pack Manager's Edit and "open in editor" (SPM-3).
+ * One session at a time. In order (owner decision 2026-11-21): an open
+ * session with unsaved changes asks first, while the caller's view is still
+ * showing; then `showEditor` switches to the Editor either way (the canvas
+ * must be on screen to measure itself); then, unless the user kept editing,
+ * the file opens.
+ */
+export function openFileInEditor(path: string, showEditor: () => void): Promise<void> {
+  renderEditor(); // builds the Editor once, which installs the hook
+  return openFileHook ? openFileHook(path, showEditor) : Promise.resolve();
+}
+
+/** The unsaved-changes question, worded for both Close and opening another image. */
+function confirmDiscard(): Promise<boolean> {
+  return confirmChoice(
+    "Unsaved changes",
+    [el("p", {}, "The editor has unsaved changes. Do you want to discard these or continue editing?")],
+    { actionLabel: "Discard", keepLabel: "Keep editing", danger: true },
+  );
 }
 
 function button(label: string, onClick: () => void, variant?: "primary"): HTMLButtonElement {

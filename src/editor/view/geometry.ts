@@ -12,6 +12,7 @@ import {
   textLayersOf,
   type CropAction,
   type Doc,
+  type Point,
   type Rect,
   type TextLayer,
 } from "../model/document";
@@ -34,11 +35,6 @@ export interface ViewTransform {
 interface Size {
   readonly width: number;
   readonly height: number;
-}
-
-interface Point {
-  readonly x: number;
-  readonly y: number;
 }
 
 /**
@@ -71,6 +67,14 @@ export function zoomAround(view: ViewTransform, pointer: Point, deltaY: number):
   const docX = (pointer.x - view.x) / view.scale;
   const docY = (pointer.y - view.y) / view.scale;
   return { scale, x: pointer.x - docX * scale, y: pointer.y - docY * scale };
+}
+
+/**
+ * Pan by a pointer drag: the view moves by the pointer's travel since the
+ * drag began, scale unchanged. `start` is the view when the drag began.
+ */
+export function panView(start: ViewTransform, startPointer: Point, pointer: Point): ViewTransform {
+  return { scale: start.scale, x: start.x + (pointer.x - startPointer.x), y: start.y + (pointer.y - startPointer.y) };
 }
 
 /**

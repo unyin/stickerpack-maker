@@ -8,6 +8,7 @@ use serde::Serialize;
 use tauri::{Manager, State};
 
 use crate::config::AppConfig;
+use crate::pack_commands::LibraryLock;
 use crate::{editor, library, SharedConfig};
 
 /// Library lifecycle status reported to the UI.
@@ -68,6 +69,7 @@ fn lock_config<'a>(
 fn set_library_path(
     app: &tauri::AppHandle,
     state: &State<SharedConfig>,
+    lock: &State<LibraryLock>,
     dir: PathBuf,
 ) -> Result<AppStateDto, String> {
     let file = crate::config_file_path(app)?;
@@ -76,7 +78,14 @@ fn set_library_path(
     next.library_path = Some(dir);
     next.save(&file)?;
     *guard = next;
-    Ok(build_state_dto(&guard))
+    let dto = build_state_dto(&guard);
+    // Lock order is serial -> config (`with_library`), so the config guard
+    // must be released before `reset()` waits on `serial`. The path is already
+    // assigned, so any operation that starts after this point sees the new
+    // Library, and `reset()` (under serial) clears what an older one left.
+    drop(guard);
+    lock.reset(); // the memo is per Library, not per pack id
+    Ok(dto)
 }
 
 #[tauri::command(async)]
@@ -104,23 +113,26 @@ pub fn create_library(
     path: String,
     app: tauri::AppHandle,
     state: State<'_, SharedConfig>,
+    lock: State<'_, LibraryLock>,
 ) -> Result<AppStateDto, String> {
     let dir = PathBuf::from(path);
     library::create_fresh(&dir)?;
-    set_library_path(&app, &state, dir)
+    set_library_path(&app, &state, &lock, dir)
 }
 
 /// Settings: re-point at another INTACT Library (database included), then
-/// persist its path. No auto-migration, no reconstruction (SPEC §3).
+/// persist its path. An older database is upgraded on open; no reconstruction
+/// from loose files (SPEC §3).
 #[tauri::command(async)]
 pub fn repoint_library(
     path: String,
     app: tauri::AppHandle,
     state: State<'_, SharedConfig>,
+    lock: State<'_, LibraryLock>,
 ) -> Result<AppStateDto, String> {
     let dir = PathBuf::from(path);
     library::validate_intact(&dir)?;
-    set_library_path(&app, &state, dir)
+    set_library_path(&app, &state, &lock, dir)
 }
 
 // ---- Editor (ADR-0005: one-shot pixel work in Rust) ----

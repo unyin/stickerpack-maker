@@ -12,6 +12,7 @@ import {
   MIN_ZOOM,
   selectModeFor,
   sizeToolBlocker,
+  panView,
   zoomAround,
 } from "../src/editor/view/geometry";
 
@@ -134,4 +135,10 @@ test("fitView offsets are whole device pixels, so adjacent layers show no seams"
   expect([v.x, v.y]).toEqual([Math.round(49.5), Math.round(46.5)]);
   const scaled = fitView({ width: 333, height: 217 }, { width: 1000, height: 700 }, 7);
   expect(Number.isInteger(scaled.x) && Number.isInteger(scaled.y)).toBe(true);
+});
+
+test("panView moves the view by the pointer travel and keeps the scale", () => {
+  const start = { scale: 2, x: 10, y: -5 };
+  expect(panView(start, { x: 100, y: 100 }, { x: 130, y: 80 })).toEqual({ scale: 2, x: 40, y: -25 });
+  expect(panView(start, { x: 7, y: 7 }, { x: 7, y: 7 })).toEqual(start);
 });

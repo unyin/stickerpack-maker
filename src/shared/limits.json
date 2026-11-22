@@ -2,5 +2,7 @@
   "importMaxSide": 2000,
   "sticker": { "side": 512, "maxKilobytes": 512 },
   "thumbnail": { "side": 100, "maxKilobytes": 128 },
-  "text": { "minFontSize": 1, "maxFontSize": 1000 }
+  "text": { "minFontSize": 1, "maxFontSize": 1000 },
+  "pack": { "maxStickers": 120, "titleMaxChars": 64, "shortNameMaxChars": 64 },
+  "emojiString": { "minEmoji": 1, "maxEmoji": 20 }
 }

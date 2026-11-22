@@ -647,7 +647,7 @@ export function cropLayers(
   return withLayers(doc, layers);
 }
 
-/** A point in document pixels. */
+/** A point: document pixels, or screen pixels for the view's pointer math. */
 export interface Point {
   readonly x: number;
   readonly y: number;

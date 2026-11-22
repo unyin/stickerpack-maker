@@ -32,6 +32,11 @@ fn limits() {
         );
     }
     assert!(
+        get("/emojiString/maxEmoji") >= get("/emojiString/minEmoji"),
+        "{}: emojiString.maxEmoji must be at least minEmoji",
+        path.display()
+    );
+    assert!(
         get("/text/minFontSize") <= get("/text/maxFontSize"),
         "{}: text.minFontSize must not exceed text.maxFontSize",
         path.display()
@@ -47,6 +52,16 @@ fn limits() {
          pub const THUMBNAIL_SIDE: u32 = {};\n\
          /// Thumbnail mode: largest file, in KB of 1024 bytes (SPEC §7).\n\
          pub const THUMBNAIL_MAX_KB: u64 = {};\n\
+         /// Telegram's per-pack sticker cap; exceeding it warns (SPEC §3).\n\
+         pub const PACK_MAX_STICKERS: usize = {};\n\
+         /// Fewest emoji an Emoji String should hold; fewer warns (SPEC §3).\n\
+         pub const EMOJI_MIN: usize = {};\n\
+         /// Most emoji an Emoji String may hold; more warns (SPEC §3).\n\
+         pub const EMOJI_MAX: usize = {};\n\
+         /// Longest pack Title, in characters (SPEC §7).\n\
+         pub const TITLE_MAX_CHARS: usize = {};\n\
+         /// Longest Short Name, in characters (SPEC §7).\n\
+         pub const SHORT_NAME_MAX_CHARS: usize = {};\n\
          /// Text layers: smallest font size, in px (SPEC §6, SPM-9).\n\
          pub const TEXT_MIN_FONT_SIZE: u32 = {};\n\
          /// Text layers: largest font size, in px (SPEC §6, SPM-9).\n\
@@ -56,6 +71,11 @@ fn limits() {
         get("/sticker/maxKilobytes"),
         get("/thumbnail/side"),
         get("/thumbnail/maxKilobytes"),
+        get("/pack/maxStickers"),
+        get("/emojiString/minEmoji"),
+        get("/emojiString/maxEmoji"),
+        get("/pack/titleMaxChars"),
+        get("/pack/shortNameMaxChars"),
         get("/text/minFontSize"),
         get("/text/maxFontSize"),
     );

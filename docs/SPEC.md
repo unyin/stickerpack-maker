@@ -22,6 +22,15 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 - Background removal runs offline via ONNX with a one-time model download. Whether ONNX runs
   in Rust (`ort`) or the webview (onnxruntime-web) is a deferred engineering decision (own ADR).
 - Difficult implementation choices get ADRs and detailed task breakdowns.
+- **UI conventions** (owner decisions 2026-11-21, 2026-11-22):
+  - Every two-option confirmation in the app (deletes, Draft/Live, invalid import, creating
+    a Library) uses the one shared in-app dialog: the safe choice is the default (focused,
+    primary), and Esc and closing choose the safe option. Buttons read action first, safe
+    choice last. Forms that collect input (New pack, Send to pack) are not confirmations:
+    their submit button stays primary.
+  - Disabled controls look disabled (faded) and still show their reason as a tooltip.
+  - Every message that stays until dismissed has an **X** close button on its left as well as
+    **Dismiss** on its right; both do the same (owner decision 2026-11-22).
 
 ## 3. Domain model
 
@@ -37,8 +46,13 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
   `com0`–`com9`, `lpt0`–`lpt9`) are refused; an auto-derived name that would be reserved
   gets a `_pack` suffix (e.g. `con_pack`).
 - **Status**: **Draft** (default for new packs; not yet on Telegram) or **Live** (exists on
-  Telegram). v1: manual toggle both ways; Live→Draft shows a warning. Live status otherwise
-  changes nothing in v1 beyond the badge and the short-name lock.
+  Telegram). v1: manual toggle both ways; each direction asks for confirmation (owner decision
+  2026-11-21): Draft→Live confirms that going Live locks the Short Name, Live→Draft warns.
+  Both are in-app dialogs with exactly two buttons and no Cancel. Draft→Live is titled "Go Live?"
+  with **Go Live** and **Keep Draft**; Live→Draft is titled "Revert to Draft?" with **Make Draft** and
+  **Keep Live**. The keep button (Keep Draft / Keep Live) is the default (focused, primary), also on
+  Esc and close (owner decision 2026-11-21).
+  Live status otherwise changes nothing in v1 beyond the badge and the short-name lock.
 - **Thumbnail**: optional; see §6.
 - Deleting a **Draft** pack deletes its folder and files after confirmation. Deleting a
   **Live** pack deletes locally only, warning that the Telegram pack remains and must be
@@ -66,7 +80,9 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 - A **fresh** library + DB can always be created from scratch (first run, or re-point at an
   empty folder). **Reconstructing** metadata (titles, short names, emoji, status, thumbnails)
   from orphaned image files is out of scope for v1.
-- No auto-migration in v1.
+- An older Library's database is upgraded to the current schema when the app opens it: the
+  migrations it lacks are applied once, in order, in one transaction (owner decision
+  2026-11-21; ADR-0007).
 
 ## 4. Files and order (ADR-0003)
 
@@ -91,15 +107,38 @@ stickers, Missing stickers, and the thumbnail.
   selection. One selected → detail panel; several → aggregate panel.
 - **Reorder** (toggle button in the pack toolbar): drag to reorder, one sticker at a time;
   selection shortcuts inactive; Esc or the toggle exits. Reorder renames files on disk (§4).
+  Reorder mode is obvious at a glance: every sticker tile turns a theme-matched green, and a
+  faded copy of the dragged sticker follows the cursor (owner decision 2026-11-21).
 - The two modes are mutually exclusive; the toggle is always visible.
+- Sticker tiles have one fixed size and show position, preview and at most one warning
+  flag: **Missing** takes priority over the emoji-count flag. The Emoji String shows in the
+  detail panel, not on the tile (owner decisions 2026-11-21 and 2026-11-22).
+- The side panel is full-height and always beside the grid, at every window width; the grid
+  scrolls on its own (owner decision 2026-11-21). Both reserve their scrollbar's space, so
+  nothing narrows or jumps when a scrollbar appears (owner decision 2026-11-22).
+- Pack toolbar, in this order: **Refresh** (refresh icon before the label), **Add images…**,
+  the sticker count (fixed width), **Open in explorer** (opens the pack's folder), and
+  **Reorder** last, so its "Done reordering" label never moves another control (owner
+  decision 2026-11-22). The Reorder-mode instructions (including that selection is off)
+  show in the side panel, not the toolbar, so the toolbar never changes.
 
 ### Detail panel (single selection)
 - Large preview; metadata: position, format, dimensions, file size.
-- **Emoji String**: inline editable field (type, or Win+. for the Windows emoji panel),
-  adjacent one-click **copy** button, live 1–20 count warning.
-- Actions: **Edit** (opens the flattened image in the Editor); **Replace** (preserves
+- **Emoji String**: inline editable box of four rows of five that shows all 20 emoji at once
+  (type, or Win+. for the Windows emoji panel); past 20 it grows a row instead of scrolling.
+  Every space is stripped when it is saved and the count ignores spaces. Beside the box: a
+  small square icon-only **copy** button and the live 1–20 count; the count warning shows
+  below (owner decisions 2026-11-21). Emoji are drawn with the colour emoji font first, never
+  as monochrome text glyphs (owner decision 2026-11-22; SPM-17 makes the style selectable).
+- Actions: **Edit** first asks **Edit / Replace… / Cancel** (Cancel is the safe default):
+  Edit opens the flattened image in the Editor, Replace runs the Replace flow below (owner
+  decision 2026-11-21). Opening in the Editor while it has unsaved changes asks first, in the
+  shared dialog: "The editor has unsaved changes. Do you want to discard these or continue
+  editing?" (Discard / Keep editing, Keep editing by default); either way the view then
+  switches to the Editor, which opens the sticker only after Discard. **Replace** (preserves
   position + emoji; validated drop-in or via Editor, §5 replacement rules below);
-  **Send to pack…**; **Open in explorer** (folder opens with the file selected);
+  **Send to pack…**; **Open in explorer** (folder opens with the file selected; the button
+  ends with an "opens in another program" icon, as every Open in explorer button does);
   **Delete** (confirmation dialog showing preview + emoji, then permanent; Delete key
   shortcut). No double-click behavior in v1.
 
@@ -138,12 +177,27 @@ stickers, Missing stickers, and the thumbnail.
   slot at the end of the list; unnumbered file (§4).
 
 ### Pack-level
+- **UI conventions**: the app-wide dialog and dismissible-message rules are in §2.
 - Create pack (Title → auto Short Name, editable while Draft; new packs are Draft).
-- Pack header: Title always editable; Short Name editable only in Draft; Draft/Live manual
-  toggle both ways (Live→Draft warned).
-- **Bulk import**: drag-drop multiple images onto a pack. Same validity rule as drop-in —
-  valid files added as-is in drop order; invalid files rejected per-file with an
+- Pack list: shows how many packs the Library holds, but no per-pack sticker counts (each
+  pack's view shows its own); each pack has **Open in explorer**, which opens the pack's
+  folder (owner decisions 2026-11-21).
+- Pack header: **← Pack list** back button; Title always editable; Short Name editable only
+  in Draft, with "🔒 Locked" beside its label (the full reason as its tooltip) so the header
+  never changes height (owner decisions 2026-11-22); the Draft/Live badge and its button sit
+  right after the Short Name, labelled **Go Live** / **Revert to Draft** like the dialogs they
+  open (owner decision 2026-11-21). Draft/Live manual toggle both ways, each direction
+  confirmed (owner decision 2026-11-21); Draft→Live offers
+  Go Live / Keep Draft, Keep Draft by default; Live→Draft offers Make Draft / Keep Live, Keep Live
+  by default (owner decision 2026-11-21).
+- **Bulk import**: drag-drop multiple images onto a pack, or pick them with Add images. Same
+  validity rule as drop-in — valid files added as-is in natural filename order ("sticker2"
+  before "sticker10"), because Windows hands dropped files over in its own drag order, not
+  Explorer's view order (owner decision 2026-11-21); invalid files rejected per-file with an
   "open in editor" option. Imported stickers get no emoji; empty-emoji stickers are flagged.
+- Pack-view messages that stay until dismissed (notices such as "Checked the pack folder…",
+  and the "Not added" list) have an **X** on the left as well as **Dismiss** on the right
+  (owner decision 2026-11-22).
 - Desync checks on pack open + manual refresh only, never on app start (§4).
 - 120-sticker warning; pack deletion semantics per §3.
 
@@ -169,7 +223,9 @@ stickers, Missing stickers, and the thumbnail.
   draggable/resizable; drawn **above all layers** so it stays visible when layers cover the
   canvas.
   Drag the image to choose what survives. The overlay is **on by default** and the **Crop
-  box** button shows or hides it (owner decision 2026-11-20). The box is the set's side,
+  box** button shows or hides it (owner decision 2026-11-20); the toggle hides the canvas
+  outline too, one toggle for both, while the checkerboard still shows where the canvas is
+  (owner decision 2026-11-21). The box is the set's side,
   **capped at the canvas size on each axis**, so it is never larger than the canvas: a
   512×439 canvas gets a 512×439 box (owner decision 2026-11-20). It follows the canvas size,
   staying centred; when the canvas and box sides differ by an odd number, its top-left is
@@ -213,6 +269,11 @@ stickers, Missing stickers, and the thumbnail.
   the user left them (owner decision 2026-11-20). The canvas keeps its top-left corner where
   it was on screen, so the outline grows or shrinks by the same factor as the canvas.
   Undo/redo of a sizing tool behaves the same.
+- **Middle-mouse click-and-drag pans the view** without moving any layer (owner decision
+  2026-11-21). It works anywhere on the stage, over layers too, in every tool; it never
+  selects or moves a layer, and it triggers no browser autoscroll. It counts as a manual view
+  change like a left-drag pan or wheel zoom (an automatic fit never overrides it; only Reset
+  view re-fits), and the zoom readout updates.
 - **Reset view** is the only way to re-fit: it re-centres the canvas and zooms to fit it in
   the view (never above 100%), without changing the image. The view is fitted automatically
   only when an editing session opens.
@@ -321,7 +382,7 @@ stickers, Missing stickers, and the thumbnail.
 
 - Bot API sync (model is shaped for it; Draft/Live and short-name lock anticipate it).
 - Custom emoji packs (100×100), animated .TGS, video .WEBM.
-- Library auto-migration; DB reconstruction from orphaned files.
+- DB reconstruction from orphaned files.
 - Project files / version history; export/prep folders; scratch saves.
 
 ## 9. Deferred decisions
@@ -342,7 +403,6 @@ stickers, Missing stickers, and the thumbnail.
 - Group-drag reorder (moving several stickers at once).
 - Trash/recovery area for deleted stickers.
 - Bulk emoji-set: rejected as unnecessary — not planned.
-- Editor: middle-mouse click-and-drag pans the view without moving the image.
 - Editor: every edge of the selection box is grabbable for resizing, not just the corners.
 - Editor: custom canvas resizing (in v1 only Fit and Longest side change the canvas).
 - Drag and drop an image file to open it in the Editor. (v3 idea: drag and drop onto an
@@ -355,6 +415,15 @@ stickers, Missing stickers, and the thumbnail.
 - Editor: real clipboard for Cut/Copy: Ctrl+C copies the selected pixels (or the selected
   layer) to the system clipboard as PNG, Ctrl+X does the same and leaves a transparent
   hole, so stickers can be copied between sessions and apps (owner, 2026-11-21).
+- Editor: hold Shift while rotating a layer to snap to fixed angles (e.g. 15° steps) or
+  to a grid.
+- Editor: hold Shift while moving a layer to snap to whole pixels or to a grid. Note:
+  Shift+click already toggles a layer in or out of the selection, so a Shift-drag must
+  not also toggle it; and the Editor has no grid yet (owner, 2026-11-21).
+- Pack Manager: a button next to the Emoji String field that opens an emoji picker for easy
+  selection (owner, 2026-11-21).
+- v3 idea: in Reorder mode the sticker images wiggle (as on phone home screens), instead of
+  or as well as the green tint (owner, 2026-11-21: animations are a bigger job).
 
 ## 10. Draft work packages (for review — not yet filed as issues)
 
@@ -379,5 +448,5 @@ stickers, Missing stickers, and the thumbnail.
     replacement and Missing-slot deletion.
 12. **Thumbnail mode**: 100×100 editor mode + thumbnail CRUD in pack view.
 
-Dependency spine (wired in Trekker): 1 → 2 → 3; 5 → 6/7/8/9 → 10; 2+10 → 11; 5+10 → 12;
+Dependency spine (wired in Trekker): 1 → 2 → 3; 5 → 6/7/8/9; 2+6+9 → 10 (save does not wait for 7/8, owner 2026-11-21); 2+10 → 11; 5+10 → 12;
 4 gated the final shape of 3's per-sticker surface (resolved).

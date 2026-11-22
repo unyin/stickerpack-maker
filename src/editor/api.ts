@@ -5,8 +5,10 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
 import { textStyleOf, type CropInput, type CutResult, type MergeInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
 
-/** Extensions the Editor imports; mirrors IMPORT_EXTENSIONS in import.rs. */
-export const IMPORT_EXTENSIONS = ["jpg", "jpeg", "jfif", "png", "webp"];
+import { IMPORT_EXTENSIONS } from "../shared/import-extensions";
+
+/** Extensions the Editor imports (shared with the Pack Manager). */
+export { IMPORT_EXTENSIONS } from "../shared/import-extensions";
 
 /** Largest side imported without the scale-to-fit dialog (SPEC §6). */
 export { IMPORT_MAX_SIDE } from "./model/image";

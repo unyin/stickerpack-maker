@@ -3,10 +3,10 @@
 //! Missing is DERIVED from file presence (desync.rs), never stored here.
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Draft (not yet on Telegram) or Live (exists on Telegram). SPEC §3.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PackStatus {
     Draft,

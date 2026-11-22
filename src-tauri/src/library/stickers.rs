@@ -17,22 +17,18 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::files::{self, has_pending_plan, remove_names, stage_copy, sticker_file_name, Step};
 use super::packs::open_pack_files;
 use super::schema::{load_pack, load_sticker, load_stickers, Format, Sticker};
-use crate::limits::{KB, STICKER_MAX_KB};
+use crate::limits::{EMOJI_MAX, EMOJI_MIN, KB, PACK_MAX_STICKERS, STICKER_MAX_KB, STICKER_SIDE};
 
-/// Telegram's per-pack sticker cap: exceeding it warns, never blocks.
-pub const MAX_PACK_SIZE: usize = 120;
 /// Largest sticker file Telegram accepts (SPEC §7).
 pub const MAX_STICKER_BYTES: u64 = STICKER_MAX_KB * KB;
-/// Most emoji an Emoji String may hold (SPEC §3).
-pub const MAX_EMOJI: usize = 20;
 
 /// A warn-only condition (SPEC §3: drafts may be incomplete).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Warning {
-    /// Emoji String outside 1-20 emoji.
+    /// Emoji String outside the allowed emoji count.
     EmojiCount { count: usize },
-    /// Pack above the 120-sticker cap.
+    /// Pack above the pack sticker cap.
     PackSize { count: usize },
 }
 
@@ -91,22 +87,22 @@ pub fn emoji_count(emoji_string: &str) -> usize {
         .count()
 }
 
-/// Warn when an Emoji String is outside 1-20 emoji (warn only, SPEC §3).
+/// Warn when an Emoji String is outside the allowed emoji count (warn only, SPEC §3).
 pub fn emoji_warning(emoji_string: &str) -> Option<Warning> {
     let count = emoji_count(emoji_string);
-    (count == 0 || count > MAX_EMOJI).then_some(Warning::EmojiCount { count })
+    (!(EMOJI_MIN..=EMOJI_MAX).contains(&count)).then_some(Warning::EmojiCount { count })
 }
 
-/// Warn when a pack holds more than 120 stickers (warn only, SPEC §3).
+/// Warn when a pack holds more than the pack sticker cap (warn only, SPEC §3).
 pub fn pack_size_warning(count: usize) -> Option<Warning> {
-    (count > MAX_PACK_SIZE).then_some(Warning::PackSize { count })
+    (count > PACK_MAX_STICKERS).then_some(Warning::PackSize { count })
 }
 
 /// Validate a file entering a pack as a sticker (drop-in, bulk import,
-/// replacement): PNG or WEBP by extension AND by content signature, at
-/// most `STICKER_MAX_KB`. Returns its format. Dimension rules (longest side
-/// exactly `limits::STICKER_SIDE`) need image decoding and are enforced at
-/// the import/save seams (SPM-10/11), not here.
+/// replacement; SPEC §5, §7): PNG or WEBP by extension AND by content
+/// signature, at most `STICKER_MAX_KB`, and one side exactly `STICKER_SIDE`
+/// with the other at most that (read from the image header, not decoded).
+/// Returns its format.
 pub fn validate_sticker_file(path: &Path) -> Result<Format, String> {
     let ext = path
         .extension()
@@ -138,7 +134,28 @@ pub fn validate_sticker_file(path: &Path) -> Result<Format, String> {
             format.as_str().to_ascii_uppercase()
         ));
     }
+    let (width, height) = image_dimensions(path)?;
+    if !sticker_dimensions_ok(width, height) {
+        return Err(format!(
+            "is {width}×{height} px; one side must be exactly {STICKER_SIDE} px and the other at most {STICKER_SIDE} px"
+        ));
+    }
     Ok(format)
+}
+
+/// True when `width`×`height` fits a sticker: the longest side exactly
+/// `STICKER_SIDE` (so the other is at most that). SPEC §7.
+pub fn sticker_dimensions_ok(width: u32, height: u32) -> bool {
+    width.max(height) == STICKER_SIDE
+}
+
+/// An image file's pixel size from its header (no full decode).
+pub fn image_dimensions(path: &Path) -> Result<(u32, u32), String> {
+    image::ImageReader::open(path)
+        .and_then(|r| r.with_guessed_format())
+        .map_err(|e| format!("cannot read file: {e}"))?
+        .into_dimensions()
+        .map_err(|e| format!("cannot read the image size: {e}"))
 }
 
 /// Where a slot's file comes from: the sticker's current file, or a staged
@@ -375,13 +392,16 @@ pub fn delete_stickers(
     load_stickers(conn, pack_id)
 }
 
-/// Set a sticker's Emoji String exactly as given (one-click copy must
-/// reproduce it). Never blocks: check `emoji_warning` for the 1-20 rule.
+/// Set a sticker's Emoji String with every whitespace character removed
+/// (owner decision 2026-11-21: Telegram takes a plain run of emoji); the
+/// stored string is what one-click copy reproduces. Never blocks: check
+/// `emoji_warning` for the emoji count rule.
 pub fn set_emoji_string(conn: &Connection, sticker_id: i64, emoji_string: &str) -> Result<Sticker, String> {
+    let stripped: String = emoji_string.chars().filter(|c| !c.is_whitespace()).collect();
     let changed = conn
         .execute(
             "UPDATE stickers SET emoji_string = ?1 WHERE id = ?2",
-            params![emoji_string, sticker_id],
+            params![stripped, sticker_id],
         )
         .map_err(|e| format!("cannot update sticker {sticker_id}: {e}"))?;
     if changed == 0 {
@@ -585,21 +605,8 @@ mod tests {
     use rusqlite::params;
     use std::fs;
 
-    const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
-
-    fn png(tag: &str) -> Vec<u8> {
-        [PNG_MAGIC, tag.as_bytes()].concat()
-    }
-
-    fn webp(tag: &str) -> Vec<u8> {
-        [b"RIFF\x00\x00\x00\x00WEBP".as_slice(), tag.as_bytes()].concat()
-    }
-
-    /// Tag written after the magic bytes: identifies a file's content.
-    fn tag_of(bytes: &[u8]) -> String {
-        let skip = if bytes.starts_with(PNG_MAGIC) { 8 } else { 12 };
-        String::from_utf8(bytes[skip..].to_vec()).unwrap()
-    }
+    use crate::library::test_images::{png, png_sized, tag_of, webp, webp_sized};
+    use crate::limits::STICKER_SIDE;
 
     /// A Library plus a separate folder of source images to import.
     struct Lib {
@@ -740,13 +747,65 @@ mod tests {
         let lib = Lib::new();
         assert_eq!(validate_sticker_file(&lib.source("a.png", "x")).unwrap(), Format::Png);
         assert_eq!(validate_sticker_file(&lib.source("b.WEBP", "x")).unwrap(), Format::Webp);
+        // Padding after the image data makes a valid image exactly the limit, or one byte over.
+        let padded = |extra: usize| {
+            let image = png("");
+            [image.clone(), vec![0u8; MAX_STICKER_BYTES as usize - image.len() + extra]].concat()
+        };
         let big = lib.sources.path().join("big.png");
-        fs::write(&big, [PNG_MAGIC, &vec![0u8; MAX_STICKER_BYTES as usize]].concat()).unwrap();
+        fs::write(&big, padded(1)).unwrap();
         let err = validate_sticker_file(&big).unwrap_err();
         assert!(err.contains(&format!("{STICKER_MAX_KB} KB")), "unexpected error: {err}");
         let at_limit = lib.sources.path().join("limit.png");
-        fs::write(&at_limit, [PNG_MAGIC, &vec![0u8; MAX_STICKER_BYTES as usize - 8]].concat()).unwrap();
+        fs::write(&at_limit, padded(0)).unwrap();
         assert!(validate_sticker_file(&at_limit).is_ok());
+    }
+
+    #[test]
+    fn sticker_files_need_one_side_exactly_the_sticker_side() {
+        let lib = Lib::new();
+        let side = STICKER_SIDE;
+        let write = |name: &str, bytes: Vec<u8>| {
+            let path = lib.sources.path().join(name);
+            fs::write(&path, bytes).unwrap();
+            path
+        };
+        // Longest side exactly the sticker side, either orientation, PNG or WEBP.
+        for (w, h) in [(side, side), (side, 1), (1, side), (side, side - 1)] {
+            assert!(validate_sticker_file(&write("ok.png", png_sized(w, h, ""))).is_ok(), "{w}x{h}");
+            assert!(validate_sticker_file(&write("ok.webp", webp_sized(w, h, ""))).is_ok(), "{w}x{h}");
+        }
+        // Too small on both sides, or a side above the limit.
+        for (w, h) in [(side - 1, side - 1), (side + 1, side), (side, side + 1), (1, 1)] {
+            let err = validate_sticker_file(&write("bad.png", png_sized(w, h, ""))).unwrap_err();
+            assert!(err.contains(&format!("{w}×{h}")), "unexpected error: {err}");
+            assert!(err.contains(&format!("exactly {side} px")), "unexpected error: {err}");
+            assert!(validate_sticker_file(&write("bad.webp", webp_sized(w, h, ""))).is_err());
+        }
+        // Truncated image data after a valid signature: the size cannot be read.
+        assert!(validate_sticker_file(&write("cut.png", png("")[..12].to_vec())).is_err());
+        assert!(sticker_dimensions_ok(side, 3));
+        assert!(!sticker_dimensions_ok(side + 1, 3));
+    }
+
+    #[test]
+    fn imports_and_replacements_enforce_the_dimension_rule() {
+        let mut lib = Lib::new();
+        let pack = lib.pack("p");
+        let wrong = lib.sources.path().join("small.png");
+        fs::write(&wrong, png_sized(STICKER_SIDE / 2, STICKER_SIDE / 2, "")).unwrap();
+        let items = [
+            lib.new_sticker("a.png", "A", ""),
+            NewSticker { path: wrong.clone(), emoji_string: String::new() },
+        ];
+        let outcome = lib.add(pack.id, &items, None).unwrap();
+        assert_eq!(outcome.added.len(), 1);
+        assert_eq!(outcome.rejected[0].path, wrong);
+        let sticker = outcome.added[0].clone();
+        let err = replace_sticker_file(&mut lib.conn, lib.dir.path(), sticker.id, &wrong).unwrap_err();
+        assert!(err.contains("px"), "unexpected error: {err}");
+        assert_eq!(lib.tags(pack.id), some(&["A"]));
+        lib.assert_consistent(pack.id);
     }
 
     #[test]
@@ -976,6 +1035,18 @@ mod tests {
         assert_eq!(emoji_warning(&edited.emoji_string), None);
         assert_eq!(set_emoji_string(&lib.conn, s[0].id, "").unwrap().emoji_string, "");
         assert!(set_emoji_string(&lib.conn, 999, "😀").is_err());
+    }
+
+    #[test]
+    fn emoji_string_drops_every_whitespace_but_keeps_zwj_sequences() {
+        let mut lib = Lib::new();
+        let pack = lib.pack("p");
+        let s = lib.seed(pack.id, &["A"]);
+        // Spaces, a tab, a newline and a no-break space go; the ZWJ family,
+        // the flag and the VS16 heart stay intact.
+        let edited = set_emoji_string(&lib.conn, s[0].id, " 👨‍👩‍👧 🇫🇷\t❤️\n\u{a0}🎉 ").unwrap();
+        assert_eq!(edited.emoji_string, "👨‍👩‍👧🇫🇷❤️🎉");
+        assert_eq!(emoji_count(&edited.emoji_string), 4);
     }
 
     // ---- Replace ----
