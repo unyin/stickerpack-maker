@@ -92,7 +92,8 @@ export const EXHAUSTED_TITLE = "Too large even as WEBP";
 
 /**
  * Even WEBP at its lowest quality is over the cap: the owner's own words
- * (decision 2026-11-22, CMT-241), with the active constraint set's limit.
+ * (decision 2026-11-22, CMT-241), with the cap the save was held to (the
+ * active constraint set's, or the debug override's in a dev build).
  */
 export function exhaustedText(maxKilobytes: number): string {
   return (

@@ -418,6 +418,12 @@ stickers, Missing stickers, and the thumbnail.
     you." ({limit} is the active constraint set's size cap, e.g. 512 KB.) **Maybe I can fix
     it**, the default, returns to the Editor; **Nah fuck it** (red) closes the session at
     once, without the unsaved-changes question: the button is the discard choice.
+  - Dev-only test hook (owner approved 2026-11-22): in a debug build (`bun run tauri dev`),
+    the environment variable `SPM_DEBUG_SAVE_CAP_KB` set to a whole number of KB (at least
+    1) replaces the size cap the Rust save holds the file to, for PNG and the WEBP quality
+    search alike, so the "even WEBP" dialog can be reached by hand; it then names that cap.
+    Other values are ignored with a warning on stderr. Release builds compile it out; the
+    Editor's readout and Save blocking always use the real limits.
 - **Saving is blocked unless constraints are met** — no warn-and-proceed path:
   - Sticker mode: longest side exactly **512 px** and file ≤ **512 KB**.
   - Thumbnail mode: exactly **100×100 px** and file ≤ **128 KB**, PNG/WEBP.

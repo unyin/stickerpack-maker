@@ -30,6 +30,7 @@ import {
   savedText,
   type SaveFormat,
   type SaveTarget,
+  type TooLarge,
 } from "../editor/save";
 import { saveDialog } from "../editor/view/save-dialog";
 import { packMemory } from "../pack-manager/model/pack-memory";
@@ -537,7 +538,7 @@ function buildEditor(): HTMLElement {
     const current = session;
     if (!current || saveBlocker(current.doc, constraints)) return;
     const doc = current.doc;
-    let exhausted = false;
+    let exhausted: TooLarge | null = null;
     await saveDialog({
       constraints,
       format: lastFormat,
@@ -553,7 +554,7 @@ function buildEditor(): HTMLElement {
         });
         if (result.kind === "declined") return declinedText(result.outcome);
         if (result.kind === "exhausted") {
-          exhausted = true;
+          exhausted = result.outcome;
           return null; // the save dialog closes; the question below follows
         }
         packMemory.lastSavedPackId = pack.id;
@@ -566,7 +567,10 @@ function buildEditor(): HTMLElement {
     });
     // Even WEBP at its lowest quality is too large (owner decision 2026-11-22):
     // back to the Editor, or give up on this session without the unsaved-changes question.
-    if (exhausted && (await confirmGiveUp(exhaustedText(constraints.maxKilobytes))) && session === current) {
+    // Its limit is the cap Rust held the save to: the constraint set's (or the debug override's).
+    // (`submit` sets `exhausted` in a callback, which TypeScript's narrowing cannot see.)
+    const tooLarge = exhausted as TooLarge | null;
+    if (tooLarge && (await confirmGiveUp(exhaustedText(tooLarge.maxKilobytes))) && session === current) {
       endSession();
     }
   }

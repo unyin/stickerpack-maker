@@ -17,7 +17,8 @@ export interface PackManagerNav {
 let cached: { library: string | null; root: HTMLElement; shown(): void; dispose(): void } | null = null;
 
 export function renderPackManager(library: string | null, nav: PackManagerNav): HTMLElement {
-  if (cached?.library !== library) forgetPackManager();
+  // Only a built Pack Manager can be stale (a first build must keep the Editor's last-saved pack).
+  if (cached && cached.library !== library) forgetPackManager();
   cached ??= build(library, nav);
   cached.shown();
   return cached.root;

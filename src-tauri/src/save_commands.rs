@@ -79,11 +79,13 @@ pub fn editor_save_image(
     let meta: SaveMeta = serde_json::from_str(header).map_err(|e| format!("the save header is invalid: {e}"))?;
     // Every target is a sticker slot (see SaveTarget).
     let set = ConstraintSet::Sticker;
+    let cap_kb = save_cap_kb(set);
     // The pixel work runs before taking the Library lock.
-    let encoded = match render_for_save(set, &meta.doc, body, editor::text::system_fonts(), meta.format)? {
+    let encoded = match render_for_save(set, &meta.doc, body, editor::text::system_fonts(), meta.format, cap_kb)? {
         EncodeOutcome::Fits(encoded) => encoded,
+        // The cap actually used, so the dialog names it (the override's, in a debug build).
         EncodeOutcome::TooLarge { format, smallest } => {
-            return Ok(SaveOutcome::TooLarge { format, bytes: smallest, max_kilobytes: set.max_kilobytes() })
+            return Ok(SaveOutcome::TooLarge { format, bytes: smallest, max_kilobytes: cap_kb })
         }
     };
     with_library(&config, &lock, |conn, dir| {
@@ -94,6 +96,36 @@ pub fn editor_save_image(
         }
         Ok(SaveOutcome::Saved { sticker, bytes: encoded.bytes.len(), quality: encoded.quality })
     })
+}
+
+/// Environment variable of the dev-only size-cap override (debug builds only).
+#[cfg(any(debug_assertions, test))]
+const DEBUG_CAP_VAR: &str = "SPM_DEBUG_SAVE_CAP_KB";
+
+/// The size cap a save is held to, in KB: the constraint set's. In a debug
+/// build (`bun run tauri dev`), `SPM_DEBUG_SAVE_CAP_KB` set to a whole number
+/// of KB replaces it, so the owner can reach the "even WEBP is too large"
+/// dialog by hand (SPEC §6 Save, dev-only test hook). Release builds compile
+/// the override out entirely. The webview's checks keep the real limits.
+fn save_cap_kb(set: ConstraintSet) -> u64 {
+    #[cfg(debug_assertions)]
+    if let Ok(raw) = std::env::var(DEBUG_CAP_VAR) {
+        match parse_cap_kb(&raw) {
+            Ok(kb) => return kb,
+            Err(e) => eprintln!("warning: ignoring {DEBUG_CAP_VAR}={raw:?}: {e}"),
+        }
+    }
+    set.max_kilobytes()
+}
+
+/// The override's value: a whole number of KB, at least 1.
+#[cfg(any(debug_assertions, test))]
+fn parse_cap_kb(raw: &str) -> Result<u64, String> {
+    match raw.trim().parse::<u64>() {
+        Ok(0) => Err("the cap must be at least 1 KB".to_string()),
+        Ok(kb) => Ok(kb),
+        Err(e) => Err(format!("not a whole number of KB ({e})")),
+    }
 }
 
 /// Write encoded bytes into the Library at `target`. The core copies from a
@@ -221,6 +253,21 @@ mod tests {
         let err = write_sticker(&mut lib.conn, lib.dir.path(), SaveTarget::Append { pack_id: pack.id }, &small).unwrap_err();
         assert!(err.starts_with("Not saved:"), "{err}");
         assert!(load_stickers(&lib.conn, pack.id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_debug_cap_override_takes_a_positive_whole_number_of_kb() {
+        assert_eq!(parse_cap_kb("1"), Ok(1));
+        assert_eq!(parse_cap_kb(" 40 "), Ok(40));
+        assert!(parse_cap_kb("0").is_err());
+        assert!(parse_cap_kb("-3").is_err());
+        assert!(parse_cap_kb("1.5").is_err());
+        assert!(parse_cap_kb("").is_err());
+        assert!(parse_cap_kb("lots").is_err());
+        // Unset (as in every test run), the constraint set's cap applies.
+        if std::env::var(DEBUG_CAP_VAR).is_err() {
+            assert_eq!(save_cap_kb(ConstraintSet::Sticker), STICKER_MAX_KB);
+        }
     }
 
     #[test]

@@ -98,7 +98,8 @@ pub fn flatten(layers: &[LayerInput], width: u32, height: u32) -> Result<Rgba, S
 }
 
 /// The whole save pixel path: check the canvas size against `set`, flatten,
-/// and encode as `format` within the set's byte cap. The caller writes
+/// and encode as `format` within `max_kilobytes` (the set's cap, except under
+/// the debug-build test override, save_commands.rs). The caller writes
 /// `EncodeOutcome::Fits`; `TooLarge` is reported to the user.
 pub fn render_for_save(
     set: ConstraintSet,
@@ -106,13 +107,14 @@ pub fn render_for_save(
     body: &[u8],
     fonts: &Database,
     format: SaveFormat,
+    max_kilobytes: u64,
 ) -> Result<EncodeOutcome, String> {
     if let Some(problem) = set.size_problem(doc.width, doc.height) {
         return Err(format!("Not saved: {problem}."));
     }
     let layers = split_save_layers(doc, body, fonts)?;
     let image = flatten(&layers, doc.width, doc.height)?;
-    encode_within(&image, format, set.max_bytes())
+    encode_within(&image, format, (max_kilobytes * KB) as usize)
 }
 
 #[cfg(test)]
@@ -247,10 +249,10 @@ mod tests {
     fn a_wrong_size_is_refused_before_anything_is_encoded() {
         let fonts = Database::new();
         let (doc, body) = raster_doc(STICKER_SIDE - 1, 4);
-        let err = render_for_save(ConstraintSet::Sticker, &doc, &body, &fonts, SaveFormat::Png).unwrap_err();
+        let err = render_for_save(ConstraintSet::Sticker, &doc, &body, &fonts, SaveFormat::Png, STICKER_MAX_KB).unwrap_err();
         assert!(err.starts_with("Not saved:"), "{err}");
         let (doc, body) = raster_doc(THUMBNAIL_SIDE, THUMBNAIL_SIDE + 1);
-        assert!(render_for_save(ConstraintSet::Thumbnail, &doc, &body, &fonts, SaveFormat::Webp).is_err());
+        assert!(render_for_save(ConstraintSet::Thumbnail, &doc, &body, &fonts, SaveFormat::Webp, THUMBNAIL_MAX_KB).is_err());
     }
 
     #[test]
@@ -262,7 +264,7 @@ mod tests {
         ] {
             let (doc, body) = raster_doc(w, h);
             for format in [SaveFormat::Png, SaveFormat::Webp] {
-                match render_for_save(set, &doc, &body, &fonts, format).unwrap() {
+                match render_for_save(set, &doc, &body, &fonts, format, set.max_kilobytes()).unwrap() {
                     EncodeOutcome::Fits(out) => {
                         assert!(out.bytes.len() <= set.max_bytes());
                         let back = image::load_from_memory(&out.bytes).unwrap();

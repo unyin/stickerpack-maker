@@ -181,6 +181,7 @@ export class Combobox<T> {
 
   /** Show the items matching `query`, highlighting the first. */
   private filter(query: string): void {
+    this.setActive(-1); // unmark the highlighted option of the previous list
     this.shown = this.config.match(this.items, query);
     this.list.replaceChildren(...this.shown.map((i) => this.optionOf(i)!));
     this.list.hidden = this.shown.length === 0;
