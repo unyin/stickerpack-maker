@@ -578,23 +578,25 @@ export function cropOutcome(plan: readonly CropAction[]): CropOutcome {
 /**
  * A layer handed to Rust for merging or cropping: a raster layer's pixels,
  * or a text layer's text (Rust rasterises it at its transform, SPM-9).
+ * Not the same shape as Rust's `placement::LayerInput`, which is the
+ * pixels-only form Rust builds from this after rasterising text.
  */
-export type MergeInput =
+export type LayerInput =
   | { readonly image: RgbaImage; readonly transform: Transform }
   | { readonly text: TextStyle; readonly render: TextRender; readonly transform: Transform };
 
 /** A model layer as a merge or crop input: the one raster/text dispatch on the TypeScript side. */
-export function layerInput(layer: Layer): MergeInput {
+export function layerInput(layer: Layer): LayerInput {
   if (layer.kind === "raster") return { image: layer.image, transform: layer.transform };
   return { text: textStyleOf(layer), render: layer.render, transform: layer.transform };
 }
 
 /**
- * A layer handed to the Rust crop with the whole pixels it keeps: the layer
- * as for a merge plus its `clip` (a crossing text layer is rasterised by
+ * A layer handed to the Rust crop with the whole pixels it keeps: its
+ * LayerInput plus its `clip` (a crossing text layer is rasterised by
  * Rust into just that clip, SPM-9).
  */
-export type CropInput = MergeInput & { readonly clip: Rect };
+export type CropInput = LayerInput & { readonly clip: Rect };
 
 /** The layers a plan clips, text included, with what Rust needs to re-render each. */
 export function cropClipInputs(doc: Doc, plan: readonly CropAction[]): (CropInput & { readonly id: string })[] {
@@ -647,7 +649,7 @@ export function cropLayers(
   return withLayers(doc, layers);
 }
 
-/** A point: document pixels, or screen pixels for the view's pointer math. */
+/** A point; the model uses document pixels. */
 export interface Point {
   readonly x: number;
   readonly y: number;

@@ -1,7 +1,7 @@
 //! Editor import pipeline (SPEC §6 "Import and canvas"): .jpg, .jpeg,
 //! .jfif, .png, .webp; images larger than the import cap (`IMPORT_MAX_SIDE`
-//! square) need the owner's OK to scale to fit (longest side at the cap,
-//! aspect preserved) — Cancel aborts. Pasted clipboard images (SPM-9)
+//! square) need "Scale to fit" in the cap dialog (longest side at the cap,
+//! aspect preserved); Cancel aborts. Pasted clipboard images (SPM-9)
 //! arrive as encoded bytes and follow the same rules.
 
 use std::io::{BufRead, Cursor, Seek};
@@ -112,7 +112,7 @@ pub fn fit_within(width: u32, height: u32, max_side: u32) -> (u32, u32) {
 
 /// Decode an image for the Editor: straight RGBA8, EXIF orientation
 /// applied. An image over the import cap is refused unless `scale_to_fit` (the
-/// owner pressed OK in the cap dialog), in which case it is resampled with
+/// owner chose "Scale to fit" in the cap dialog), in which case it is resampled with
 /// Lanczos3, alpha-aware so transparent edges keep their colour.
 pub fn import(path: &Path, scale_to_fit: bool) -> Result<Rgba, String> {
     let (decoder, orientation) = open_decoder(path)?;

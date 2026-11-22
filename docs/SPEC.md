@@ -30,7 +30,10 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
     their submit button stays primary.
   - Disabled controls look disabled (faded) and still show their reason as a tooltip.
   - Every message that stays until dismissed has an **X** close button on its left as well as
-    **Dismiss** on its right; both do the same (owner decision 2026-11-22).
+    **Dismiss** on its right; both do the same (owner decision 2026-11-22). The red message
+    line (errors and blocked-action reasons, in the Editor and the Pack Manager) is not such a
+    message: it stays until the next command replaces or clears it, and has neither (owner
+    decision 2026-11-22).
 
 ## 3. Domain model
 
@@ -209,8 +212,9 @@ stickers, Missing stickers, and the thumbnail.
   **100×100** for thumbnails (owner decision 2026-11-20); it is never set from the imported
   image. The opened image is placed at its native pixel size, centred on the canvas, and may
   overflow it.
-- Imports larger than **2000×2000** (the import cap) trigger a dialog: **OK** scales to fit
-  within 2000×2000 preserving aspect ratio (longest side 2000); **Cancel** aborts the import.
+- Imports larger than **2000×2000** (the import cap) trigger the shared two-option dialog
+  (§2): **Scale to fit** scales to fit within 2000×2000 preserving aspect ratio (longest
+  side 2000); **Cancel**, the default, aborts the import.
 - The image is draggable on the canvas (pan/zoom for editing comfort).
 - One session at a time (owner decision 2026-11-20): with no session open, **Open image**
   starts one; while a session is open, another image can only be brought in with **Add image

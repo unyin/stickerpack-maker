@@ -58,8 +58,9 @@ export function fitView(view: Size, doc: Size, margin: number): ViewTransform {
 }
 
 /**
- * Zoom one wheel notch around the pointer: negative `deltaY` zooms in. The
- * document point under the pointer stays under it. Clamped to MIN/MAX_ZOOM.
+ * Zoom one wheel notch around the pointer (the model's Point, in screen pixels):
+ * negative `deltaY` zooms in. The document point under the pointer stays under
+ * it. Clamped to MIN/MAX_ZOOM.
  */
 export function zoomAround(view: ViewTransform, pointer: Point, deltaY: number): ViewTransform {
   const factor = deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;

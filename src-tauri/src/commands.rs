@@ -146,7 +146,7 @@ pub fn editor_probe_image(path: String) -> Result<editor::import::ImageInfo, Str
 
 /// Decode an image for the Editor and return it as a binary frame (u32 LE
 /// width, u32 LE height, straight RGBA8) — raw bytes, never JSON.
-/// `scale_to_fit` is the owner's OK in the import cap dialog.
+/// `scale_to_fit` is "Scale to fit" in the import cap dialog.
 #[tauri::command(async)]
 pub fn editor_import_image(path: String, scale_to_fit: bool) -> Result<tauri::ipc::Response, String> {
     let image = editor::import::import(&PathBuf::from(path), scale_to_fit)?;
@@ -207,7 +207,7 @@ fn header<'a>(request: &'a tauri::ipc::Request<'_>, name: &str) -> Result<&'a st
 }
 
 /// Header saying whether a pasted image over the import cap may be scaled
-/// to fit ("true" is the owner's OK in the cap dialog).
+/// to fit ("true" is "Scale to fit" in the cap dialog).
 pub const SCALE_TO_FIT_HEADER: &str = "x-scale-to-fit";
 
 /// Probe a pasted image (SPM-9): raw body = its encoded bytes (PNG, JPEG or

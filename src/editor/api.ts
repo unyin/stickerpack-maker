@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
-import { textStyleOf, type CropInput, type CutResult, type MergeInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
+import { textStyleOf, type CropInput, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
 
 import { IMPORT_EXTENSIONS } from "../shared/import-extensions";
 
@@ -25,7 +25,7 @@ export function probeImage(path: string): Promise<ImageInfo> {
 }
 
 /**
- * Decode an image in Rust. `scaleToFit` is the owner's OK in the import
+ * Decode an image in Rust. `scaleToFit` is "Scale to fit" in the import
  * cap dialog; without it an oversize image is refused.
  */
 export async function importImage(
@@ -68,7 +68,7 @@ export async function pickImageFile(): Promise<string | null> {
   return typeof selected === "string" ? selected : null;
 }
 
-/** Header naming each merge input's size and transform; mirrors MERGE_LAYERS_HEADER. */
+/** Header naming each layer's size and transform; mirrors MERGE_LAYERS_HEADER. */
 export const MERGE_LAYERS_HEADER = "x-merge-layers";
 
 /**
@@ -89,7 +89,7 @@ function bytesOf(image: RgbaImage): Uint8Array {
  * one raw body, and per layer its size and transform (plus, for text, its
  * text and no body bytes; the size is then its rendered box).
  */
-function encodeLayers(inputs: readonly MergeInput[]): { body: Uint8Array; meta: Record<string, unknown>[] } {
+function encodeLayers(inputs: readonly LayerInput[]): { body: Uint8Array; meta: Record<string, unknown>[] } {
   const parts = inputs.map((i) =>
     "image" in i
       ? { pixels: bytesOf(i.image), meta: { width: i.image.width, height: i.image.height, transform: i.transform } }
@@ -119,7 +119,7 @@ export interface PlacedImage {
  * Composite layers (bottom to top) in Rust (ADR-0005), text included.
  * Pixels go as one raw body; sizes, transforms and text ride in a header.
  */
-export async function mergeImages(inputs: readonly MergeInput[]): Promise<PlacedImage> {
+export async function mergeImages(inputs: readonly LayerInput[]): Promise<PlacedImage> {
   const { body, meta } = encodeLayers(inputs);
   const frame = await invokeRaw("editor_merge_layers", body, MERGE_LAYERS_HEADER, meta);
   return decodePlacedFrame(frame);
@@ -225,7 +225,7 @@ export function probePasted(bytes: Uint8Array): Promise<ImageInfo> {
   return invoke<ImageInfo>("editor_probe_pasted", bytes);
 }
 
-/** Decode a pasted image in Rust with the import cap rule; `scaleToFit` is the OK in the cap dialog. */
+/** Decode a pasted image in Rust with the import cap rule; `scaleToFit` is "Scale to fit" in the cap dialog. */
 export async function importPasted(bytes: Uint8Array, scaleToFit: boolean): Promise<RgbaImage> {
   const frame = await invokeRaw("editor_import_pasted", bytes, SCALE_TO_FIT_HEADER, scaleToFit);
   return decodeFrame(frame);

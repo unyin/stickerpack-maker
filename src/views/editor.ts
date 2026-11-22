@@ -3,7 +3,6 @@
 // pasting (Ctrl+V) bring in other images; "Close" ends it (warning on unsaved
 // changes). The session survives switching tabs: the view is built once.
 // SPM-9 adds the text tool, the cut selection tools and paste.
-import { ask } from "@tauri-apps/plugin-dialog";
 import "../editor/editor.css";
 import { baseName } from "../api";
 import {
@@ -341,21 +340,13 @@ function buildEditor(): HTMLElement {
 
   /**
    * Decode an image with the import cap rule (SPEC §6): an image over the
-   * cap needs the OK in the scale-to-fit dialog; Cancel aborts (null).
+   * cap needs "Scale to fit" in the shared dialog; Cancel aborts (null).
    */
   async function importWithCap(
     info: ImageInfo,
     decode: (scaleToFit: boolean) => Promise<RgbaImage>,
   ): Promise<RgbaImage | null> {
-    if (info.exceedsCap) {
-      const side = `${IMPORT_MAX_SIDE}×${IMPORT_MAX_SIDE}`;
-      const ok = await ask(
-        `This image is ${info.width}×${info.height}, larger than ${side}.\n\n` +
-          `OK scales it to fit within ${side} (longest side ${IMPORT_MAX_SIDE}, aspect ratio kept). Cancel aborts the import.`,
-        { title: "Image too large", kind: "warning", okLabel: "OK", cancelLabel: "Cancel" },
-      );
-      if (!ok) return null;
-    }
+    if (info.exceedsCap && !(await confirmScaleToFit(info))) return null;
     return decode(info.exceedsCap);
   }
 
@@ -891,6 +882,23 @@ function confirmDiscard(): Promise<boolean> {
     "Unsaved changes",
     [el("p", {}, "The editor has unsaved changes. Do you want to discard these or continue editing?")],
     { actionLabel: "Discard", keepLabel: "Keep editing", danger: true },
+  );
+}
+
+/** The import cap question (SPEC §6); Cancel, the safe choice, aborts the import. */
+function confirmScaleToFit(info: ImageInfo): Promise<boolean> {
+  const side = `${IMPORT_MAX_SIDE}×${IMPORT_MAX_SIDE}`;
+  return confirmChoice(
+    "Image too large",
+    [
+      el("p", {}, `This image is ${info.width}×${info.height}, larger than ${side}.`),
+      el(
+        "p",
+        {},
+        `Scale it to fit within ${side}? The longest side becomes ${IMPORT_MAX_SIDE} and the aspect ratio is kept.`,
+      ),
+    ],
+    { actionLabel: "Scale to fit", keepLabel: "Cancel" },
   );
 }
 
