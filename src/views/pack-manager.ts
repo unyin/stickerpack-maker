@@ -6,12 +6,13 @@
 import "../pack-manager/pack-manager.css";
 import { el, errorMessage } from "../ui";
 import { packMemory } from "../pack-manager/model/pack-memory";
+import type { StickerOrigin } from "../editor/save";
 import { buildPackList } from "../pack-manager/view/pack-list";
 import { buildPackView, type PackViewHandle } from "../pack-manager/view/pack-view";
 
 export interface PackManagerNav {
-  /** Show the Editor with this image open. */
-  openInEditor(path: string): void;
+  /** Show the Editor with this image open; `origin` when it is a pack's sticker (Edit). */
+  openInEditor(path: string, origin?: StickerOrigin): void;
 }
 
 let cached: { library: string | null; root: HTMLElement; shown(): void; dispose(): void } | null = null;

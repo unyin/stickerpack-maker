@@ -3,7 +3,7 @@
 // (editor_save_image); this decides when Save is blocked, runs the owner's
 // size flow (CMT-144) and words what happened.
 import { formatBytes } from "../pack-manager/model/messages";
-import type { Sticker } from "../pack-manager/api";
+import type { PackView, Sticker } from "../pack-manager/api";
 import { constraintStatus, readoutText, type ConstraintSet } from "./model/constraints";
 import type { Size } from "./model/document";
 
@@ -15,6 +15,57 @@ export type SaveTarget =
   | { readonly kind: "append"; readonly packId: number }
   /** An existing sticker's image, keeping its position and Emoji String (SPM-11). */
   | { readonly kind: "replace"; readonly stickerId: number };
+
+/**
+ * The sticker a session edits, when it was opened with the Pack Manager's
+ * Edit (owner decision 2026-11-22): saving offers to replace it. Position and
+ * pack title are as they were when it was opened, for the "no longer
+ * exists" message; the dialog shows the current ones.
+ */
+export interface StickerOrigin {
+  readonly stickerId: number;
+  readonly packId: number;
+  readonly position: number;
+  readonly packTitle: string;
+}
+
+/** The origin sticker as it is now: where it sits and its format. */
+export interface OriginNow {
+  readonly position: number;
+  readonly packTitle: string;
+  readonly format: SaveFormat;
+}
+
+/**
+ * Find the origin sticker in its pack as it is now (`view` null: the pack
+ * could not be read, e.g. deleted). It may have moved within its pack
+ * (Reorder): that is still the same sticker. Gone (deleted, moved to another
+ * pack, another Library): why it cannot be replaced.
+ */
+export function resolveOrigin(origin: StickerOrigin, view: PackView | null): OriginNow | { readonly gone: string } {
+  const sticker = view?.stickers.find((s) => s.id === origin.stickerId);
+  if (!view || !sticker) {
+    return {
+      gone: `Sticker #${origin.position} of “${origin.packTitle}” no longer exists (it was deleted or moved since it was opened), so it cannot be replaced. Save it as a new sticker instead.`,
+    };
+  }
+  return { position: sticker.position, packTitle: view.pack.title, format: sticker.format };
+}
+
+/** The replace option's label: "Replace #4 in “Cats”". */
+export function replaceLabel(now: OriginNow): string {
+  return `Replace #${now.position} in “${now.packTitle}”`;
+}
+
+/**
+ * The session's origin after a save (design decision 2026-11-22): a replace
+ * keeps the same sticker; a save as a new sticker makes the session edit
+ * that new sticker, so the next save replaces it rather than adding another.
+ */
+export function originAfterSave(saved: Saved, packTitle: string): StickerOrigin {
+  const { sticker } = saved;
+  return { stickerId: sticker.id, packId: sticker.packId, position: sticker.position, packTitle };
+}
 
 /** What the save command did; mirrors `SaveOutcome` in save_commands.rs. */
 export type SaveOutcome =
@@ -108,7 +159,7 @@ export function savedText(outcome: Saved, packTitle: string, target: SaveTarget)
   const { sticker } = outcome;
   const quality = outcome.quality === null ? "" : `, WEBP quality ${outcome.quality}`;
   const size = `${formatBytes(outcome.bytes)}${quality}`;
-  if (target.kind === "replace") return `Saved over sticker #${sticker.position} (${sticker.fileName}) in “${packTitle}” (${size}).`;
+  if (target.kind === "replace") return `Replaced #${sticker.position} in “${packTitle}”.`;
   const emoji = sticker.emojiString === "" ? " Give it an Emoji String in the Pack Manager." : "";
   return `Saved as ${sticker.fileName}, sticker #${sticker.position} of “${packTitle}” (${size}).${emoji}`;
 }

@@ -135,7 +135,8 @@ stickers, Missing stickers, and the thumbnail.
   as monochrome text glyphs (owner decision 2026-11-22; SPM-17 makes the style selectable).
 - Actions: **Edit** first asks **Edit / Replace… / Cancel** (Cancel is the safe default):
   Edit opens the flattened image in the Editor, Replace runs the Replace flow below (owner
-  decision 2026-11-21). Opening in the Editor while it has unsaved changes asks first, in the
+  decision 2026-11-21). A session opened with Edit remembers that sticker: saving it offers
+  to replace the sticker in its slot (§6 Save; owner decision 2026-11-22). Opening in the Editor while it has unsaved changes asks first, in the
   shared dialog: "The editor has unsaved changes. Do you want to discard these or continue
   editing?" (Discard / Keep editing, Keep editing by default); either way the view then
   switches to the Editor, which opens the sticker only after Discard. **Replace** (preserves
@@ -401,11 +402,23 @@ stickers, Missing stickers, and the thumbnail.
     **Save**, so Enter saves at once; otherwise in the pack field. The format starts on the
     session's last save's (PNG the first time); the PNG/WEBP choice is a two-way toggle (its
     look is for the SPM-15 pass).
-  - A save appends a new sticker at the pack's end with an order-encoded file name
+  - **Saving an edited sticker** (owner decision 2026-11-22): a session opened with the Pack
+    Manager's Edit remembers that sticker. Its save dialog starts with two options at the
+    top: **Replace #N in <pack>** (the default; N and the pack as they are now, even after
+    a reorder or rename) and **Save as a new sticker**, which shows the pack picker. A
+    session opened from an image file shows only the pack picker. Ctrl+S then Enter
+    replaces. A replace keeps the sticker's position and Emoji String; the format starts on
+    the sticker's own, and a PNG↔WEBP change changes the file's extension (`002.png` →
+    `002.webp`, ADR-0003, through the crash-safe renames of ADR-0004). The over-cap flow
+    below applies the same way. If the sticker no longer exists (deleted, sent away with
+    Move, or the Library changed), the dialog says so, disables Replace and selects Save as
+    a new sticker: a save never writes to another slot. After a replace the note says
+    "Replaced #N in “<pack>”", the unsaved-changes flag clears and the Pack Manager shows
+    the new picture. After any save the session edits the saved sticker, so the next save
+    offers to replace it, a new sticker included. Thumbnail-mode sessions come with SPM-12.
+  - A save as a new sticker appends it at the pack's end with an order-encoded file name
     (ADR-0003) and an empty Emoji String (flagged in the Pack Manager, like bulk imports).
-    The Library core checks the file as a sticker once more before it enters the pack. A
-    replace-in-slot path (keeping position and Emoji String) exists for the Replace flow
-    (SPM-11).
+    The Library core checks the file as a sticker once more before it enters the pack.
   - After a save the dialog closes, the unsaved-changes flag clears, the session stays open,
     and a neutral note names the file, its position, the pack and the file size. A Pack
     Manager showing that pack re-reads it when its tab is shown again.

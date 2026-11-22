@@ -7,7 +7,10 @@ import { STICKER, THUMBNAIL } from "../src/editor/model/constraints";
 import {
   declinedText,
   exhaustedText,
+  originAfterSave,
   pngTooLargeText,
+  replaceLabel,
+  resolveOrigin,
   runSave,
   saveBlocker,
   savedText,
@@ -119,5 +122,29 @@ test("the saved note names the file, the slot, the pack and the size", () => {
   const png = saved("png") as Extract<SaveOutcome, { kind: "saved" }>;
   expect(savedText(png, "Cats", { kind: "append", packId: 2 })).not.toContain("quality");
   const withEmoji = { ...png, sticker: { ...png.sticker, emojiString: "🐱" } };
-  expect(savedText(withEmoji, "Cats", { kind: "replace", stickerId: 9 })).toBe("Saved over sticker #4 (004.png) in “Cats” (2.0 KB).");
+  expect(savedText(withEmoji, "Cats", { kind: "replace", stickerId: 9 })).toBe("Replaced #4 in “Cats”.");
+});
+
+const origin = { stickerId: 9, packId: 2, position: 4, packTitle: "Cats" };
+const viewWith = (stickers: { id: number; position: number; format: "png" | "webp" }[], title = "Cats") =>
+  ({ pack: { title }, stickers }) as unknown as import("../src/pack-manager/api").PackView;
+
+test("the origin sticker is found where it is now, or reported gone", () => {
+  // Reordered within its pack, pack renamed: still the same sticker.
+  expect(resolveOrigin(origin, viewWith([{ id: 9, position: 2, format: "webp" }], "Kittens"))).toEqual({
+    position: 2,
+    packTitle: "Kittens",
+    format: "webp",
+  });
+  // Deleted or moved to another pack, or the pack is gone: never another slot.
+  const gone = resolveOrigin(origin, viewWith([{ id: 8, position: 4, format: "png" }]));
+  expect("gone" in gone && gone.gone).toContain("Sticker #4 of “Cats” no longer exists");
+  expect("gone" in resolveOrigin(origin, null)).toBe(true);
+  expect(replaceLabel({ position: 2, packTitle: "Kittens", format: "png" })).toBe("Replace #2 in “Kittens”");
+});
+
+test("after a save the session edits the saved sticker, and a replace says so", () => {
+  const out = saved("png") as Extract<SaveOutcome, { kind: "saved" }>;
+  expect(originAfterSave(out, "Cats")).toEqual({ stickerId: 9, packId: 2, position: 4, packTitle: "Cats" });
+  expect(savedText(out, "Cats", { kind: "replace", stickerId: 9 })).toBe("Replaced #4 in “Cats”.");
 });

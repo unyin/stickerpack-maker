@@ -1,6 +1,7 @@
 import type { AppState } from "./api";
 import { clear, el } from "./ui";
-import { openFileInEditor, renderEditor } from "./views/editor";
+import { forgetEditorOrigin, openFileInEditor, renderEditor } from "./views/editor";
+import type { StickerOrigin } from "./editor/save";
 import { forgetPackManager, renderPackManager } from "./views/pack-manager";
 import { resetPackMemory } from "./pack-manager/model/pack-memory";
 import { renderSettings } from "./views/settings";
@@ -38,13 +39,14 @@ export function renderShell(
       renderSettings(content, state, () => {
         forgetPackManager(); // a new Library may sit at the same path
         resetPackMemory(); // pack pickers must not start on a pack of the old one
+        forgetEditorOrigin(); // nor may a save replace a sticker id of the old one
         onChanged();
       });
   }
 
   /** Pack Manager -> Editor: the Editor asks about unsaved changes, then switches tabs and opens the file. */
-  function openInEditor(path: string): void {
-    void openFileInEditor(path, () => show("editor"));
+  function openInEditor(path: string, origin?: StickerOrigin): void {
+    void openFileInEditor(path, () => show("editor"), origin);
   }
 
   for (const item of NAV) {

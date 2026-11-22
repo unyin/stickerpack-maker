@@ -241,3 +241,21 @@
   display: flex;
   gap: 16px;
 }
+
+/* The save dialog's "Replace #N / Save as a new sticker" choice (SPM-10). */
+.editor-save-target {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.editor-save-pack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.editor-save-pack[hidden] {
+  display: none;
+}

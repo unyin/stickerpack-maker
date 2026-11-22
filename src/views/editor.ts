@@ -29,11 +29,14 @@ import {
   saveBlocker,
   savedText,
   type SaveFormat,
+  originAfterSave,
   type SaveTarget,
+  type StickerOrigin,
   type TooLarge,
 } from "../editor/save";
 import { saveDialog } from "../editor/view/save-dialog";
 import { packMemory } from "../pack-manager/model/pack-memory";
+import { markStickerFileChanged } from "../pack-manager/model/changed-files";
 import {
   addRasterLayer,
   addTextLayer,
@@ -131,6 +134,8 @@ function buildEditor(): HTMLElement {
   let nextStyle: NextStyle = { fontFamily: "", fontSize: DEFAULT_FONT_SIZE, color: DEFAULT_TEXT_COLOR };
   // The save dialog starts on the last save's format (SPM-10); its pack comes from packMemory.
   let lastFormat: SaveFormat = "png";
+  // The sticker this session edits when the Pack Manager's Edit opened it, else null (SPM-10).
+  let origin: StickerOrigin | null = null;
 
   const message = el("p", { class: "message editor-message", role: "alert" });
   const canvasHost = el("div", { class: "editor-canvas" }) as HTMLDivElement;
@@ -404,10 +409,11 @@ function buildEditor(): HTMLElement {
     return image ? { image, name: baseName(path) } : null;
   }
 
-  async function openImage(path?: string): Promise<void> {
+  async function openImage(path?: string, from: StickerOrigin | null = null): Promise<void> {
     if (session) return; // one session at a time: Close first
     const picked = await pickAndImport(path);
     if (!picked) return;
+    origin = from;
     session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(constraints)));
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
@@ -517,6 +523,7 @@ function buildEditor(): HTMLElement {
 
   /** End the session at once, unsaved changes included (the caller has asked). */
   function endSession(): void {
+    origin = null;
     textOverlay.close();
     stage?.destroy();
     stage = null;
@@ -542,8 +549,14 @@ function buildEditor(): HTMLElement {
     await saveDialog({
       constraints,
       format: lastFormat,
-      submit: async ({ pack, format }, setFormat) => {
-        const target: SaveTarget = { kind: "append", packId: pack.id };
+      origin,
+      submit: async (choice, setFormat) => {
+        const { format } = choice;
+        const target: SaveTarget =
+          choice.kind === "replace"
+            ? { kind: "replace", stickerId: choice.origin.stickerId }
+            : { kind: "append", packId: choice.pack.id };
+        const packTitle = choice.kind === "replace" ? choice.now.packTitle : choice.pack.title;
         const result = await runSave(format, {
           save: (f) => saveImage(doc, f, target),
           offerWebp: async (outcome) => {
@@ -557,11 +570,16 @@ function buildEditor(): HTMLElement {
           exhausted = result.outcome;
           return null; // the save dialog closes; the question below follows
         }
-        packMemory.lastSavedPackId = pack.id;
-        lastFormat = result.outcome.sticker.format;
+        const saved = result.outcome;
+        packMemory.lastSavedPackId = saved.sticker.packId;
+        lastFormat = saved.sticker.format;
+        // The open pack view must not keep showing the old picture of a replaced sticker.
+        if (target.kind === "replace") markStickerFileChanged(saved.sticker.id);
+        // The session now edits the saved sticker: the next save replaces it (design decision 2026-11-22).
+        origin = originAfterSave(saved, packTitle);
         // The session cannot change while the dialog is open; check anyway.
         if (current.doc === doc) current.markSaved();
-        say(savedText(result.outcome, pack.title, target), "note");
+        say(savedText(saved, packTitle, target), "note");
         return null;
       },
     });
@@ -985,18 +1003,30 @@ function buildEditor(): HTMLElement {
   void loadFonts();
 
   // Pack Manager hook (SPM-3), see openFileInEditor below.
-  openFileHook = (path, showEditor) =>
+  openFileHook = (path, showEditor, from) =>
     run(async () => {
       const closed = await closeSession(); // warns on unsaved changes
       showEditor(); // either way: Keep editing shows the open image
-      if (closed) await openImage(path);
+      if (closed) await openImage(path, from ?? null);
     });
+  forgetOriginHook = () => {
+    origin = null;
+  };
 
   refresh();
   return view;
 }
 
-let openFileHook: ((path: string, showEditor: () => void) => Promise<void>) | null = null;
+let openFileHook: ((path: string, showEditor: () => void, origin?: StickerOrigin) => Promise<void>) | null = null;
+let forgetOriginHook: (() => void) | null = null;
+
+/**
+ * The Library changed: a session opened with Edit no longer replaces its
+ * sticker, whose id belongs to the old Library; it can still save as new.
+ */
+export function forgetEditorOrigin(): void {
+  forgetOriginHook?.();
+}
 
 /**
  * Open the image at `path` in the Editor, as Open image would (import cap
@@ -1005,11 +1035,12 @@ let openFileHook: ((path: string, showEditor: () => void) => Promise<void>) | nu
  * session with unsaved changes asks first, while the caller's view is still
  * showing; then `showEditor` switches to the Editor either way (the canvas
  * must be on screen to measure itself); then, unless the user kept editing,
- * the file opens.
+ * the file opens. `origin` is the sticker it is (Edit): saving then offers
+ * to replace it (owner decision 2026-11-22).
  */
-export function openFileInEditor(path: string, showEditor: () => void): Promise<void> {
+export function openFileInEditor(path: string, showEditor: () => void, origin?: StickerOrigin): Promise<void> {
   renderEditor(); // builds the Editor once, which installs the hook
-  return openFileHook ? openFileHook(path, showEditor) : Promise.resolve();
+  return openFileHook ? openFileHook(path, showEditor, origin) : Promise.resolve();
 }
 
 /** The unsaved-changes question, worded for both Close and opening another image. */

@@ -2,6 +2,8 @@
 // (Reorder toggle, Refresh, Add images), banners, the sticker grid with the
 // thumbnail slot at its end, and the selection panel. Rules live in
 // ../model; this file wires them to the DOM and the commands.
+import type { StickerOrigin } from "../../editor/save";
+import { takeChangedStickers } from "../model/changed-files";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { editorCanImport } from "../../shared/import-extensions";
 import { explorerLabel, icon } from "../../icons";
@@ -58,8 +60,8 @@ import { cancelReorderDrag, startReorderDrag, type ReorderDragHost } from "./reo
 export interface PackViewHost {
   /** Back to the pack list. */
   back(): void;
-  /** Show the Editor with this image open. */
-  openInEditor(path: string): void;
+  /** Show the Editor with this image open; `origin` when it is this pack's sticker (Edit). */
+  openInEditor(path: string, origin?: StickerOrigin): void;
 }
 
 export interface PackViewHandle {
@@ -278,7 +280,11 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     edit: (s) =>
       void run(async () => {
         const choice = await editChoiceDialog(s.position);
-        if (choice === "edit") host.openInEditor(await stickerFilePath(s.id));
+        if (choice === "edit") {
+          // Saving the session then offers to replace this sticker (owner decision 2026-11-22).
+          const origin = { stickerId: s.id, packId, position: s.position, packTitle: view.pack.title };
+          host.openInEditor(await stickerFilePath(s.id), origin);
+        }
         else if (choice === "replace") await replace(s);
       }),
     replace: (s) => void run(() => replace(s)),
@@ -538,7 +544,12 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   render();
   return {
     element: root,
-    reload: () => void run(async () => setView(await loadPackView(packId))),
+    reload: () =>
+      void run(async () => {
+        // The Editor may have replaced a sticker's file: its cached preview is stale.
+        for (const id of takeChangedStickers()) previews.forget(id);
+        setView(await loadPackView(packId));
+      }),
     destroy() {
       document.removeEventListener("keydown", onKey);
       unlistenDrop?.();
