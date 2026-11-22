@@ -64,6 +64,8 @@ export interface PackViewHost {
 
 export interface PackViewHandle {
   element: HTMLElement;
+  /** Re-read the pack without a Missing scan (e.g. the Editor saved into it). */
+  reload(): void;
   destroy(): void;
 }
 
@@ -536,6 +538,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   render();
   return {
     element: root,
+    reload: () => void run(async () => setView(await loadPackView(packId))),
     destroy() {
       document.removeEventListener("keydown", onKey);
       unlistenDrop?.();

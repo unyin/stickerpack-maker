@@ -1,7 +1,8 @@
 // The Pack Manager (SPEC §5): the pack list, or one open pack. Built once
 // per Library and reused, so an open pack survives switching tabs; showing
-// the tab again re-reads the pack list but never re-scans an open pack
-// (desync checks run on pack open and Refresh only, SPEC §4).
+// the tab again re-reads the pack list, or the open pack (the Editor may have
+// saved into it), but never re-scans an open pack for Missing files (desync
+// checks run on pack open and Refresh only, SPEC §4).
 import "../pack-manager/pack-manager.css";
 import { el, errorMessage } from "../ui";
 import { buildPackList } from "../pack-manager/view/pack-list";
@@ -61,7 +62,9 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
     library,
     root,
     shown: () => {
-      if (!pack) void list.reload();
+      // The Editor may have saved into a pack meanwhile (SPM-10).
+      if (pack) pack.reload();
+      else void list.reload();
     },
     dispose: () => {
       pack?.destroy();

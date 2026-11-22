@@ -1,0 +1,120 @@
+// The save pipeline's rules and wording (src/editor/save.ts, SPM-10):
+// when Save is blocked, the owner's size flow, and the messages.
+import { expect, test } from "bun:test";
+import limits from "../src/shared/limits.json";
+import { STICKER, THUMBNAIL } from "../src/editor/model/constraints";
+import {
+  declinedText,
+  exhaustedText,
+  pngTooLargeText,
+  runSave,
+  saveBlocker,
+  savedText,
+  type SaveFormat,
+  type SaveOutcome,
+  type TooLarge,
+} from "../src/editor/save";
+
+const S = limits.sticker.side;
+const T = limits.thumbnail.side;
+
+test("Sticker mode saves only with the longest side exactly the sticker side", () => {
+  expect(saveBlocker({ width: S, height: S }, STICKER)).toBeNull();
+  expect(saveBlocker({ width: S, height: 1 }, STICKER)).toBeNull();
+  expect(saveBlocker({ width: 1, height: S }, STICKER)).toBeNull();
+  const over = saveBlocker({ width: S + 88, height: 400 }, STICKER);
+  expect(over).toContain("Save is blocked");
+  expect(over).toContain("88 px over");
+  expect(over).toContain(`Fit to ${S}×${S} or Longest side ${S}`);
+  expect(saveBlocker({ width: S - 1, height: S - 1 }, STICKER)).toContain("1 px under");
+});
+
+test("Thumbnail mode saves only exactly square, and only Fit is offered as the fix", () => {
+  expect(saveBlocker({ width: T, height: T }, THUMBNAIL)).toBeNull();
+  const off = saveBlocker({ width: T, height: T + 2 }, THUMBNAIL)!;
+  expect(off).toContain("height 2 px over");
+  expect(off).toContain(`Fit to ${T}×${T} fixes it`);
+  expect(off).not.toContain("Longest side");
+});
+
+const sticker = { id: 9, packId: 2, position: 4, fileName: "004.png", format: "png" as const, emojiString: "" };
+const saved = (format: SaveFormat): SaveOutcome => ({
+  kind: "saved",
+  sticker: { ...sticker, format, fileName: `004.${format}` },
+  bytes: 2048,
+  quality: format === "webp" ? 80 : null,
+});
+const tooLarge = (format: SaveFormat): TooLarge => ({ kind: "tooLarge", format, bytes: 600 * 1024, maxKilobytes: limits.sticker.maxKilobytes });
+
+/** A scripted flow: what each save returns, and the user's answer to the WEBP offer. */
+function flow(outcomes: Partial<Record<SaveFormat, SaveOutcome>>, accept: boolean) {
+  const log: string[] = [];
+  return {
+    log,
+    flow: {
+      save: async (f: SaveFormat) => {
+        log.push(`save ${f}`);
+        return outcomes[f]!;
+      },
+      offerWebp: async () => {
+        log.push("offer");
+        return accept;
+      },
+    },
+  };
+}
+
+test("a save that fits is saved in the chosen format, with no question", async () => {
+  for (const f of ["png", "webp"] as const) {
+    const { log, flow: fl } = flow({ [f]: saved(f) }, false);
+    const result = await runSave(f, fl);
+    expect(result).toEqual({ kind: "saved", outcome: saved(f) as never });
+    expect(log).toEqual([`save ${f}`]);
+  }
+});
+
+test("a PNG over the cap offers WEBP, and saves as WEBP when accepted", async () => {
+  const { log, flow: fl } = flow({ png: tooLarge("png"), webp: saved("webp") }, true);
+  expect((await runSave("png", fl)).kind).toBe("saved");
+  expect(log).toEqual(["save png", "offer", "save webp"]);
+});
+
+test("a PNG over the cap with the offer declined saves nothing", async () => {
+  const { log, flow: fl } = flow({ png: tooLarge("png") }, false);
+  expect(await runSave("png", fl)).toEqual({ kind: "declined", outcome: tooLarge("png") });
+  expect(log).toEqual(["save png", "offer"]);
+});
+
+test("a WEBP over the cap even at the lowest quality is exhausted, chosen or offered", async () => {
+  const direct = flow({ webp: tooLarge("webp") }, true);
+  expect((await runSave("webp", direct.flow)).kind).toBe("exhausted");
+  expect(direct.log).toEqual(["save webp"]);
+  const offered = flow({ png: tooLarge("png"), webp: tooLarge("webp") }, true);
+  expect(await runSave("png", offered.flow)).toEqual({ kind: "exhausted", outcome: tooLarge("webp") });
+});
+
+test("errors from the save reject the flow", async () => {
+  const fl = { save: async () => Promise.reject("Not saved: bad size."), offerWebp: async () => true };
+  await expect(runSave("png", fl)).rejects.toBe("Not saved: bad size.");
+});
+
+test("the size messages say how large and what the limit is", () => {
+  const cap = `${limits.sticker.maxKilobytes} KB limit`;
+  expect(pngTooLargeText(tooLarge("png")).join(" ")).toContain(`600.0 KB, over the ${cap}`);
+  expect(pngTooLargeText(tooLarge("png")).join(" ")).toContain("WEBP");
+  expect(declinedText(tooLarge("png"))).toStartWith("Not saved:");
+  const exhausted = exhaustedText(tooLarge("webp"));
+  expect(exhausted).toContain("Congratulations");
+  expect(exhausted).toContain("Nothing was saved");
+  expect(exhausted).toContain(cap);
+});
+
+test("the saved note names the file, the slot, the pack and the size", () => {
+  const out = saved("webp") as Extract<SaveOutcome, { kind: "saved" }>;
+  const note = savedText(out, "Cats", { kind: "append", packId: 2 });
+  expect(note).toBe("Saved as 004.webp, sticker #4 of “Cats” (2.0 KB, WEBP quality 80). Give it an Emoji String in the Pack Manager.");
+  const png = saved("png") as Extract<SaveOutcome, { kind: "saved" }>;
+  expect(savedText(png, "Cats", { kind: "append", packId: 2 })).not.toContain("quality");
+  const withEmoji = { ...png, sticker: { ...png.sticker, emojiString: "🐱" } };
+  expect(savedText(withEmoji, "Cats", { kind: "replace", stickerId: 9 })).toBe("Saved over sticker #4 (004.png) in “Cats” (2.0 KB).");
+});

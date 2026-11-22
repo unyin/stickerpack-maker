@@ -768,3 +768,9 @@ button.pm-link {
 .pm .message {
   margin: 0;
 }
+
+/* The Editor's save dialog: PNG / WEBP side by side (SPM-10). */
+.pm-format {
+  display: flex;
+  gap: 16px;
+}

@@ -17,8 +17,20 @@ import {
   probeImage,
   probePasted,
   renderText,
+  saveImage,
   type ImageInfo,
 } from "../editor/api";
+import {
+  declinedText,
+  exhaustedText,
+  pngTooLargeText,
+  runSave,
+  saveBlocker,
+  savedText,
+  type SaveFormat,
+  type SaveTarget,
+} from "../editor/save";
+import { saveDialog } from "../editor/view/save-dialog";
 import {
   addRasterLayer,
   addTextLayer,
@@ -114,6 +126,8 @@ function buildEditor(): HTMLElement {
   // The style the next new text gets: the text controls edit it while no
   // text layer is selected.
   let nextStyle: NextStyle = { fontFamily: "", fontSize: DEFAULT_FONT_SIZE, color: DEFAULT_TEXT_COLOR };
+  // The save dialog starts from the last save's pack and format (SPM-10).
+  let lastSave: { packId: number | null; format: SaveFormat } = { packId: null, format: "png" };
 
   const message = el("p", { class: "message editor-message", role: "alert" });
   const canvasHost = el("div", { class: "editor-canvas" }) as HTMLDivElement;
@@ -156,6 +170,8 @@ function buildEditor(): HTMLElement {
   const cropButton = button("Crop", () => run(cropToBox));
   const resetViewButton = button("Reset view", () => stage?.fit());
   const closeButton = button("Close", () => run(async () => void (await closeSession())));
+  const saveButton = button("Save…", () => run(saveSession), "primary");
+  const saveTitle = "Save the canvas as a sticker in a pack (Ctrl+S)";
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
@@ -285,6 +301,7 @@ function buildEditor(): HTMLElement {
     zoomLabel,
     dirtyLabel,
     el("span", { class: "editor-spacer" }),
+    saveButton,
     closeButton,
   );
 
@@ -497,6 +514,48 @@ function buildEditor(): HTMLElement {
     session = null;
     tool = "move";
     return true;
+  }
+
+  // ---- Save (SPM-10) ----
+
+  /**
+   * Save (SPEC §6, hard-blocked): the save dialog picks the pack and the
+   * format; Rust flattens what is inside the canvas, encodes it within the
+   * size cap and appends it to the pack. A PNG over the cap offers WEBP; a
+   * WEBP over the cap even at its lowest quality sends the user back to the
+   * Editor (owner decision 2026-11-21, CMT-144). A save clears the unsaved
+   * changes; the session stays open.
+   */
+  async function saveSession(): Promise<void> {
+    const current = session;
+    if (!current || saveBlocker(current.doc, constraints)) return;
+    const doc = current.doc;
+    await saveDialog({
+      constraints,
+      preselect: lastSave.packId,
+      format: lastSave.format,
+      submit: async ({ pack, format }, setFormat) => {
+        const target: SaveTarget = { kind: "append", packId: pack.id };
+        const result = await runSave(format, {
+          save: (f) => saveImage(doc, f, target),
+          offerWebp: async (outcome) => {
+            const ok = await confirmWebp(pngTooLargeText(outcome));
+            if (ok) setFormat("webp");
+            return ok;
+          },
+        });
+        if (result.kind === "declined") return declinedText(result.outcome);
+        if (result.kind === "exhausted") {
+          say(exhaustedText(result.outcome));
+          return null; // back to the Editor
+        }
+        lastSave = { packId: pack.id, format: result.outcome.sticker.format };
+        // The session cannot change while the dialog is open; check anyway.
+        if (current.doc === doc) current.markSaved();
+        say(savedText(result.outcome, pack.title, target), "note");
+        return null;
+      },
+    });
   }
 
   // ---- Cut and paste (SPM-9) ----
@@ -786,6 +845,9 @@ function buildEditor(): HTMLElement {
     readout.classList.toggle("off", !status.ok);
     resetViewButton.disabled = busy;
     closeButton.disabled = busy;
+    const saveReason = saveBlocker(doc, constraints);
+    saveButton.disabled = busy || saveReason !== null;
+    saveButton.title = saveReason ?? saveTitle;
     undoButton.disabled = busy || !current.canUndo;
     redoButton.disabled = busy || !current.canRedo;
     upButton.disabled = busy || !single || index === doc.layers.length - 1;
@@ -869,6 +931,12 @@ function buildEditor(): HTMLElement {
       clearNote();
       current.redo();
     }
+    // Ctrl+S saves; a blocked save says why (SPEC §6: hard-blocked).
+    else if ((e.ctrlKey || e.metaKey) && key === "s" && !e.shiftKey) {
+      const reason = saveBlocker(current.doc, constraints);
+      if (reason) say(reason);
+      else void run(saveSession);
+    }
     // Ctrl+X is the Cut tool, not the clipboard; a blocked cut says why.
     else if (isCutShortcut(e)) {
       const reason = cutBlocker(current.doc, current.selection, current.region);
@@ -932,6 +1000,14 @@ function confirmDiscard(): Promise<boolean> {
     [el("p", {}, "The editor has unsaved changes. Do you want to discard these or continue editing?")],
     { actionLabel: "Discard", keepLabel: "Keep editing", danger: true },
   );
+}
+
+/** A PNG over the size cap (owner decision 2026-11-21): offer WEBP; Cancel, the safe choice, keeps the dialog. */
+function confirmWebp(body: readonly string[]): Promise<boolean> {
+  return confirmChoice("Too large as PNG", body.map((line) => el("p", {}, line)), {
+    actionLabel: "Save as WEBP",
+    keepLabel: "Cancel",
+  });
 }
 
 /** The import cap question (SPEC §6); Cancel, the safe choice, aborts the import. */

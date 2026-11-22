@@ -215,23 +215,43 @@ export function invalidFileDialog(path: string, reason: string): Promise<boolean
   );
 }
 
+/** A pack the picker can choose: listed, or just created inline. */
+export type PickedPack = PackSummary | Pack;
+
+export interface PackPicker {
+  /** The search field, the list and the inline New pack area, in order. */
+  readonly elements: HTMLElement[];
+  /** The chosen pack, or null. */
+  selected(): PickedPack | null;
+  /** Load the packs (errors go to the message line), then render. */
+  load(): Promise<void>;
+  focus(): void;
+}
+
 /**
- * Send to pack (SPEC §5): searchable target list with badges, the current
- * pack excluded, inline New pack, and "Delete originals after sending"
- * (off = Duplicate, on = Move). Resolves with the report text, or null when
- * cancelled. Failures stay in the dialog with their per-file errors.
+ * The target-pack picker of Send to pack and the Editor's save dialog
+ * (SPEC §5-6): a searchable list with Draft/Live badges and an inline
+ * **New pack…** (Title → auto Short Name, Draft) that selects the new pack.
+ * `excludeId` hides a pack (Send's current one); `preselect` chooses one
+ * when it is listed; `onChange` fires whenever the choice changes.
  */
-export async function sendDialog(currentPackId: number, stickers: readonly StickerView[]): Promise<{
-  report: SendReport;
-  text: string;
-} | null> {
-  const message = el("div", { class: "message", role: "alert" });
+export function packPicker(options: {
+  message: HTMLElement;
+  excludeId?: number;
+  preselect?: number | null;
+  onChange: () => void;
+}): PackPicker {
+  const { message, excludeId, onChange } = options;
   const search = el("input", { class: "pm-input", type: "search", placeholder: "Search packs", "aria-label": "Search packs" }) as HTMLInputElement;
   const list = el("ul", { class: "pm-target-list", role: "listbox", "aria-label": "Target pack" });
-  const moveBox = el("input", { type: "checkbox" }) as HTMLInputElement;
   let packs: PackSummary[] = [];
-  let target: PackSummary | Pack | null = null;
-  let handle: DialogHandle<"send" | "cancel"> | null = null;
+  let target: PickedPack | null = null;
+
+  const choose = (p: PickedPack | null) => {
+    target = p;
+    renderList();
+    onChange();
+  };
 
   const newPackArea = el("div", { class: "pm-new-pack" });
   const newPackButton = el("button", { class: "secondary", type: "button" }, "New pack…") as HTMLButtonElement;
@@ -250,11 +270,10 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
         const { title, shortName } = form.read();
         const pack = await createPack(title, shortName);
         packs = [...packs, { ...pack, stickerCount: 0 }];
-        target = pack;
         newPackArea.replaceChildren();
         newPackButton.hidden = false;
         newPackArea.append(newPackButton);
-        renderList();
+        choose(pack);
       } catch (err) {
         message.textContent = errorMessage(err);
       }
@@ -267,7 +286,7 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
   newPackArea.append(newPackButton);
 
   function renderList(): void {
-    const shown = packs.filter((p) => p.id !== currentPackId && matchesSearch(p, search.value));
+    const shown = packs.filter((p) => p.id !== excludeId && matchesSearch(p, search.value));
     list.replaceChildren(
       ...shown.map((p) => {
         const item = el(
@@ -278,24 +297,63 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
           el("span", { class: "muted" }, stickerCountText(p.stickerCount)),
           statusBadge(p.status),
         );
-        const choose = () => {
-          target = p;
-          renderList();
-        };
-        item.addEventListener("click", choose);
-        onActivate(item, choose);
+        item.addEventListener("click", () => choose(p));
+        onActivate(item, () => choose(p));
         return item;
       }),
     );
-    if (shown.length === 0) list.append(el("li", { class: "muted pm-empty-item" }, packs.length <= 1 ? "No other packs yet: create one." : "No pack matches."));
-    const send = handle?.buttons.get("send");
-    if (send) send.disabled = target === null;
+    const others = packs.filter((p) => p.id !== excludeId).length;
+    if (shown.length === 0) list.append(el("li", { class: "muted pm-empty-item" }, others === 0 ? emptyText(excludeId) : "No pack matches."));
   }
   search.addEventListener("input", renderList);
 
+  return {
+    elements: [search, list, newPackArea],
+    selected: () => target,
+    async load() {
+      renderList();
+      try {
+        packs = await listPacks();
+      } catch (err) {
+        message.textContent = errorMessage(err);
+      }
+      const preselected = packs.find((p) => p.id === options.preselect && p.id !== excludeId);
+      if (preselected && target === null) choose(preselected);
+      else renderList();
+    },
+    focus: () => search.focus(),
+  };
+}
+
+function emptyText(excludeId: number | undefined): string {
+  return excludeId === undefined ? "No packs yet: create one." : "No other packs yet: create one.";
+}
+
+/**
+ * Send to pack (SPEC §5): searchable target list with badges, the current
+ * pack excluded, inline New pack, and "Delete originals after sending"
+ * (off = Duplicate, on = Move). Resolves with the report text, or null when
+ * cancelled. Failures stay in the dialog with their per-file errors.
+ */
+export async function sendDialog(currentPackId: number, stickers: readonly StickerView[]): Promise<{
+  report: SendReport;
+  text: string;
+} | null> {
+  const message = el("div", { class: "message", role: "alert" });
+  const moveBox = el("input", { type: "checkbox" }) as HTMLInputElement;
+  let handle: DialogHandle<"send" | "cancel"> | null = null;
+  const picker = packPicker({
+    message,
+    excludeId: currentPackId,
+    onChange: () => {
+      const send = handle?.buttons.get("send");
+      if (send) send.disabled = picker.selected() === null;
+    },
+  });
+
   let sent: { report: SendReport; text: string } | null = null;
   const send = async (): Promise<boolean> => {
-    const chosen = target;
+    const chosen = picker.selected();
     if (!chosen) return false;
     try {
       const report = await sendToPack(stickers.map((s) => s.id), chosen.id, moveBox.checked);
@@ -318,9 +376,7 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
   handle = openDialog<"send" | "cancel">(
     stickers.length === 1 ? `Send sticker #${stickers[0].position} to pack` : `Send ${stickers.length} stickers to pack`,
     [
-      search,
-      list,
-      newPackArea,
+      ...picker.elements,
       el("label", { class: "pm-check" }, moveBox, " Delete originals after sending"),
       el(
         "p",
@@ -335,13 +391,8 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
     ],
     "cancel",
   );
-  renderList();
-  try {
-    packs = await listPacks();
-  } catch (err) {
-    message.textContent = errorMessage(err);
-  }
-  renderList();
-  search.focus();
+  handle.buttons.get("send")!.disabled = true;
+  await picker.load();
+  picker.focus();
   return (await handle.result) === "send" ? sent : null;
 }
