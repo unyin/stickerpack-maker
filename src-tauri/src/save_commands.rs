@@ -19,8 +19,8 @@ use crate::library::stickers::{self, NewSticker};
 use crate::pack_commands::{with_library, LibraryLock};
 use crate::{editor, SharedConfig};
 
-/// Where a save goes. Both are sticker slots, so both use the sticker
-/// constraint set; Thumbnail mode (SPM-12) adds its own target.
+/// Where a save goes. Both are sticker slots, so a save is held to the
+/// sticker constraint set; Thumbnail mode (SPM-12) adds its own target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SaveTarget {
@@ -29,12 +29,6 @@ pub enum SaveTarget {
     /// The image of an existing sticker, keeping its position and Emoji
     /// String (the replace-in-slot path, consumed by SPM-11).
     Replace { sticker_id: i64 },
-}
-
-impl SaveTarget {
-    pub fn constraints(self) -> ConstraintSet {
-        ConstraintSet::Sticker
-    }
 }
 
 /// The save request's header: the document, the chosen format and target.
@@ -83,7 +77,8 @@ pub fn editor_save_image(
         .to_str()
         .map_err(|e| format!("the {SAVE_HEADER} header is not text: {e}"))?;
     let meta: SaveMeta = serde_json::from_str(header).map_err(|e| format!("the save header is invalid: {e}"))?;
-    let set = meta.target.constraints();
+    // Every target is a sticker slot (see SaveTarget).
+    let set = ConstraintSet::Sticker;
     // The pixel work runs before taking the Library lock.
     let encoded = match render_for_save(set, &meta.doc, body, editor::text::system_fonts(), meta.format)? {
         EncodeOutcome::Fits(encoded) => encoded,
@@ -107,7 +102,7 @@ pub fn editor_save_image(
 /// drop-in, and appends it with an order-encoded name (ADR-0003) or puts it
 /// in its slot.
 pub fn write_sticker(conn: &mut Connection, library_dir: &Path, target: SaveTarget, encoded: &Encoded) -> Result<Sticker, String> {
-    let temp = TempFile::write(extension(encoded.format), &encoded.bytes)?;
+    let temp = TempFile::write(encoded.format.as_str(), &encoded.bytes)?;
     match target {
         SaveTarget::Append { pack_id } => {
             let new = [NewSticker { path: temp.0.clone(), emoji_string: String::new() }];
@@ -118,13 +113,6 @@ pub fn write_sticker(conn: &mut Connection, library_dir: &Path, target: SaveTarg
             outcome.added.pop().ok_or_else(|| "internal error: the saved sticker was not added".to_string())
         }
         SaveTarget::Replace { sticker_id } => stickers::replace_sticker_file(conn, library_dir, sticker_id, &temp.0),
-    }
-}
-
-fn extension(format: SaveFormat) -> &'static str {
-    match format {
-        SaveFormat::Png => "png",
-        SaveFormat::Webp => "webp",
     }
 }
 
@@ -157,7 +145,7 @@ mod tests {
     use crate::library;
     use crate::library::packs::create_pack;
     use crate::library::schema::{load_stickers, Format};
-    use crate::limits::STICKER_SIDE;
+    use crate::limits::{STICKER_MAX_KB, STICKER_SIDE};
 
     struct Lib {
         dir: tempfile::TempDir,
@@ -247,18 +235,18 @@ mod tests {
 
     #[test]
     fn request_and_outcome_json_match_the_typescript_names() {
-        let meta: SaveMeta = serde_json::from_str(
-            r#"{"width":512,"height":300,"layers":[],"format":"webp","target":{"kind":"replace","stickerId":7}}"#,
-        )
+        let meta: SaveMeta = serde_json::from_str(&format!(
+            r#"{{"width":{STICKER_SIDE},"height":3,"layers":[],"format":"webp","target":{{"kind":"replace","stickerId":7}}}}"#,
+        ))
         .unwrap();
-        assert_eq!((meta.doc.width, meta.doc.height, meta.format), (512, 300, SaveFormat::Webp));
+        assert_eq!((meta.doc.width, meta.doc.height, meta.format), (STICKER_SIDE, 3, SaveFormat::Webp));
         assert_eq!(meta.target, SaveTarget::Replace { sticker_id: 7 });
         let append: SaveTarget = serde_json::from_str(r#"{"kind":"append","packId":3}"#).unwrap();
         assert_eq!(append, SaveTarget::Append { pack_id: 3 });
-        let too_large = SaveOutcome::TooLarge { format: SaveFormat::Png, bytes: 600_000, max_kilobytes: 7 };
+        let too_large = SaveOutcome::TooLarge { format: SaveFormat::Png, bytes: 9, max_kilobytes: STICKER_MAX_KB };
         assert_eq!(
             serde_json::to_value(&too_large).unwrap(),
-            serde_json::json!({"kind":"tooLarge","format":"png","bytes":600000,"maxKilobytes":7})
+            serde_json::json!({"kind":"tooLarge","format":"png","bytes":9,"maxKilobytes":STICKER_MAX_KB})
         );
     }
 }

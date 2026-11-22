@@ -1,7 +1,9 @@
 // The Editor's save dialog (SPEC §6 Save, SPM-10): pick the target pack
 // (searchable, with inline New pack) and the format, PNG or WEBP, per save.
 // Saving itself runs in `submit`, so a refusal can stay in the dialog.
+// The pack picker is the Pack Manager's: its styles come with it.
 import "../../pack-manager/pack-manager.css";
+import "../editor.css";
 import { openDialog, type DialogHandle } from "../../dialog";
 import { el, errorMessage } from "../../ui";
 import { packPicker, type PickedPack } from "../../pack-manager/view/dialogs";
@@ -26,8 +28,8 @@ export interface SaveDialogOptions {
   submit(choice: SaveChoice, setFormat: (format: SaveFormat) => void): Promise<string | null>;
 }
 
-/** Open the save dialog; resolves with the choice that was saved, or null when cancelled. */
-export async function saveDialog(options: SaveDialogOptions): Promise<SaveChoice | null> {
+/** Open the save dialog; resolves when it closes (what happened is `submit`'s to report). */
+export async function saveDialog(options: SaveDialogOptions): Promise<void> {
   const message = el("div", { class: "message", role: "alert" });
   let handle: DialogHandle<"save" | "cancel"> | null = null;
   const picker = packPicker({
@@ -36,7 +38,7 @@ export async function saveDialog(options: SaveDialogOptions): Promise<SaveChoice
     onChange: () => syncSave(),
   });
   const radios = new Map<SaveFormat, HTMLInputElement>();
-  const formatRow = el("div", { class: "pm-format", role: "radiogroup", "aria-label": "Format" });
+  const formatRow = el("div", { class: "editor-save-format", role: "radiogroup", "aria-label": "Format" });
   for (const format of ["png", "webp"] as const) {
     const radio = el("input", { type: "radio", name: "save-format", value: format }) as HTMLInputElement;
     radio.checked = format === options.format;
@@ -56,7 +58,6 @@ export async function saveDialog(options: SaveDialogOptions): Promise<SaveChoice
     save.title = picker.selected() === null ? "Choose a pack to save into" : "";
   }
 
-  let saved: SaveChoice | null = null;
   const save = async (): Promise<boolean> => {
     const pack = picker.selected();
     if (!pack) return false;
@@ -68,7 +69,6 @@ export async function saveDialog(options: SaveDialogOptions): Promise<SaveChoice
         message.textContent = stay;
         return false;
       }
-      saved = choice;
       return true;
     } catch (err) {
       message.textContent = errorMessage(err);
@@ -100,5 +100,5 @@ export async function saveDialog(options: SaveDialogOptions): Promise<SaveChoice
   syncSave();
   await picker.load();
   picker.focus();
-  return (await handle.result) === "save" ? saved : null;
+  await handle.result;
 }

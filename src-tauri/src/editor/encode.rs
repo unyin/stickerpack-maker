@@ -7,17 +7,10 @@
 
 use image::codecs::png::{CompressionType, FilterType, PngEncoder};
 use image::{ExtendedColorType, ImageEncoder};
-use serde::{Deserialize, Serialize};
 
 use super::Rgba;
-
-/// A saved image's format; the extension of its file (ADR-0003).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SaveFormat {
-    Png,
-    Webp,
-}
+/// The saved file's format: the Library's sticker format (its file extension, ADR-0003).
+pub use crate::library::schema::Format as SaveFormat;
 
 /// An encoding that fits the cap.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,6 +29,11 @@ pub enum EncodeOutcome {
     /// Nothing fit; `smallest` is the fewest bytes any attempt took.
     TooLarge { format: SaveFormat, smallest: usize },
 }
+
+/// libwebp's lossless `quality` is compression effort, not fidelity (every
+/// pixel is kept at any value): 75 is libwebp's own default balance of size
+/// and speed.
+const LOSSLESS_EFFORT: f32 = 75.0;
 
 /// Lossy WEBP qualities searched, lowest first.
 const QUALITY_RANGE: std::ops::RangeInclusive<u8> = 0..=100;
@@ -121,7 +119,7 @@ pub fn encode_png(image: &Rgba) -> Result<Vec<u8>, String> {
 pub fn encode_webp(image: &Rgba, quality: Option<u8>) -> Result<Vec<u8>, String> {
     let encoder = webp::Encoder::from_rgba(&image.pixels, image.width, image.height);
     let memory = match quality {
-        None => encoder.encode_simple(true, 75.0),
+        None => encoder.encode_simple(true, LOSSLESS_EFFORT),
         Some(q) => encoder.encode_simple(false, f32::from(q.min(*QUALITY_RANGE.end()))),
     }
     .map_err(|e| format!("cannot encode the WEBP: {e:?}"))?;

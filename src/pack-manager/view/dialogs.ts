@@ -345,11 +345,15 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
   const picker = packPicker({
     message,
     excludeId: currentPackId,
-    onChange: () => {
-      const send = handle?.buttons.get("send");
-      if (send) send.disabled = picker.selected() === null;
-    },
+    onChange: () => syncSend(),
   });
+  // Disabled controls show their reason (SPEC §2).
+  function syncSend(): void {
+    const send = handle?.buttons.get("send");
+    if (!send) return;
+    send.disabled = picker.selected() === null;
+    send.title = send.disabled ? "Choose a pack to send to" : "";
+  }
 
   let sent: { report: SendReport; text: string } | null = null;
   const send = async (): Promise<boolean> => {
@@ -391,7 +395,7 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
     ],
     "cancel",
   );
-  handle.buttons.get("send")!.disabled = true;
+  syncSend();
   await picker.load();
   picker.focus();
   return (await handle.result) === "send" ? sent : null;

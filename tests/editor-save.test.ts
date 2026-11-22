@@ -2,6 +2,7 @@
 // when Save is blocked, the owner's size flow, and the messages.
 import { expect, test } from "bun:test";
 import limits from "../src/shared/limits.json";
+import { KB } from "../src/shared/units";
 import { STICKER, THUMBNAIL } from "../src/editor/model/constraints";
 import {
   declinedText,
@@ -44,7 +45,7 @@ const saved = (format: SaveFormat): SaveOutcome => ({
   bytes: 2048,
   quality: format === "webp" ? 80 : null,
 });
-const tooLarge = (format: SaveFormat): TooLarge => ({ kind: "tooLarge", format, bytes: 600 * 1024, maxKilobytes: limits.sticker.maxKilobytes });
+const tooLarge = (format: SaveFormat): TooLarge => ({ kind: "tooLarge", format, bytes: (limits.sticker.maxKilobytes + 88) * KB, maxKilobytes: limits.sticker.maxKilobytes });
 
 /** A scripted flow: what each save returns, and the user's answer to the WEBP offer. */
 function flow(outcomes: Partial<Record<SaveFormat, SaveOutcome>>, accept: boolean) {
@@ -100,7 +101,7 @@ test("errors from the save reject the flow", async () => {
 
 test("the size messages say how large and what the limit is", () => {
   const cap = `${limits.sticker.maxKilobytes} KB limit`;
-  expect(pngTooLargeText(tooLarge("png")).join(" ")).toContain(`600.0 KB, over the ${cap}`);
+  expect(pngTooLargeText(tooLarge("png")).join(" ")).toContain(`${limits.sticker.maxKilobytes + 88}.0 KB, over the ${cap}`);
   expect(pngTooLargeText(tooLarge("png")).join(" ")).toContain("WEBP");
   expect(declinedText(tooLarge("png"))).toStartWith("Not saved:");
   const exhausted = exhaustedText(tooLarge("webp"));

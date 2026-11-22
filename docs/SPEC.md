@@ -405,13 +405,15 @@ stickers, Missing stickers, and the thumbnail.
     and the limit) in the shared dialog, **Save as WEBP** / **Cancel** (Cancel, the default,
     returns to the save dialog with "Not saved: …"). If even WEBP at its lowest quality is
     over the cap, nothing is saved: the dialog closes and the message line says so in a
-    playful, tongue-in-cheek tone aimed at the image, never the person (exact copy to
-    confirm with the owner), sending the user back to the Editor to fix it or start over.
+    playful, tongue-in-cheek tone (exact copy to confirm with the owner), sending the user
+    back to the Editor to fix it or start over.
 - **Saving is blocked unless constraints are met** — no warn-and-proceed path:
   - Sticker mode: longest side exactly **512 px** and file ≤ **512 KB**.
   - Thumbnail mode: exactly **100×100 px** and file ≤ **128 KB**, PNG/WEBP.
   - Both halves are checked in Rust on what is actually written: the flattened size, then
-    the encoded bytes (KB = 1024 bytes).
+    the encoded bytes (KB = 1024 bytes). Saving a thumbnail (Thumbnail mode's target, the
+    pack's thumbnail slot) comes with Thumbnail mode (SPM-12); the Rust checks already
+    cover the thumbnail constraint set.
 - The live readout shows how far the canvas is off the constraint set. **Fit** fixes it in one
   click in both modes; **Longest side** also does in Sticker mode.
 - In Thumbnail mode **Longest side** is greyed out (visible but disabled, with the reason in

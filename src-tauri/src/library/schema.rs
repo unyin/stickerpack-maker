@@ -31,7 +31,8 @@ impl PackStatus {
 }
 
 /// Sticker image format; static packs may mix PNG and WEBP (SPEC §3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// Also the format the Editor saves in (SPM-10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Format {
     Png,

@@ -915,6 +915,8 @@ function buildEditor(): HTMLElement {
   // Esc act on the text (SPM-9).
   document.addEventListener("keydown", (e) => {
     const current = session;
+    // Ctrl+S never reaches the webview's own "save page", even while busy.
+    if (view.isConnected && isSaveShortcut(e)) e.preventDefault();
     if (!current || !view.isConnected || busy || textOverlay.isOpen) return;
     if (isTextTarget(e.target)) return;
     // A lasso in progress takes Enter, Esc and Backspace first (SPM-9).
@@ -932,7 +934,7 @@ function buildEditor(): HTMLElement {
       current.redo();
     }
     // Ctrl+S saves; a blocked save says why (SPEC §6: hard-blocked).
-    else if ((e.ctrlKey || e.metaKey) && key === "s" && !e.shiftKey) {
+    else if (isSaveShortcut(e)) {
       const reason = saveBlocker(current.doc, constraints);
       if (reason) say(reason);
       else void run(saveSession);
@@ -1000,6 +1002,11 @@ function confirmDiscard(): Promise<boolean> {
     [el("p", {}, "The editor has unsaved changes. Do you want to discard these or continue editing?")],
     { actionLabel: "Discard", keepLabel: "Keep editing", danger: true },
   );
+}
+
+/** Ctrl+S (Cmd+S): Save. */
+function isSaveShortcut(e: KeyboardEvent): boolean {
+  return (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s";
 }
 
 /** A PNG over the size cap (owner decision 2026-11-21): offer WEBP; Cancel, the safe choice, keeps the dialog. */
