@@ -202,7 +202,7 @@ test("a click undone with Backspace never pairs with the next click as a double-
   expect(lassoDoubleClick(draft, R).close).toBe(false);
 });
 
-test("Backspace drops a whole freehand stroke at once, like GIMP's segments (owner re-test 2026-11-22)", () => {
+test("Backspace drops a stroke's freehand points at once, keeping the waypoint it began at (owner re-test 2026-11-22)", () => {
   let draft = clicks([0, 0], [100, 0]);
   draft = lassoPress(draft, { x: 100, y: 100 }, R).draft!;
   for (let x = 96; x >= 20; x -= 4) draft = lassoDrag(draft, { x, y: 100 }, STEP, SLOP);
@@ -212,16 +212,34 @@ test("Backspace drops a whole freehand stroke at once, like GIMP's segments (own
   expect(undone.points).toEqual([
     { x: 0, y: 0 },
     { x: 100, y: 0 },
+    { x: 100, y: 100 },
   ]);
   // Then waypoint by waypoint, and the first one cancels.
-  expect(lassoUndo(undone)!.points).toEqual([{ x: 0, y: 0 }]);
-  expect(lassoUndo(lassoUndo(undone)!)).toBeNull();
+  const twice = lassoUndo(undone)!;
+  expect(twice.points).toEqual([
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+  ]);
+  expect(lassoUndo(lassoUndo(twice)!)).toBeNull();
 });
 
-test("a lasso started with a freehand stroke is one segment: Backspace cancels it", () => {
+test("a click's jitter within the slop stays part of its waypoint for Backspace", () => {
+  let draft = clicks([0, 0], [100, 0]);
+  draft = lassoPress(draft, { x: 100, y: 100 }, R).draft!;
+  draft = lassoDrag(draft, { x: 103, y: 100 }, STEP, SLOP); // a slip, still a click
+  draft = lassoRelease(draft, { x: 103, y: 100 }, R).draft!;
+  expect(lassoUndo(draft)!.points).toEqual([
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+  ]);
+});
+
+test("a lasso started with a freehand stroke: Backspace drops the stroke, then the start point cancels", () => {
   let draft = lassoPress(null, { x: 0, y: 0 }, R).draft!;
   draft = lassoDrag(draft, { x: 10, y: 0 }, STEP, SLOP);
   draft = lassoDrag(draft, { x: 10, y: 10 }, STEP, SLOP);
   draft = lassoRelease(draft, { x: 10, y: 10 }, R).draft!;
-  expect(lassoUndo(draft)).toBeNull();
+  const undone = lassoUndo(draft)!;
+  expect(undone.points).toEqual([{ x: 0, y: 0 }]);
+  expect(lassoUndo(undone)).toBeNull();
 });

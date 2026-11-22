@@ -305,8 +305,9 @@ stickers, Missing stickers, and the thumbnail.
     rubber band to the pointer. It closes by pressing on its start point (or releasing a
     freehand stroke there), by a double-click on one spot (two clicks, not a stroke), or by
     Enter. While it is open, Esc cancels it (the previous selection stays) and Backspace
-    removes its last segment: the last waypoint, or the whole last freehand stroke, as in
-    GIMP (owner re-test 2026-11-22). A closed lasso with no area clears the selection.
+    removes its last segment: the last waypoint, or the whole last freehand stroke while
+    the point the stroke began at stays a waypoint, as in GIMP (owner re-tests
+    2026-11-22). A closed lasso with no area clears the selection.
   - **Cut** works on exactly one selected image layer that the selection touches (its
     tooltip says why not). The selected pixels (whole pixels whose centres lie inside the
     selection; a lasso that crosses itself leaves the overlap out) move into a new floating
@@ -352,8 +353,12 @@ stickers, Missing stickers, and the thumbnail.
     field keeps the current font (owner decision 2026-11-22); a session's first text uses Impact
     when installed (else a common sans, else the first family). Size is a whole number of
     px within the range in src/shared/limits.json (1–1000); default 64 px, black. The font,
-    size and colour controls restyle the selected text layers (one undo step), or set the
-    next new text's style when no text layer is selected.
+    size and colour controls restyle the selected text layers (one undo step), and every
+    change also sticks for the next new text, so the last font, size and colour used carry
+    over (owner re-test 2026-11-22). Only the property changed carries over; selecting a
+    text layer alone changes nothing, so while one is selected the controls show its style
+    and Add text still uses the next-text style (owner decision 2026-11-22). To set the
+    next text's style without restyling a layer, deselect first (Esc).
     After a committed change on the font list, size field or colour picker, the control
     gives up focus so Ctrl+Z, Delete, Esc and Ctrl+V work at once (typing in the size field
     is not intercepted).

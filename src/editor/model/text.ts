@@ -49,10 +49,11 @@ export function isBlankText(text: string): boolean {
 export type NextStyle = Omit<TextStyle, "text">;
 
 /**
- * The next new text's style after a text control changed (SPEC §6): the
- * controls restyle the selected text layers OR, when none is selected, set
- * the next text's style. So `next` only changes while no text layer is selected.
+ * The next new text's style after a text control changed (SPEC §6): every
+ * change sticks for the next new text, whether or not it also restyled
+ * selected text layers (owner re-test 2026-11-22: a text made white means
+ * the next one is white too).
  */
-export function nextStyleAfter(next: NextStyle, selectedTexts: number, patch: Partial<NextStyle>): NextStyle {
-  return selectedTexts > 0 ? next : { ...next, ...patch };
+export function nextStyleAfter(next: NextStyle, patch: Partial<NextStyle>): NextStyle {
+  return { ...next, ...patch };
 }

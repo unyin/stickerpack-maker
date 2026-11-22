@@ -646,12 +646,12 @@ function buildEditor(): HTMLElement {
   }
 
   /**
-   * A text control changed (SPEC §6): restyle the selected text layers, or,
-   * when none is selected, set the style of the next new text.
+   * A text control changed (SPEC §6): restyle the selected text layers, if
+   * any, and keep the change for the next new text either way.
    */
   function restyle(patch: Partial<NextStyle>): void {
     const ids = session ? session.selectedTexts.map((l) => l.id) : [];
-    nextStyle = nextStyleAfter(nextStyle, ids.length, patch);
+    nextStyle = nextStyleAfter(nextStyle, patch);
     if (ids.length > 0) void run(() => restyleLayers(ids, patch));
     else refresh();
   }

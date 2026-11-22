@@ -407,10 +407,10 @@ test("the layer hint adds cut and text reasons only where they are relevant", ()
   expect(layerHint(doc, [base, text], null, reasons)).toBe("M. E.");
 });
 
-test("text controls set the next text's style only while no text layer is selected (P2)", () => {
+test("every text-control change sticks for the next new text (owner re-test 2026-11-22)", () => {
   const next = { fontFamily: "Arial", fontSize: 64, color: "#000000" };
-  expect(nextStyleAfter(next, 0, { fontSize: 30 })).toEqual({ ...next, fontSize: 30 });
-  expect(nextStyleAfter(next, 2, { fontSize: 30 })).toBe(next);
+  expect(nextStyleAfter(next, { fontSize: 30 })).toEqual({ ...next, fontSize: 30 });
+  expect(nextStyleAfter(next, { color: "#ffffff" })).toEqual({ ...next, color: "#ffffff" });
 });
 
 test("Crop notes how many crossing text layers became images (owner, 2026-11-22)", () => {

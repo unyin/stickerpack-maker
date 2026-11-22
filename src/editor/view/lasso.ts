@@ -4,10 +4,11 @@
 // closes by pressing on its start point, by releasing a drag there, by a
 // double-click on one spot, or by Enter; Esc cancels it and Backspace
 // removes the last segment: the last waypoint, or the whole last freehand
-// stroke (as GIMP's Backspace does). No button is held between points, so
-// the view can be panned and zoomed mid-lasso. Pure: no Konva, no DOM.
-// Points are document pixels; distances come in document pixels too (the
-// caller divides screen px by the zoom).
+// stroke but not the point it began at, which stays a waypoint (as in
+// GIMP). No button is held between points, so the view can be panned and
+// zoomed mid-lasso. Pure: no Konva, no DOM. Points are document pixels;
+// distances come in document pixels too (the caller divides screen px by
+// the zoom).
 import type { Point } from "../model/document";
 
 /** One press of the left button on the lasso. */
@@ -34,8 +35,9 @@ export interface LassoDraft {
   /** The press before `press`, for the double-click test (null when there is none). */
   readonly previous: LassoPress | null;
   /**
-   * Where each press's points begin in `points`, oldest first (the first is
-   * 0): a press is one segment, a waypoint or a whole freehand stroke.
+   * Where each segment's points begin in `points`, oldest first (the first
+   * is 0). A click is one segment, its waypoint; a press that turns into a
+   * stroke is two: the waypoint it went down at, then its freehand points.
    */
   readonly starts: readonly number[];
 }
@@ -74,15 +76,18 @@ export function lassoPress(draft: LassoDraft | null, at: Point, closeRadius: num
 /**
  * The pointer moves to `at`: with the button down, freehand points every
  * `step` or more; the press becomes a stroke once it is more than `slop`
- * from where it went down.
+ * from where it went down, and from then on its freehand points are a
+ * segment of their own (Backspace keeps the waypoint it began at).
  */
 export function lassoDrag(draft: LassoDraft, at: Point, step: number, slop: number): LassoDraft {
-  const { press } = draft;
+  const { press, starts } = draft;
   if (!draft.pressed || !press) return draft;
   const last = draft.points[draft.points.length - 1];
   if (distance(at, last) < step) return draft;
   const moved = press.moved || distance(at, press.from) > slop;
-  return { ...draft, points: [...draft.points, at], press: { ...press, moved } };
+  // Just became a stroke: its freehand points start right after the press point.
+  const split = moved && !press.moved ? [...starts, starts[starts.length - 1] + 1] : starts;
+  return { ...draft, points: [...draft.points, at], press: { ...press, moved }, starts: split };
 }
 
 /**
@@ -114,8 +119,9 @@ export function lassoDoubleClick(draft: LassoDraft, radius: number): LassoStep {
 }
 
 /**
- * Backspace: drop the last segment (the last press's waypoint, or its whole
- * freehand stroke); dropping the first one cancels the lasso (null).
+ * Backspace: drop the last segment (a waypoint, or a stroke's freehand
+ * points, leaving the waypoint it began at); dropping the first one
+ * cancels the lasso (null).
  */
 export function lassoUndo(draft: LassoDraft): LassoDraft | null {
   if (draft.starts.length <= 1) return null;
