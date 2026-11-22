@@ -382,9 +382,36 @@ stickers, Missing stickers, and the thumbnail.
 - Saving flattens what is **inside the canvas**; anything outside the canvas is clipped
   (discarded) (owner decision 2026-11-20).
 - Save dialog: pick target pack (create-new inline); choose **PNG or WEBP** per save.
+  Details (SPM-10, 2026-11-22):
+  - **Save…** sits at the right of the Editor toolbar, before Close; **Ctrl+S** does the
+    same. While the canvas misses the constraint set it is disabled, with the reason (the
+    live readout's text and the sizing tool that fixes it) as its tooltip; Ctrl+S then shows
+    that reason in the message line.
+  - The dialog uses the same searchable pack list as Send to pack, with Draft/Live badges and
+    inline **New pack…** (Title → auto Short Name, Draft), which selects the new pack. It
+    starts on the pack and format of the session's last save (PNG the first time).
+  - A save appends a new sticker at the pack's end with an order-encoded file name
+    (ADR-0003) and an empty Emoji String (flagged in the Pack Manager, like bulk imports).
+    The Library core checks the file as a sticker once more before it enters the pack. A
+    replace-in-slot path (keeping position and Emoji String) exists for the Replace flow
+    (SPM-11).
+  - After a save the dialog closes, the unsaved-changes flag clears, the session stays open,
+    and a neutral note names the file, its position, the pack and the file size. A Pack
+    Manager showing that pack re-reads it when its tab is shown again.
+  - PNG is encoded once at the best lossless compression: it has no quality knob. WEBP is
+    lossless when that fits the cap, otherwise lossy at the highest quality that fits (alpha
+    stays lossless); the quality is found automatically, there is no quality slider.
+  - **Over the size cap** (owner decision 2026-11-21): a PNG over the cap says so (its size
+    and the limit) in the shared dialog, **Save as WEBP** / **Cancel** (Cancel, the default,
+    returns to the save dialog with "Not saved: …"). If even WEBP at its lowest quality is
+    over the cap, nothing is saved: the dialog closes and the message line says so in a
+    playful, tongue-in-cheek tone aimed at the image, never the person (exact copy to
+    confirm with the owner), sending the user back to the Editor to fix it or start over.
 - **Saving is blocked unless constraints are met** — no warn-and-proceed path:
   - Sticker mode: longest side exactly **512 px** and file ≤ **512 KB**.
   - Thumbnail mode: exactly **100×100 px** and file ≤ **128 KB**, PNG/WEBP.
+  - Both halves are checked in Rust on what is actually written: the flattened size, then
+    the encoded bytes (KB = 1024 bytes).
 - The live readout shows how far the canvas is off the constraint set. **Fit** fixes it in one
   click in both modes; **Longest side** also does in Sticker mode.
 - In Thumbnail mode **Longest side** is greyed out (visible but disabled, with the reason in
