@@ -29,7 +29,7 @@ pub struct LibraryLock {
 
 impl LibraryLock {
     /// What the last explicit desync check found (used under the lock).
-    fn memo(&self) -> &PresenceMemo {
+    pub(crate) fn memo(&self) -> &PresenceMemo {
         &self.memo
     }
 
@@ -54,7 +54,7 @@ fn library_dir(config: &State<'_, SharedConfig>) -> Result<PathBuf, String> {
 /// Run `op` on the configured Library under the Library lock.
 /// Generic over the error so commands with a richer one (Send to pack's
 /// `SendFailure`) share the lock/open steps.
-fn with_library<T, E: From<String>>(
+pub(crate) fn with_library<T, E: From<String>>(
     config: &State<'_, SharedConfig>,
     lock: &State<'_, LibraryLock>,
     op: impl FnOnce(&mut Connection, &Path) -> Result<T, E>,

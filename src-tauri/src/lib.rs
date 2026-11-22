@@ -3,6 +3,8 @@ mod config;
 mod db;
 /// Pack Manager commands (SPM-3) over the Library core.
 mod pack_commands;
+/// The Editor's save command (SPM-10): editor pixel work + the Library core.
+mod save_commands;
 /// Editor pixel work (ADR-0005): Tauri-free, unit-tested; commands wrap it.
 pub mod editor;
 /// Library core (SPEC §3-4): data model, file operations, crash-safe
@@ -62,6 +64,7 @@ pub fn run() {
             commands::editor_list_fonts,
             commands::editor_render_text,
             commands::editor_cut_layer,
+            save_commands::editor_save_image,
             pack_commands::list_packs,
             pack_commands::suggest_short_name,
             pack_commands::create_pack,
