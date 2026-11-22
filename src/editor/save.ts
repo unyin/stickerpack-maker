@@ -5,8 +5,6 @@
 import { formatBytes } from "../pack-manager/model/messages";
 import type { PackView, Sticker } from "../pack-manager/api";
 import { stickerOrigin, type StickerOrigin } from "../shared/sticker-origin";
-
-export type { StickerOrigin } from "../shared/sticker-origin";
 import { constraintStatus, readoutText, type ConstraintSet } from "./model/constraints";
 import type { Size } from "./model/document";
 
@@ -16,7 +14,10 @@ export type SaveFormat = "png" | "webp";
 export type SaveTarget =
   /** A new sticker at the end of the pack. */
   | { readonly kind: "append"; readonly packId: number }
-  /** An existing sticker's image, keeping its position and Emoji String (the edited sticker; SPM-11's Replace too). */
+  /**
+   * An existing sticker's image, keeping its position and Emoji String
+   * (the edited sticker; SPM-11's Replace too).
+   */
   | { readonly kind: "replace"; readonly stickerId: number };
 
 /** The origin sticker as it is now: where it sits and its format. */

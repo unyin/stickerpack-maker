@@ -31,9 +31,9 @@ import {
   type SaveFormat,
   originAfterSave,
   type SaveTarget,
-  type StickerOrigin,
   type TooLarge,
 } from "../editor/save";
+import type { StickerOrigin } from "../shared/sticker-origin";
 import { saveDialog } from "../editor/view/save-dialog";
 import { packMemory } from "../pack-manager/model/pack-memory";
 import { markStickerFileChanged } from "../pack-manager/model/changed-files";
