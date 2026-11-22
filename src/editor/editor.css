@@ -293,3 +293,48 @@
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+
+/* The effect tools' options bar (SPM-8): under the toolbar while Outline,
+   Glow or Warp is active. */
+.editor-effect-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.editor-effect-bar[hidden],
+.editor-effect-group[hidden],
+.editor-effect-bar button[hidden] {
+  display: none;
+}
+
+.editor-effect-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.editor-effect-group input[type="range"] {
+  width: 110px;
+}
+
+/* Fixed width, so the bar does not jump while a slider's value changes. */
+.editor-effect-value {
+  display: inline-block;
+  min-width: 52px;
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-effect-target {
+  font-size: 14px;
+}
+
+.editor-effect-target.is-blocked {
+  color: var(--danger-text);
+}

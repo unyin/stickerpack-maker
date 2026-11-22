@@ -22,9 +22,35 @@ import { distance, lassoDoubleClick, lassoDrag, lassoPress, lassoPreview, lassoR
  * What the left button does on the canvas: "move" moves the layer under
  * the pointer (or pans on empty space); "rect" drags the cut selection's
  * rectangle and "lasso" draws it from clicks and drags (SPM-9). Neither
- * selection tool moves layers.
+ * selection tool moves layers. The effect tools "outline" and "glow" only
+ * pick the layer the effect goes on (a click selects, empty space pans,
+ * nothing moves: the layer shows its preview meanwhile); "warp" paints with
+ * the brush handed to `onBrush` (SPM-8).
  */
-export type CanvasTool = "move" | "rect" | "lasso";
+export type CanvasTool = "move" | "rect" | "lasso" | "outline" | "glow" | "warp";
+
+/** The warp brush's side of a stroke, in document px (SPM-8). */
+export interface BrushHandler {
+  press(at: Point): void;
+  move(at: Point): void;
+  release(): void;
+}
+
+/**
+ * What a layer shows instead of its own pixels for a while: an effect
+ * preview (pixels plus where they go) or a brush stroke in progress (its
+ * live canvas). Never part of the model (ADR-0005, CMT-186).
+ */
+export interface LayerOverride {
+  readonly id: string;
+  readonly image: RgbaImage | HTMLCanvasElement;
+  readonly transform: Transform;
+}
+
+/** The tools that only pick a layer, for an effect preview (SPM-8). */
+function picksLayer(tool: CanvasTool): boolean {
+  return tool === "outline" || tool === "glow";
+}
 
 /** Lasso points closer than this many screen px to the previous one are skipped. */
 const LASSO_STEP = 2;
@@ -130,6 +156,11 @@ export class EditorStage {
     strokeScaleEnabled: false,
     listening: false,
   });
+  /** The warp brush's outline under the pointer (SPM-8). */
+  private readonly brushRing = new Konva.Circle({ strokeWidth: 1, strokeScaleEnabled: false, listening: false, visible: false });
+  private brush?: BrushHandler;
+  private brushing = false;
+  private override: LayerOverride | null = null;
   private readonly nodes = new Map<string, Konva.Image>();
   private readonly pending = new Set<string>();
   private readonly resizeObserver: ResizeObserver;
@@ -188,7 +219,7 @@ export class EditorStage {
       strokeScaleEnabled: false,
       listening: false,
     });
-    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine);
+    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.brushRing);
     this.content.add(this.backdrop);
     this.content.add(this.transformer);
     this.stage.add(this.content);
@@ -208,12 +239,13 @@ export class EditorStage {
       this.viewChanged?.(this.view());
     });
     this.stage.on("click tap", (e) => {
-      if (e.target === this.stage && this.tool === "move") this.session.clearSelection();
+      if (e.target === this.stage && (this.tool === "move" || picksLayer(this.tool))) this.session.clearSelection();
     });
     this.stage.on("mousedown touchstart", (e) => {
       if (!(e.evt instanceof MouseEvent) || e.evt.button === 0) this.pressRegion();
     });
     this.stage.on("mousemove touchmove", () => this.extendRegion());
+    this.stage.on("mouseleave", () => this.placeBrushRing(null));
     this.stage.on("dblclick dbltap", () => {
       if (!this.interactive || this.tool !== "lasso" || !this.lasso) return;
       const step = lassoDoubleClick(this.lasso, this.docPx(LASSO_CLOSE_RADIUS));
@@ -261,9 +293,11 @@ export class EditorStage {
 
   /** Choose what the left button does on the canvas (SPM-9). */
   setTool(tool: CanvasTool): void {
+    if (this.brushing) this.releaseBrush();
     this.tool = tool;
     this.rectDrag = null;
     this.lasso = null;
+    if (tool !== "warp") this.placeBrushRing(null);
     this.applyListening();
     this.render();
   }
@@ -282,6 +316,29 @@ export class EditorStage {
     else return false;
     this.drawRegion();
     return true;
+  }
+
+  /** Paint with `handler` while the warp tool is active (SPM-8). */
+  onBrush(handler: BrushHandler): void {
+    this.brush = handler;
+  }
+
+  /** The warp brush's radius in document px, for the ring under the pointer. */
+  setBrushRadius(radius: number): void {
+    this.brushRing.radius(radius);
+    this.guides.batchDraw();
+  }
+
+  /** Show other pixels for one layer (an effect preview, a stroke), or (null) every layer as it is. */
+  setOverride(override: LayerOverride | null): void {
+    if (override === this.override) return;
+    this.override = override;
+    this.render();
+  }
+
+  /** Redraw after a stroke painted into the override's canvas. */
+  redraw(): void {
+    this.content.batchDraw();
   }
 
   /** Hide a text layer while its text is edited in the overlay (null shows it again). */
@@ -334,9 +391,9 @@ export class EditorStage {
     this.applyListening();
   }
 
-  /** Layers listen and empty space pans only when interactive with the Move tool. */
+  /** Layers listen and empty space pans only when interactive with the Move tool (or an effect tool, to pick a layer). */
   private applyListening(): void {
-    const moving = this.interactive && this.tool === "move";
+    const moving = this.interactive && (this.tool === "move" || picksLayer(this.tool));
     this.content.listening(moving);
     this.stage.draggable(moving);
     this.content.batchDraw();
@@ -366,6 +423,7 @@ export class EditorStage {
     this.transformer.anchorFill(token("--panel"));
     this.regionHalo.stroke(token("--panel"));
     this.regionLine.stroke(token("--accent-ink"));
+    this.brushRing.stroke(token("--accent-ink"));
     this.content.batchDraw();
     this.guides.batchDraw();
   }
@@ -400,9 +458,14 @@ export class EditorStage {
   }
 
   private pressRegion(): void {
-    if (this.tool === "move" || !this.interactive) return;
+    if (this.tool === "move" || picksLayer(this.tool) || !this.interactive) return;
     const at = this.pointer();
     if (!at) return;
+    if (this.tool === "warp") {
+      this.brushing = true;
+      this.brush?.press(at);
+      return;
+    }
     if (this.tool === "rect") this.rectDrag = { start: at, end: at };
     else {
       const radius = this.docPx(LASSO_CLOSE_RADIUS);
@@ -417,6 +480,11 @@ export class EditorStage {
   private extendRegion(): void {
     const at = this.pointer();
     if (!at) return;
+    if (this.tool === "warp") {
+      this.placeBrushRing(at);
+      if (this.brushing) this.brush?.move(at);
+      return;
+    }
     if (this.rectDrag) this.rectDrag = { ...this.rectDrag, end: at };
     else if (this.lasso) this.lasso = lassoDrag(this.lasso, at, this.docPx(LASSO_STEP), this.docPx(LASSO_DRAG_SLOP));
     else return;
@@ -425,6 +493,7 @@ export class EditorStage {
 
   /** The left button went up: a rectangle drag ends; a lasso closes only when released on its start. */
   private releaseRegion(): void {
+    if (this.brushing) return this.releaseBrush();
     const rect = this.rectDrag;
     if (rect) {
       this.rectDrag = null;
@@ -436,6 +505,18 @@ export class EditorStage {
     this.lasso = step.draft;
     if (step.close) this.closeLasso();
     else this.drawRegion();
+  }
+
+  private releaseBrush(): void {
+    this.brushing = false;
+    this.brush?.release();
+  }
+
+  /** Show the brush ring at `at` (document px), or hide it. */
+  private placeBrushRing(at: Point | null): void {
+    this.brushRing.visible(at !== null && this.tool === "warp");
+    if (at) this.brushRing.position(at);
+    this.guides.batchDraw();
   }
 
   /** True when a lasso closed at `at` (within `radius`) a moment ago. */
@@ -535,14 +616,21 @@ export class EditorStage {
       const node = this.nodeFor(layer);
       // skew is reset so the view can never hold skew the model lacks
       // (ADR-0005). Text shows its Rust rendering (SPM-9), so the view draws
-      // the pixels merge, Crop and the save produce, in the same box.
-      node.setAttrs({ ...layer.transform, skewX: 0, skewY: 0, image: canvasFor(layerImage(layer)) });
+      // the pixels merge, Crop and the save produce, in the same box. An
+      // override (effect preview, brush stroke) shows instead, never stored.
+      const o = this.override?.id === layer.id ? this.override : null;
+      const image = o ? (o.image instanceof HTMLCanvasElement ? o.image : canvasFor(o.image)) : canvasFor(layerImage(layer));
+      node.setAttrs({ ...(o ? o.transform : layer.transform), skewX: 0, skewY: 0, image });
+      // Only the Move tool moves layers; effect tools pick them.
+      node.draggable(this.tool === "move");
       node.visible(layer.id !== this.editing);
       // z-order: the backdrop is index 0, layers follow bottom to top.
       node.zIndex(index + 1);
     });
+    // No handles while an effect tool picks layers: the node shows the
+    // preview's grown box, which is not the layer's to resize.
     this.transformer.nodes(
-      this.session.selection.flatMap((id) => {
+      picksLayer(this.tool) ? [] : this.session.selection.flatMap((id) => {
         const node = this.nodes.get(id);
         return node && id !== this.editing ? [node] : [];
       }),

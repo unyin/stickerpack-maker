@@ -2,10 +2,12 @@
 // session, "Open image" starts one; while open, "Add image as layer" and
 // pasting (Ctrl+V) bring in other images; "Close" ends it (warning on unsaved
 // changes). The session survives switching tabs: the view is built once.
-// SPM-9 adds the text tool, the cut selection tools and paste.
+// SPM-9 adds the text tool, the cut selection tools and paste; SPM-8 the
+// effect tools (outline, fuzzy glow, warp/bulge).
 import "../editor/editor.css";
 import { baseName } from "../api";
 import {
+  applyEffect,
   cropImages,
   cutImage,
   IMPORT_MAX_SIDE,
@@ -41,10 +43,12 @@ import {
   planCrop,
   scaleLongestSide,
   restyledTexts,
+  setLayerImage,
   setTextStyles,
   textStyleOf,
   type CropAction,
   type Doc,
+  type Point,
   type Rect,
   type TextStyle,
 } from "../editor/model/document";
@@ -61,6 +65,7 @@ import {
   type NextStyle,
 } from "../editor/model/text";
 import { EditorSession } from "../editor/model/session";
+import { applyEffectResult, effectTarget, effectTextNotice, warpTarget, type EffectKind, type EffectResult } from "../editor/model/effects";
 import {
   cropBlocker,
   cropTextNotice,
@@ -82,6 +87,9 @@ import {
 import { EditorStage, type CanvasTool } from "../editor/view/stage";
 import { TextEditOverlay } from "../editor/view/text-edit";
 import { FontPicker } from "../editor/view/font-picker";
+import { EffectControls } from "../editor/view/effect-controls";
+import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
+import { WarpStroke } from "../editor/view/warp-brush";
 import { confirmChoice } from "../dialog";
 import { el, errorMessage, withMessage } from "../ui";
 
@@ -171,6 +179,26 @@ function buildEditor(): HTMLElement {
   lassoToolButton.title =
     "Click to place points, drag to draw freehand; click the start point, double-click or press Enter to close (Backspace removes the last point or stroke, Esc cancels)";
   const cutTitle = "Move the selected pixels into a new floating layer at the same spot";
+  // Effect tools (SPM-8): each targets the selected layer, else the base image.
+  const outlineToolButton = button("Outline", () => setTool("outline"));
+  const glowToolButton = button("Glow", () => setTool("glow"));
+  const warpToolButton = button("Warp", () => setTool("warp"));
+  outlineToolButton.title = "Outline the selected layer (or the base image): preview, then Apply";
+  glowToolButton.title = "Give the selected layer (or the base image) a fuzzy glow: preview, then Apply";
+  warpToolButton.title = "Enlarge parts of the selected layer (or the base image) with a bulge brush";
+  const effectControls = new EffectControls({
+    change: () => refresh(),
+    apply: () => void run(applyEffectTool),
+    cancel: () => setTool("move"),
+  });
+  // The live outline/glow preview, drawn by Rust with Apply's own code (ADR-0008).
+  const preview = new EffectPreview<EffectResult>(
+    (req) => applyEffect(layerInput(req.doc.layers[layerIndex(req.doc, req.layerId)]), req.effect),
+    (req, result) => stage?.setOverride(req && result ? { id: req.layerId, ...result } : null),
+    (err) => say(errorMessage(err)),
+  );
+  // The warp stroke being painted, if any.
+  let stroke: WarpStroke | null = null;
   const pasteTitle = "Paste an image from the clipboard as a new layer (Ctrl+V)";
   // Text tool (SPM-9): the controls style the selected text layers, or the next new text.
   const textButton = button("Add text", () => editText(null));
@@ -273,6 +301,13 @@ function buildEditor(): HTMLElement {
     ),
     el(
       "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Effects" },
+      outlineToolButton,
+      glowToolButton,
+      warpToolButton,
+    ),
+    el(
+      "span",
       { class: "editor-tool-group", role: "group", "aria-label": "Text" },
       textButton,
       editTextButton,
@@ -300,7 +335,7 @@ function buildEditor(): HTMLElement {
   const workspace = el("div", { class: "editor-workspace" }, canvasHost, layersPanel);
   // The wheel over the typing overlay zooms the canvas like anywhere else (owner re-test 2026-11-22).
   const textOverlay = new TextEditOverlay(canvasHost, (e) => stage?.zoomAtClient(e.clientX, e.clientY, e.deltaY));
-  const view = el("section", { class: "view editor" }, toolbar, message, empty, workspace);
+  const view = el("section", { class: "view editor" }, toolbar, effectControls.element, message, empty, workspace);
 
   /**
    * Show a line in the message area: an error or blocked-action reason in
@@ -394,6 +429,7 @@ function buildEditor(): HTMLElement {
     stage.setCropGuidesVisible(showBox);
     stage.setTool(tool);
     stage.onEditText((id) => editText(id));
+    stage.onBrush({ press: beginStroke, move: continueStroke, release: endStroke });
     refresh(); // place the crop box overlay
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
@@ -490,7 +526,10 @@ function buildEditor(): HTMLElement {
    */
   async function closeSession(): Promise<boolean> {
     if (!session) return true;
+    // An unapplied effect preview alone is not a change (CMT-186): it is dropped.
     if (session.isDirty && !(await confirmDiscard())) return false;
+    preview.request(null);
+    stroke = null;
     textOverlay.close();
     stage?.destroy();
     stage = null;
@@ -570,6 +609,87 @@ function buildEditor(): HTMLElement {
       return;
     }
     await pasteImage(new Uint8Array(await blob.arrayBuffer()));
+  }
+
+  // ---- Effects (SPM-8) ----
+
+  /** The effect a tool previews and applies, or null for the other tools. */
+  function effectKindOf(t: CanvasTool): EffectKind | null {
+    return t === "outline" || t === "glow" ? t : null;
+  }
+
+  /**
+   * What the preview should show now: the active effect tool's settings on
+   * its target layer in the current document, or nothing. Called on every
+   * refresh, so switching tool or layer, undo/redo and any edit discard an
+   * unapplied preview and draw a fresh one if the tool is still active
+   * (CMT-185, CMT-186); it never enters the document or its history.
+   */
+  function previewRequest(): PreviewRequest | null {
+    const kind = effectKindOf(tool);
+    if (!session || !kind) return null;
+    const target = effectTarget(session.doc, session.selection);
+    return "id" in target ? { doc: session.doc, layerId: target.id, effect: effectControls.effect(kind) } : null;
+  }
+
+  /**
+   * Apply (CMT-183): bake the previewed effect into the layer's pixels as
+   * ONE undo step: the very result the preview shows (or, when the settings
+   * just changed, the one being drawn). The Move tool comes back, as after Cut.
+   */
+  async function applyEffectTool(): Promise<void> {
+    const current = session;
+    const kind = effectKindOf(tool);
+    const req = previewRequest();
+    if (!current || !kind || !req) return;
+    const layer = req.doc.layers[layerIndex(req.doc, req.layerId)];
+    await editAsync(
+      current,
+      { doing: `drawing the ${kind}`, done: "applied" },
+      () => preview.result(req),
+      (result) => {
+        setTool("move"); // drops the preview first: the baked pixels replace it
+        current.apply((d) => applyEffectResult(d, req.layerId, result));
+        const notice = effectTextNotice(layer, kind);
+        if (notice) say(notice, "note");
+      },
+    );
+  }
+
+  /** A warp stroke starts (SPM-8): dabs paint live into a copy of the target layer. */
+  function beginStroke(at: Point): void {
+    const current = session;
+    if (!current || !stage || busy || stroke) return;
+    const target = warpTarget(current.doc, current.selection);
+    if ("blocker" in target) {
+      say(target.blocker);
+      return;
+    }
+    const layer = current.doc.layers[layerIndex(current.doc, target.id)];
+    if (layer.kind !== "raster") return;
+    say("");
+    stroke = new WarpStroke(layer, effectControls.warp);
+    stroke.press(at);
+    stage.setOverride({ id: layer.id, image: stroke.canvas, transform: layer.transform });
+  }
+
+  function continueStroke(at: Point): void {
+    if (!stroke) return;
+    stroke.move(at);
+    stage?.redraw();
+  }
+
+  /** A warp stroke ends: its pixels become the layer's as ONE undo step (CMT-148). */
+  function endStroke(): void {
+    const finished = stroke;
+    stroke = null;
+    const current = session;
+    if (!finished || !current) return;
+    stage?.setOverride(null);
+    const image = finished.finish();
+    // Nothing painted, or the layer changed mid-stroke (e.g. Ctrl+Z): drop the stroke.
+    const now = current.doc.layers.find((l) => l.id === finished.layer.id);
+    if (image && now === finished.layer) current.apply((d) => setLayerImage(d, finished.layer.id, image));
   }
 
   // ---- Text (SPM-9) ----
@@ -799,6 +919,9 @@ function buildEditor(): HTMLElement {
       [moveToolButton, "move"],
       [rectToolButton, "rect"],
       [lassoToolButton, "lasso"],
+      [outlineToolButton, "outline"],
+      [glowToolButton, "glow"],
+      [warpToolButton, "warp"],
     ] as const) {
       b.setAttribute("aria-pressed", String(tool === t));
       b.disabled = busy;
@@ -837,6 +960,22 @@ function buildEditor(): HTMLElement {
       editText: editReason,
     });
     dirtyLabel.hidden = !current.isDirty;
+    // Effect tools (SPM-8): the bar, the brush ring and the live preview follow the current state.
+    const effectOn = tool === "warp" ? warpTarget(doc, current.selection) : effectTarget(doc, current.selection);
+    effectControls.update({
+      tool,
+      busy,
+      targetName: "id" in effectOn ? layerLabel(doc, effectOn.id, current.selection) : null,
+      blocker: "blocker" in effectOn ? effectOn.blocker : null,
+    });
+    stage?.setBrushRadius(effectControls.warp.radius);
+    preview.request(previewRequest());
+  }
+
+  /** A target layer's name, saying when it is the base image by default. */
+  function layerLabel(doc: Doc, id: string, selection: readonly string[]): string {
+    const name = doc.layers[layerIndex(doc, id)].name;
+    return selection.length === 0 ? `${name} (base image)` : name;
   }
 
   /**
