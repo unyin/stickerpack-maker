@@ -7,7 +7,7 @@
 //
 // Enter commits, Shift+Enter starts a new line, Esc cancels; clicking
 // elsewhere (blur) commits. The text is rendered in Rust once committed.
-import type { OverlayPlacement } from "./geometry";
+import { cssFontFamily, type OverlayPlacement } from "./geometry";
 
 export interface TextEditRequest {
   readonly text: string;
@@ -45,13 +45,8 @@ export class TextEditOverlay {
     area.spellcheck = false;
     area.setAttribute("aria-label", "Text");
     area.wrap = "off";
-    const p = request.placement;
-    const centre = p.centred ? " translate(-50%, -50%)" : "";
     Object.assign(area.style, {
-      left: `${p.left}px`,
-      top: `${p.top}px`,
-      transform: `rotate(${p.rotation}deg) scale(${p.scale})${centre}`,
-      fontFamily: `"${request.fontFamily.replace(/"/g, '\\"')}"`,
+      fontFamily: cssFontFamily(request.fontFamily),
       fontSize: `${request.fontSize}px`,
       lineHeight: request.lineHeight === null ? "normal" : `${request.lineHeight}px`,
       color: request.color,
@@ -79,9 +74,21 @@ export class TextEditOverlay {
     area.addEventListener("input", () => this.fit(area));
     this.host.appendChild(area);
     this.textarea = area;
+    this.place(request.placement);
     this.fit(area);
     area.focus();
     area.select();
+  }
+
+  /** Move the open overlay, e.g. when the view is panned or zoomed while typing. */
+  place(p: OverlayPlacement): void {
+    if (!this.textarea) return;
+    const centre = p.centred ? " translate(-50%, -50%)" : "";
+    Object.assign(this.textarea.style, {
+      left: `${p.left}px`,
+      top: `${p.top}px`,
+      transform: `rotate(${p.rotation}deg) scale(${p.scale})${centre}`,
+    });
   }
 
   /** Remove the overlay without committing or cancelling. */

@@ -13,19 +13,27 @@ import {
   type Rect,
   type Transform,
 } from "../model/document";
-import { lassoRegion, rectRegion } from "../model/region";
+import { lassoRegion, rectRegion, type Region } from "../model/region";
 import type { EditorSession } from "../model/session";
 import { fitView, panView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
+import { distance, lassoDoubleClick, lassoDrag, lassoPress, lassoPreview, lassoRelease, lassoUndo, type LassoDraft } from "./lasso";
 
 /**
- * What dragging on the canvas does: "move" moves the layer under the
- * pointer (or pans on empty space); "rect" and "lasso" draw the cut
- * selection (SPM-9) and never move layers.
+ * What the left button does on the canvas: "move" moves the layer under
+ * the pointer (or pans on empty space); "rect" drags the cut selection's
+ * rectangle and "lasso" draws it from clicks and drags (SPM-9). Neither
+ * selection tool moves layers.
  */
 export type CanvasTool = "move" | "rect" | "lasso";
 
 /** Lasso points closer than this many screen px to the previous one are skipped. */
 const LASSO_STEP = 2;
+/** A lasso press (or freehand release) this close to its start point, in screen px, closes it. */
+const LASSO_CLOSE_RADIUS = 8;
+/** A lasso press that travels more than this, in screen px, is a freehand stroke, not a click (Windows' drag threshold). */
+const LASSO_DRAG_SLOP = 4;
+/** A press this soon after a lasso closed, on the same spot, is that double-click's second press. */
+const DOUBLE_CLICK_MS = 500;
 
 /** Canvas per pixel buffer: pixels are immutable, so a buffer draws once. */
 const canvases = new WeakMap<RgbaImage, HTMLCanvasElement>();
@@ -144,9 +152,16 @@ export class EditorStage {
   private interactive = true;
   /** The text layer whose overlay editor is open: its node is hidden meanwhile. */
   private editing: string | null = null;
-  /** The selection being drawn: its start, and the lasso's points so far (document px). */
-  private drawing: { start: Point; points: Point[] } | null = null;
-  private readonly endDrawing = () => this.finishRegion();
+  /** The rectangle being dragged, in document px. */
+  private rectDrag: { start: Point; end: Point } | null = null;
+  /** The lasso being drawn (it stays open between presses). */
+  private lasso: LassoDraft | null = null;
+  /** Where and when the last lasso closed (to swallow the second press of a closing double-click). */
+  private lassoClosed: { at: Point; time: number } | null = null;
+  /** Only the left button (or a touch) ends a drag: a middle-button pan mid-drag leaves it be. */
+  private readonly onRelease = (e: MouseEvent | TouchEvent): void => {
+    if (!(e instanceof MouseEvent) || e.button === 0) this.releaseRegion();
+  };
   /**
    * Whether the view is settled: fitted once, or zoomed/panned by the user.
    * Until then a 0×0 host defers the first fit to resize().
@@ -195,11 +210,19 @@ export class EditorStage {
     this.stage.on("click tap", (e) => {
       if (e.target === this.stage && this.tool === "move") this.session.clearSelection();
     });
-    this.stage.on("mousedown touchstart", () => this.startRegion());
+    this.stage.on("mousedown touchstart", (e) => {
+      if (!(e.evt instanceof MouseEvent) || e.evt.button === 0) this.pressRegion();
+    });
     this.stage.on("mousemove touchmove", () => this.extendRegion());
-    // Released anywhere, even outside the canvas, a drawn selection ends.
-    window.addEventListener("mouseup", this.endDrawing);
-    window.addEventListener("touchend", this.endDrawing);
+    this.stage.on("dblclick dbltap", () => {
+      if (!this.interactive || this.tool !== "lasso" || !this.lasso) return;
+      const step = lassoDoubleClick(this.lasso, this.docPx(LASSO_CLOSE_RADIUS));
+      this.lasso = step.draft;
+      if (step.close) this.closeLasso(true);
+    });
+    // Released anywhere, even outside the canvas, a drag ends.
+    window.addEventListener("mouseup", this.onRelease);
+    window.addEventListener("touchend", this.onRelease);
 
     this.applyTheme();
     this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
@@ -236,12 +259,28 @@ export class EditorStage {
     return contentBounds(this.session.doc);
   }
 
-  /** Choose what dragging on the canvas does (SPM-9). */
+  /** Choose what the left button does on the canvas (SPM-9). */
   setTool(tool: CanvasTool): void {
     this.tool = tool;
-    this.drawing = null;
+    this.rectDrag = null;
+    this.lasso = null;
     this.applyListening();
     this.render();
+  }
+
+  /**
+   * A key for the lasso in progress (SPM-9): Enter closes it, Escape cancels
+   * it, Backspace removes its last point. True when the key was used, so
+   * the Editor's own shortcuts (Esc dropping the selection) do not also run.
+   */
+  handleLassoKey(key: string): boolean {
+    if (!this.lasso) return false;
+    if (key === "Enter") this.closeLasso();
+    else if (key === "Escape") this.lasso = null;
+    else if (key === "Backspace") this.lasso = lassoUndo(this.lasso);
+    else return false;
+    this.drawRegion();
+    return true;
   }
 
   /** Hide a text layer while its text is edited in the overlay (null shows it again). */
@@ -303,8 +342,8 @@ export class EditorStage {
   }
 
   destroy(): void {
-    window.removeEventListener("mouseup", this.endDrawing);
-    window.removeEventListener("touchend", this.endDrawing);
+    window.removeEventListener("mouseup", this.onRelease);
+    window.removeEventListener("touchend", this.onRelease);
     this.container.removeEventListener("mousedown", this.onMiddleDown, true);
     this.container.removeEventListener("auxclick", this.onAuxClick, true);
     window.removeEventListener("mousemove", this.onMiddleMove);
@@ -354,33 +393,72 @@ export class EditorStage {
     return this.content.getRelativePointerPosition();
   }
 
-  private startRegion(): void {
+  /** Screen px as document px at the current zoom. */
+  private docPx(screenPx: number): number {
+    return screenPx / this.stage.scaleX();
+  }
+
+  private pressRegion(): void {
     if (this.tool === "move" || !this.interactive) return;
-    const start = this.pointer();
-    if (!start) return;
-    this.drawing = { start, points: [start] };
+    const at = this.pointer();
+    if (!at) return;
+    if (this.tool === "rect") this.rectDrag = { start: at, end: at };
+    else {
+      const radius = this.docPx(LASSO_CLOSE_RADIUS);
+      if (!this.lasso && this.justClosedAt(at, radius)) return; // a closing double-click's second press
+      const step = lassoPress(this.lasso, at, radius);
+      this.lasso = step.draft;
+      if (step.close) return this.closeLasso(true);
+    }
     this.drawRegion();
   }
 
   private extendRegion(): void {
-    const drawing = this.drawing;
     const at = this.pointer();
-    if (!drawing || !at) return;
-    const last = drawing.points[drawing.points.length - 1];
-    const step = LASSO_STEP / this.stage.scaleX();
-    if (this.tool === "rect") drawing.points = [drawing.start, at];
-    else if (Math.hypot(at.x - last.x, at.y - last.y) >= step) drawing.points.push(at);
-    this.drawRegion();
+    if (!at) return;
+    if (this.rectDrag) this.rectDrag = { ...this.rectDrag, end: at };
+    else if (this.lasso) this.lasso = lassoDrag(this.lasso, at, this.docPx(LASSO_STEP), this.docPx(LASSO_DRAG_SLOP));
+    else return;
+    this.drawRegion(); // between lasso presses this moves the rubber band
   }
 
-  /** Finish drawing: the session's region becomes the shape (or nothing, for a click). */
-  private finishRegion(): void {
-    const drawing = this.drawing;
-    if (!drawing) return;
-    this.drawing = null;
-    const { points } = drawing;
-    const region =
-      this.tool === "rect" ? rectRegion(drawing.start, points[points.length - 1]) : lassoRegion(points);
+  /** The left button went up: a rectangle drag ends; a lasso closes only when released on its start. */
+  private releaseRegion(): void {
+    const rect = this.rectDrag;
+    if (rect) {
+      this.rectDrag = null;
+      return this.commitRegion(rectRegion(rect.start, rect.end));
+    }
+    if (!this.lasso?.pressed) return;
+    const at = this.pointer() ?? this.lasso.points[this.lasso.points.length - 1];
+    const step = lassoRelease(this.lasso, at, this.docPx(LASSO_CLOSE_RADIUS));
+    this.lasso = step.draft;
+    if (step.close) this.closeLasso();
+    else this.drawRegion();
+  }
+
+  /** True when a lasso closed at `at` (within `radius`) a moment ago. */
+  private justClosedAt(at: Point, radius: number): boolean {
+    const closed = this.lassoClosed;
+    if (!closed || performance.now() - closed.time >= DOUBLE_CLICK_MS) return false;
+    return distance(at, closed.at) <= radius;
+  }
+
+  /**
+   * Close the lasso in progress: its polygon becomes the cut selection (none,
+   * if it has no area). A close `byPointer` (a press on the start point or a
+   * double-click) is remembered, to swallow the double-click's second press.
+   */
+  private closeLasso(byPointer = false): void {
+    const points = this.lasso?.points ?? [];
+    this.lasso = null;
+    const at = byPointer ? this.pointer() : null;
+    this.lassoClosed = at ? { at, time: performance.now() } : null;
+    this.commitRegion(lassoRegion(points));
+  }
+
+  /** A finished drawing becomes the session's region (or none, for a click or no area). */
+  private commitRegion(region: Region | null): void {
     if (region === this.session.region) this.drawRegion();
     else this.session.setRegion(region);
   }
@@ -388,17 +466,18 @@ export class EditorStage {
   /** Draw the selection being drawn, else the session's region. */
   private drawRegion(): void {
     let points: readonly Point[] = this.session.region?.points ?? [];
-    if (this.drawing) {
-      const { start, points: drawn } = this.drawing;
-      const end = drawn[drawn.length - 1];
-      points =
-        this.tool === "rect"
-          ? [start, { x: end.x, y: start.y }, end, { x: start.x, y: end.y }]
-          : drawn;
+    let closed = true;
+    if (this.rectDrag) {
+      const { start, end } = this.rectDrag;
+      points = [start, { x: end.x, y: start.y }, end, { x: start.x, y: end.y }];
+    } else if (this.lasso) {
+      points = lassoPreview(this.lasso, this.pointer());
+      closed = false;
     }
     const flat = points.flatMap((p) => [p.x, p.y]);
     for (const line of [this.regionHalo, this.regionLine]) {
       line.points(flat);
+      line.closed(closed);
       line.visible(points.length > 1);
     }
     this.guides.batchDraw();

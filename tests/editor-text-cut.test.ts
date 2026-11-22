@@ -48,14 +48,17 @@ import {
 import {
   cutBlocker,
   cropBlocker,
+  cropTextNotice,
   editTextBlocker,
   escapeTarget,
   fontChoices,
   isCutShortcut,
   layerHint,
+  matchFonts,
   mergeBlocker,
   textBlocker,
   textOverlayPlacement,
+  cssFontFamily,
 } from "../src/editor/view/geometry";
 
 function image(width: number, height: number, fill = 0): RgbaImage {
@@ -408,4 +411,36 @@ test("text controls set the next text's style only while no text layer is select
   const next = { fontFamily: "Arial", fontSize: 64, color: "#000000" };
   expect(nextStyleAfter(next, 0, { fontSize: 30 })).toEqual({ ...next, fontSize: 30 });
   expect(nextStyleAfter(next, 2, { fontSize: 30 })).toBe(next);
+});
+
+test("Crop notes how many crossing text layers became images (owner, 2026-11-22)", () => {
+  const base = newDocument(image(4, 4, 255), "base", { width: 10, height: 10 });
+  const box = { x: 0, y: 0, width: 10, height: 10 };
+  const inside = addTextLayer(base, HI, render(4, 4), { ...IDENTITY, x: 2, y: 2 });
+  expect(cropTextNotice(inside, planCrop(inside, box))).toBeNull(); // kept as text
+  const one = addTextLayer(base, HI, render(20, 4), { ...IDENTITY, x: 5, y: 0 });
+  expect(cropTextNotice(one, planCrop(one, box))).toBe(
+    "1 text layer crossed the crop edge and was converted to an image.",
+  );
+  const two = addTextLayer(one, HI, render(20, 4), { ...IDENTITY, x: -5, y: 5 });
+  expect(cropTextNotice(two, planCrop(two, box))).toBe(
+    "2 text layers crossed the crop edge and were converted to images.",
+  );
+  // A crossing image layer is not text: no note.
+  const img = newDocument(image(20, 4, 255), "wide", { width: 10, height: 10 });
+  expect(cropTextNotice(img, planCrop(img, box))).toBeNull();
+});
+
+test("the font picker matches names starting with the query first, then containing it", () => {
+  const fonts = ["Arial", "Comic Sans MS", "Impact", "Segoe UI", "Arial Black", "Calibri"];
+  expect(matchFonts(fonts, "")).toBe(fonts);
+  expect(matchFonts(fonts, "  ")).toBe(fonts);
+  expect(matchFonts(fonts, "ari")).toEqual(["Arial", "Arial Black"]);
+  expect(matchFonts(fonts, "I")).toEqual(["Impact", "Arial", "Comic Sans MS", "Segoe UI", "Arial Black", "Calibri"]);
+  expect(matchFonts(fonts, "zz")).toEqual([]);
+});
+
+test("cssFontFamily quotes a family and escapes quotes and backslashes", () => {
+  expect(cssFontFamily("Arial")).toBe('"Arial"');
+  expect(cssFontFamily('Ab"c\\d')).toBe('"Ab\\"c\\\\d"');
 });

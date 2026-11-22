@@ -253,7 +253,10 @@ stickers, Missing stickers, and the thumbnail.
     editable text; entirely outside it is discarded like an image; crossing the box edge it
     is rasterised (in Rust) and clipped like an image, becoming an image layer with the same
     name and place: text cannot both stay editable and lose its outside part. The "at least
-    one layer" rule is unchanged.
+    one layer" rule is unchanged. After such a Crop a neutral (not red) note in the
+    message line says how many text layers were converted, e.g. "1 text layer crossed the
+    crop edge and was converted to an image."; Undo brings the text back and clears the note (owner decision
+    2026-11-22).
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
   image" = everything on the canvas treated as one layer, exactly like selecting every layer
   and resizing them together (owner decision 2026-11-20). Sides below are Sticker mode's;
@@ -291,10 +294,18 @@ stickers, Missing stickers, and the thumbnail.
 - Session layer model: base image, pasted cutouts, text objects. Undo/redo throughout.
 - **Cut / paste / resize** floating parts. Details below are owner
   confirmed 2026-11-21 (SPM-9):
-  - **Move / Rectangle / Lasso** tools: with Rectangle or Lasso, dragging on the canvas draws
-    a selection instead of moving layers or panning (wheel zoom still works). The selection
-    is not an undo step; it stays until it is used, replaced, or cleared with Esc (Esc
-    clears it before it clears the layer selection).
+  - **Move / Rectangle / Lasso** tools: with Rectangle or Lasso, the left button draws a
+    selection instead of moving layers or panning; wheel zoom and middle-drag pan still
+    work, even mid-drag (only the left button's release ends a drag). The selection is not
+    an undo step; it stays until it is used, replaced, or cleared with Esc (Esc clears it
+    before it clears the layer selection).
+  - The **Lasso** is a hybrid (owner decision 2026-11-22, in the style of GIMP's Free
+    Select): a click adds a waypoint (a straight edge from the last point), a drag draws
+    freehand, and the two mix in one lasso, which stays open between presses with a
+    rubber band to the pointer. It closes by pressing on its start point (or releasing a
+    freehand stroke there), by a double-click on one spot (two clicks, not a stroke), or by
+    Enter. While it is open, Esc cancels it (the previous selection stays) and Backspace
+    removes its last point. A closed lasso with no area clears the selection.
   - **Cut** works on exactly one selected image layer that the selection touches (its
     tooltip says why not). The selected pixels (whole pixels whose centres lie inside the
     selection; a lasso that crosses itself leaves the overlap out) move into a new floating
@@ -310,7 +321,11 @@ stickers, Missing stickers, and the thumbnail.
   - **Paste**: Ctrl+V with an image on the clipboard (or the Paste button, where the
     webview allows reading the clipboard) adds it as a new layer named "Pasted image",
     native size, centred on the canvas, on top, with the same 2000×2000 import cap dialog
-    as Add image as layer. PNG, JPEG and WEBP clipboard data are accepted.
+    as Add image as layer. PNG, JPEG and WEBP clipboard data are accepted. Ctrl+V also
+    pastes an image file copied in the file explorer; the Paste button cannot see copied
+    files (the webview's clipboard API reads only image data), so when it finds no image it
+    says "No image data on the clipboard. Copied an image file? Press Ctrl+V." (owner
+    decision 2026-11-22).
   - Floating parts are moved and resized with the same handles as every layer (corner
     anchors, aspect kept, rotation), at any time.
 - **Enlarge selected parts**: local warp/bulge (strength + radius), paints on the selected layer.
@@ -324,8 +339,12 @@ stickers, Missing stickers, and the thumbnail.
     cancels, clicking elsewhere finishes. A new text layer is centred on the canvas and
     named after its first line. Blank text creates or changes nothing (delete a text layer
     with Delete). While text is typed, every key (Delete, undo/redo, Esc) acts on the text,
-    never on the layers.
-  - The font list is the system's installed families; a session's first text uses Impact
+    never on the layers. The text box follows the view when it is panned or zoomed while
+    typing.
+  - The font list is the system's installed families, shown in a font picker where each
+    name is drawn in its own typeface and typing filters the list (names starting with
+    the typed text first); arrow keys move, Enter or a click picks, Esc or leaving the
+    field keeps the current font (owner decision 2026-11-22); a session's first text uses Impact
     when installed (else a common sans, else the first family). Size is a whole number of
     px within the range in src/shared/limits.json (1–1000); default 64 px, black. The font,
     size and colour controls restyle the selected text layers (one undo step), or set the
@@ -426,6 +445,8 @@ stickers, Missing stickers, and the thumbnail.
   not also toggle it; and the Editor has no grid yet (owner, 2026-11-21).
 - Pack Manager: a button next to the Emoji String field that opens an emoji picker for easy
   selection (owner, 2026-11-21).
+- Editor: layer locking, so a locked layer cannot be selected, moved or edited by accident
+  (owner, 2026-11-22).
 - v3 idea: in Reorder mode the sticker images wiggle (as on phone home screens), instead of
   or as well as the green tint (owner, 2026-11-21: animations are a bigger job).
 

@@ -63,6 +63,7 @@ import {
 import { EditorSession } from "../editor/model/session";
 import {
   cropBlocker,
+  cropTextNotice,
   cutBlocker,
   deleteBlocker,
   editTextBlocker,
@@ -76,9 +77,11 @@ import {
   textBlocker,
   textOverlayPlacement,
   type SizeTool,
+  type ViewTransform,
 } from "../editor/view/geometry";
 import { EditorStage, type CanvasTool } from "../editor/view/stage";
 import { TextEditOverlay } from "../editor/view/text-edit";
+import { FontPicker } from "../editor/view/font-picker";
 import { confirmChoice } from "../dialog";
 import { el, errorMessage, withMessage } from "../ui";
 
@@ -100,14 +103,14 @@ function buildEditor(): HTMLElement {
   let busy = false;
   // The crop box overlay is on by default (owner, 2026-11-20).
   let showBox = true;
-  // What dragging on the canvas does: move layers, or draw the cut selection.
+  // What the left button does on the canvas: move layers, or draw the cut selection.
   let tool: CanvasTool = "move";
+  // The text layer the open overlay edits (null: new text), to keep it placed as the view moves.
+  let overlayLayerId: string | null = null;
   // The installed font families, loaded once (null while loading), and why
   // there are none. Never changed after loading.
   let fonts: readonly string[] | null = null;
   let fontsProblem: string | null = null;
-  // The families the font select currently lists (see fontChoices).
-  let listedFonts: readonly string[] = [];
   // The style the next new text gets: the text controls edit it while no
   // text layer is selected.
   let nextStyle: NextStyle = { fontFamily: "", fontSize: DEFAULT_FONT_SIZE, color: DEFAULT_TEXT_COLOR };
@@ -123,8 +126,14 @@ function buildEditor(): HTMLElement {
 
   const openButton = button("Open image", () => run(openImage), "primary");
   const addButton = button("Add image as layer", () => run(addImageAsLayer), "primary");
-  const undoButton = button("Undo", () => session?.undo());
-  const redoButton = button("Redo", () => session?.redo());
+  const undoButton = button("Undo", () => {
+    clearNote();
+    session?.undo();
+  });
+  const redoButton = button("Redo", () => {
+    clearNote();
+    session?.redo();
+  });
   // Sizing tools (SPEC §6), all on the whole image as one group.
   const fitButton = button(`Fit to ${targetSide}×${targetSide}`, () =>
     resizeWholeImage((doc, c) => fitToBox(doc, c, targetSide)),
@@ -159,7 +168,8 @@ function buildEditor(): HTMLElement {
   const pasteButton = button("Paste", () => run(pasteFromButton));
   moveToolButton.title = "Drag layers to move them, or empty space to pan";
   rectToolButton.title = "Drag on the canvas to select a rectangle to cut";
-  lassoToolButton.title = "Drag on the canvas to draw a freehand selection to cut";
+  lassoToolButton.title =
+    "Click to place points, drag to draw freehand; click the start point, double-click or press Enter to close (Backspace removes the last point, Esc cancels)";
   const cutTitle = "Move the selected pixels into a new floating layer at the same spot";
   const pasteTitle = "Paste an image from the clipboard as a new layer (Ctrl+V)";
   // Text tool (SPM-9): the controls style the selected text layers, or the next new text.
@@ -168,7 +178,8 @@ function buildEditor(): HTMLElement {
     const id = session?.selection[0];
     if (id) editText(id);
   });
-  const fontSelect = el("select", { class: "editor-font-select", "aria-label": "Font" }) as HTMLSelectElement;
+  // Font names shown in their own typeface, with type-to-search (owner, 2026-11-22).
+  const fontPicker = new FontPicker("Font");
   const fontSizeInput = el("input", {
     class: "editor-side-input",
     type: "number",
@@ -181,15 +192,12 @@ function buildEditor(): HTMLElement {
   // After a committed change the control gives up focus, so the editor's
   // shortcuts (Ctrl+Z, Delete, Esc, Ctrl+V) work at once. Typing in the size
   // input is not hijacked: it commits only on Enter or when focus leaves.
-  fontSelect.addEventListener("change", () => {
-    restyle({ fontFamily: fontSelect.value });
-    fontSelect.blur();
-  });
+  fontPicker.onChange((fontFamily) => restyle({ fontFamily })); // the picker gives up focus itself
   fontSizeInput.addEventListener("change", () => {
     const size = Number(fontSizeInput.value);
     const problem = fontSizeProblem(size);
     if (problem) {
-      message.textContent = problem;
+      say(problem);
       refresh(); // shows the current size again
       return;
     }
@@ -268,7 +276,7 @@ function buildEditor(): HTMLElement {
       { class: "editor-tool-group", role: "group", "aria-label": "Text" },
       textButton,
       editTextButton,
-      fontSelect,
+      fontPicker.element,
       el("label", { class: "editor-side" }, fontSizeInput, " px"),
       colorInput,
     ),
@@ -293,11 +301,28 @@ function buildEditor(): HTMLElement {
   const textOverlay = new TextEditOverlay(canvasHost);
   const view = el("section", { class: "view editor" }, toolbar, message, empty, workspace);
 
+  /**
+   * Show a line in the message area: an error or blocked-action reason in
+   * red, or a neutral note (`"note"`, e.g. after Crop converted text).
+   * `run()` clears the line (and its tone) with `say("")` before an action,
+   * so errors that `withMessage` writes directly always show in the error tone.
+   */
+  function say(text: string, tone: "error" | "note" = "error"): void {
+    message.textContent = text;
+    message.classList.toggle("is-note", tone === "note");
+  }
+
+  /** Undo and redo take the neutral note back with them (owner decision 2026-11-22); errors stay. */
+  function clearNote(): void {
+    if (message.classList.contains("is-note")) say("");
+  }
+
   /** Run an async action with one-at-a-time busy handling and error reporting. */
   async function run(action: () => Promise<void>): Promise<void> {
     if (busy) return;
     busy = true;
     stage?.setInteractive(false); // nothing is edited while an action works
+    say(""); // a note never carries over into the action's error
     refresh();
     try {
       await withMessage(message, action);
@@ -332,7 +357,7 @@ function buildEditor(): HTMLElement {
       return;
     }
     if (current.doc !== doc) {
-      message.textContent = `The layers changed while ${onStale.doing}; nothing was ${onStale.done}. Try again.`;
+      say(`The layers changed while ${onStale.doing}; nothing was ${onStale.done}. Try again.`);
       return;
     }
     commit(result, doc);
@@ -372,7 +397,10 @@ function buildEditor(): HTMLElement {
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
     session.subscribe(refresh);
-    stage.onViewChange((v) => (zoomLabel.textContent = `${Math.round(v.scale * 100)}%`));
+    stage.onViewChange((v) => {
+      zoomLabel.textContent = `${Math.round(v.scale * 100)}%`;
+      placeTextOverlay(v); // typing overlay follows pan and zoom
+    });
   }
 
   async function addImageAsLayer(): Promise<void> {
@@ -429,7 +457,11 @@ function buildEditor(): HTMLElement {
         const images = clips.length > 0 ? await cropImages(clips) : [];
         return { plan, byId: new Map(clips.map((c, i) => [c.id, images[i]])) };
       },
-      ({ plan, byId }) => current.apply((d) => cropLayers(d, plan, byId)),
+      ({ plan, byId }, doc) => {
+        current.apply((d) => cropLayers(d, plan, byId));
+        const notice = cropTextNotice(doc, plan);
+        if (notice) say(notice, "note");
+      },
     );
   }
 
@@ -529,11 +561,11 @@ function buildEditor(): HTMLElement {
         }
       }
     } catch {
-      message.textContent = "The clipboard can't be read here: press Ctrl+V to paste an image.";
+      say("The clipboard can't be read here: press Ctrl+V to paste an image.");
       return;
     }
     if (!blob) {
-      message.textContent = "The clipboard holds no image.";
+      say("No image data on the clipboard. Copied an image file? Press Ctrl+V.");
       return;
     }
     await pasteImage(new Uint8Array(await blob.arrayBuffer()));
@@ -559,6 +591,7 @@ function buildEditor(): HTMLElement {
       current.select(layer.id);
       stage.setEditing(layer.id);
     }
+    overlayLayerId = layer ? layer.id : null;
     const placement = textOverlayPlacement(stage.view(), layer ?? null, current.doc);
     textOverlay.open(
       { ...style, lineHeight: layer ? layer.render.metrics.lineHeight : null, placement },
@@ -571,6 +604,13 @@ function buildEditor(): HTMLElement {
         cancel: () => stage?.setEditing(null),
       },
     );
+  }
+
+  /** Keep the open text overlay over its layer (or the canvas centre, for new text) in view `v`. */
+  function placeTextOverlay(v: ViewTransform): void {
+    if (!session || !textOverlay.isOpen) return;
+    const layer = session.doc.layers.find((l) => l.id === overlayLayerId);
+    textOverlay.place(textOverlayPlacement(v, layer?.kind === "text" ? layer : null, session.doc));
   }
 
   async function addText(style: TextStyle): Promise<void> {
@@ -639,11 +679,11 @@ function buildEditor(): HTMLElement {
     const current = session;
     if (!current || !stage || busy) return;
     const content = stage.contentBounds();
-    message.textContent = "";
+    say("");
     try {
       current.apply((doc) => tool(doc, content));
     } catch (err) {
-      message.textContent = errorMessage(err);
+      say(errorMessage(err));
     }
   }
 
@@ -657,7 +697,7 @@ function buildEditor(): HTMLElement {
     const side = enteredSide();
     const problem = resizeSideProblem(side);
     if (problem) {
-      message.textContent = problem;
+      say(problem);
       return;
     }
     resizeWholeImage((doc, content) => resizeLongestSide(doc, content, side));
@@ -777,18 +817,15 @@ function buildEditor(): HTMLElement {
     const editReason = editTextBlocker(textReason, doc, current.selection);
     editTextButton.disabled = busy || editReason !== null;
     editTextButton.title = editReason ?? editTextTitle;
-    // The select lists the installed fonts, plus a layer's font that is no longer installed.
+    // The picker lists the installed fonts, plus a layer's font that is no longer installed.
     const choices = fontChoices(fonts ?? [], shown.fontFamily);
-    if (choices.length !== listedFonts.length || choices.some((f, i) => f !== listedFonts[i])) {
-      fontSelect.replaceChildren(...choices.map((f) => el("option", { value: f }, f)));
-      listedFonts = choices;
-    }
-    fontSelect.value = shown.fontFamily;
+    fontPicker.setFonts(choices);
+    fontPicker.value = shown.fontFamily;
     if (document.activeElement !== fontSizeInput) fontSizeInput.value = String(shown.fontSize);
     colorInput.value = shown.color;
-    for (const control of [fontSelect, fontSizeInput, colorInput]) control.disabled = busy || textReason !== null;
+    for (const control of [fontPicker, fontSizeInput, colorInput]) control.disabled = busy || textReason !== null;
     const target = texts.length > 0 ? "the selected text" : "the next text";
-    fontSelect.title = textReason ?? `Font of ${target}`;
+    fontPicker.title = textReason ?? `Font of ${target}`;
     fontSizeInput.title = textReason ?? `Font size of ${target} in px (${TEXT_FONT_SIZE.min}–${TEXT_FONT_SIZE.max})`;
     colorInput.title = textReason ?? `Colour of ${target}`;
     // Explain disabled actions only once something is selected.
@@ -803,7 +840,7 @@ function buildEditor(): HTMLElement {
 
   /**
    * True when keys and paste belong to a form control or the text overlay,
-   * never to the layers: text fields, the font list, editable content.
+   * never to the layers: text fields, the font picker's field, editable content.
    */
   function isTextTarget(target: EventTarget | null): boolean {
     const t = target as HTMLElement | null;
@@ -817,13 +854,24 @@ function buildEditor(): HTMLElement {
     const current = session;
     if (!current || !view.isConnected || busy || textOverlay.isOpen) return;
     if (isTextTarget(e.target)) return;
+    // A lasso in progress takes Enter, Esc and Backspace first (SPM-9).
+    if (stage?.handleLassoKey(e.key)) {
+      e.preventDefault();
+      return;
+    }
     const key = e.key.toLowerCase();
-    if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) current.undo();
-    else if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) current.redo();
+    if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) {
+      clearNote();
+      current.undo();
+    }
+    else if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) {
+      clearNote();
+      current.redo();
+    }
     // Ctrl+X is the Cut tool, not the clipboard; a blocked cut says why.
     else if (isCutShortcut(e)) {
       const reason = cutBlocker(current.doc, current.selection, current.region);
-      if (reason) message.textContent = reason;
+      if (reason) say(reason);
       else void run(cutSelection);
     }
     // Esc drops the cut selection first, then the layer selection.
@@ -840,7 +888,7 @@ function buildEditor(): HTMLElement {
     const file = item?.getAsFile();
     e.preventDefault();
     if (!file) {
-      message.textContent = "The clipboard holds no image to paste.";
+      say("The clipboard holds no image to paste.");
       return;
     }
     void run(async () => pasteImage(new Uint8Array(await file.arrayBuffer())));

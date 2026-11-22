@@ -214,6 +214,19 @@ export function cropBlocker(plan: readonly CropAction[], box: Rect): string | nu
 }
 
 /**
+ * The note after a Crop that turned crossing text layers into images (owner
+ * decision 2026-11-22), or null when no text was converted. Undo brings
+ * the text back.
+ */
+export function cropTextNotice(doc: Doc, plan: readonly CropAction[]): string | null {
+  const converted = plan.filter((a, i) => a.kind === "clip" && doc.layers[i]?.kind === "text").length;
+  if (converted === 0) return null;
+  return converted === 1
+    ? "1 text layer crossed the crop edge and was converted to an image."
+    : `${converted} text layers crossed the crop edge and were converted to images.`;
+}
+
+/**
  * Why the text tool can't be used, or null: the installed fonts are still
  * loading (`fonts` null) or could not be listed (`problem`).
  */
@@ -231,13 +244,32 @@ export function editTextBlocker(textReason: string | null, doc: Doc, selection: 
 }
 
 /**
- * The font list the select shows: the installed families, plus `family`
+ * The fonts the picker lists: the installed families, plus `family`
  * when it is set but not installed (a layer in a font that has since gone
  * still shows its font). Pure: the installed list is never changed, and it
  * is returned as is when nothing is added.
  */
 export function fontChoices(installed: readonly string[], family: string): readonly string[] {
   return family === "" || installed.includes(family) ? installed : [...installed, family];
+}
+
+/**
+ * The fonts the picker lists for a typed `query` (owner decision
+ * 2026-11-22: type-to-search): case-insensitive, names starting with the
+ * query first, then names containing it, each group in list order. An
+ * empty query lists every font.
+ */
+export function matchFonts(fonts: readonly string[], query: string): readonly string[] {
+  const q = query.trim().toLowerCase();
+  if (q === "") return fonts;
+  const starts: string[] = [];
+  const contains: string[] = [];
+  for (const font of fonts) {
+    const name = font.toLowerCase();
+    if (name.startsWith(q)) starts.push(font);
+    else if (name.includes(q)) contains.push(font);
+  }
+  return [...starts, ...contains];
 }
 
 /** What Esc clears: the cut selection first, then the layer selection (SPEC §6). */
@@ -284,4 +316,9 @@ export function layerHint(
     textLayersOf(doc, selection).length > 0 ? reasons.editText : null,
   ];
   return relevant.filter((r) => r !== null).join(" ");
+}
+
+/** A CSS font-family value naming exactly `family`: quoted, with `"` and `\` escaped, so any name works. */
+export function cssFontFamily(family: string): string {
+  return `"${family.replace(/["\\]/g, "\\$&")}"`;
 }
