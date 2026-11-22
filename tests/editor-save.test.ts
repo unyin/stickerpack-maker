@@ -148,3 +148,8 @@ test("after a save the session edits the saved sticker, and a replace says so", 
   expect(originAfterSave(out, "Cats")).toEqual({ stickerId: 9, packId: 2, position: 4, packTitle: "Cats" });
   expect(savedText(out, "Cats", { kind: "replace", stickerId: 9 })).toBe("Replaced #4 in “Cats”.");
 });
+
+test("after a Library change the origin sticker is reported, not looked up", () => {
+  const gone = resolveOrigin({ ...origin, otherLibrary: true }, viewWith([{ id: 9, position: 4, format: "png" }]));
+  expect("gone" in gone && gone.gone).toContain("belongs to the Library used before");
+});

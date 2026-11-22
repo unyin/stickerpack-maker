@@ -4,6 +4,9 @@
 // size flow (CMT-144) and words what happened.
 import { formatBytes } from "../pack-manager/model/messages";
 import type { PackView, Sticker } from "../pack-manager/api";
+import { stickerOrigin, type StickerOrigin } from "../shared/sticker-origin";
+
+export type { StickerOrigin } from "../shared/sticker-origin";
 import { constraintStatus, readoutText, type ConstraintSet } from "./model/constraints";
 import type { Size } from "./model/document";
 
@@ -13,21 +16,8 @@ export type SaveFormat = "png" | "webp";
 export type SaveTarget =
   /** A new sticker at the end of the pack. */
   | { readonly kind: "append"; readonly packId: number }
-  /** An existing sticker's image, keeping its position and Emoji String (SPM-11). */
+  /** An existing sticker's image, keeping its position and Emoji String (the edited sticker; SPM-11's Replace too). */
   | { readonly kind: "replace"; readonly stickerId: number };
-
-/**
- * The sticker a session edits, when it was opened with the Pack Manager's
- * Edit (owner decision 2026-11-22): saving offers to replace it. Position and
- * pack title are as they were when it was opened, for the "no longer
- * exists" message; the dialog shows the current ones.
- */
-export interface StickerOrigin {
-  readonly stickerId: number;
-  readonly packId: number;
-  readonly position: number;
-  readonly packTitle: string;
-}
 
 /** The origin sticker as it is now: where it sits and its format. */
 export interface OriginNow {
@@ -43,6 +33,11 @@ export interface OriginNow {
  * pack, another Library): why it cannot be replaced.
  */
 export function resolveOrigin(origin: StickerOrigin, view: PackView | null): OriginNow | { readonly gone: string } {
+  if (origin.otherLibrary) {
+    return {
+      gone: `Sticker #${origin.position} of “${origin.packTitle}” belongs to the Library used before, so it cannot be replaced. Save it as a new sticker instead.`,
+    };
+  }
   const sticker = view?.stickers.find((s) => s.id === origin.stickerId);
   if (!view || !sticker) {
     return {
@@ -63,8 +58,7 @@ export function replaceLabel(now: OriginNow): string {
  * that new sticker, so the next save replaces it rather than adding another.
  */
 export function originAfterSave(saved: Saved, packTitle: string): StickerOrigin {
-  const { sticker } = saved;
-  return { stickerId: sticker.id, packId: sticker.packId, position: sticker.position, packTitle };
+  return stickerOrigin(saved.sticker, packTitle);
 }
 
 /** What the save command did; mirrors `SaveOutcome` in save_commands.rs. */

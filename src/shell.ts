@@ -1,7 +1,7 @@
 import type { AppState } from "./api";
 import { clear, el } from "./ui";
 import { forgetEditorOrigin, openFileInEditor, renderEditor } from "./views/editor";
-import type { StickerOrigin } from "./editor/save";
+import type { StickerOrigin } from "./shared/sticker-origin";
 import { forgetPackManager, renderPackManager } from "./views/pack-manager";
 import { resetPackMemory } from "./pack-manager/model/pack-memory";
 import { renderSettings } from "./views/settings";

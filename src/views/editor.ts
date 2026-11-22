@@ -1009,8 +1009,9 @@ function buildEditor(): HTMLElement {
       showEditor(); // either way: Keep editing shows the open image
       if (closed) await openImage(path, from ?? null);
     });
+  // The dialog then says why Replace is gone, rather than silently dropping it.
   forgetOriginHook = () => {
-    origin = null;
+    if (origin) origin = { ...origin, otherLibrary: true };
   };
 
   refresh();
@@ -1022,7 +1023,8 @@ let forgetOriginHook: (() => void) | null = null;
 
 /**
  * The Library changed: a session opened with Edit no longer replaces its
- * sticker, whose id belongs to the old Library; it can still save as new.
+ * sticker, whose id belongs to the old Library; its save dialog says so and
+ * it can still save as a new sticker.
  */
 export function forgetEditorOrigin(): void {
   forgetOriginHook?.();

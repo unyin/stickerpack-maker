@@ -37,6 +37,7 @@ export interface SaveDialogOptions {
 
 /** Where the origin sticker is now, or why it cannot be replaced. */
 async function originNow(origin: StickerOrigin): Promise<OriginNow | { readonly gone: string }> {
+  if (origin.otherLibrary) return resolveOrigin(origin, null);
   try {
     return resolveOrigin(origin, await loadPackView(origin.packId));
   } catch {
@@ -56,10 +57,11 @@ export async function saveDialog(options: SaveDialogOptions): Promise<void> {
   const replaceRadio = el("input", { type: "radio", name: "save-target", value: "replace" }) as HTMLInputElement;
   const newRadio = el("input", { type: "radio", name: "save-target", value: "new" }) as HTMLInputElement;
   const replaceText = el("span", {}, origin ? replaceLabel({ ...origin, format: options.format }) : "");
+  const replaceOption = el("label", { class: "pm-check" }, replaceRadio, " ", replaceText);
   const targetRow = el(
     "div",
     { class: "editor-save-target", role: "radiogroup", "aria-label": "Save as" },
-    el("label", { class: "pm-check" }, replaceRadio, " ", replaceText),
+    replaceOption,
     el("label", { class: "pm-check" }, newRadio, " Save as a new sticker"),
   );
   replaceRadio.checked = origin !== null;
@@ -150,13 +152,15 @@ export async function saveDialog(options: SaveDialogOptions): Promise<void> {
   if (found && "gone" in found) {
     // Never write to another slot: only a new sticker is left (owner decision 2026-11-22).
     replaceRadio.disabled = true;
+    replaceOption.title = found.gone; // disabled controls show their reason (SPEC §2)
     replaceRadio.checked = false;
     newRadio.checked = true;
     message.textContent = found.gone;
   } else if (found) {
     now = found;
     replaceText.textContent = replaceLabel(found);
-    setFormat(found.format); // a replace keeps the sticker's format unless changed here
+    // A replace keeps the sticker's format unless changed here (not overriding a pick made meanwhile).
+    if (format() === options.format) setFormat(found.format);
   }
   sync();
   if (replacing() || initialFocus("save", picker.selected() !== null) === "submit") handle.buttons.get("save")?.focus();

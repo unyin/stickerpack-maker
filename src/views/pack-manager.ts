@@ -6,7 +6,7 @@
 import "../pack-manager/pack-manager.css";
 import { el, errorMessage } from "../ui";
 import { packMemory } from "../pack-manager/model/pack-memory";
-import type { StickerOrigin } from "../editor/save";
+import type { StickerOrigin } from "../shared/sticker-origin";
 import { buildPackList } from "../pack-manager/view/pack-list";
 import { buildPackView, type PackViewHandle } from "../pack-manager/view/pack-view";
 

@@ -2,7 +2,7 @@
 // (Reorder toggle, Refresh, Add images), banners, the sticker grid with the
 // thumbnail slot at its end, and the selection panel. Rules live in
 // ../model; this file wires them to the DOM and the commands.
-import type { StickerOrigin } from "../../editor/save";
+import { stickerOrigin, type StickerOrigin } from "../../shared/sticker-origin";
 import { takeChangedStickers } from "../model/changed-files";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { editorCanImport } from "../../shared/import-extensions";
@@ -282,8 +282,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
         const choice = await editChoiceDialog(s.position);
         if (choice === "edit") {
           // Saving the session then offers to replace this sticker (owner decision 2026-11-22).
-          const origin = { stickerId: s.id, packId, position: s.position, packTitle: view.pack.title };
-          host.openInEditor(await stickerFilePath(s.id), origin);
+          host.openInEditor(await stickerFilePath(s.id), stickerOrigin(s, view.pack.title));
         }
         else if (choice === "replace") await replace(s);
       }),

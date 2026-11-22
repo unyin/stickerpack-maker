@@ -135,16 +135,17 @@ stickers, Missing stickers, and the thumbnail.
   as monochrome text glyphs (owner decision 2026-11-22; SPM-17 makes the style selectable).
 - Actions: **Edit** first asks **Edit / Replace… / Cancel** (Cancel is the safe default):
   Edit opens the flattened image in the Editor, Replace runs the Replace flow below (owner
-  decision 2026-11-21). A session opened with Edit remembers that sticker: saving it offers
-  to replace the sticker in its slot (§6 Save; owner decision 2026-11-22). Opening in the Editor while it has unsaved changes asks first, in the
-  shared dialog: "The editor has unsaved changes. Do you want to discard these or continue
-  editing?" (Discard / Keep editing, Keep editing by default); either way the view then
-  switches to the Editor, which opens the sticker only after Discard. **Replace** (preserves
-  position + emoji; validated drop-in or via Editor, §5 replacement rules below);
-  **Send to pack…**; **Open in explorer** (folder opens with the file selected; the button
-  ends with an "opens in another program" icon, as every Open in explorer button does);
-  **Delete** (confirmation dialog showing preview + emoji, then permanent; Delete key
-  shortcut). No double-click behavior in v1.
+  decision 2026-11-21). A session opened with Edit remembers that sticker: saving it
+  offers to replace the sticker in its slot (§6 Save; owner decision 2026-11-22).
+  Opening in the Editor while it has unsaved changes asks first, in the shared dialog: "The
+  editor has unsaved changes. Do you want to discard these or continue editing?" (Discard /
+  Keep editing, Keep editing by default); either way the view then switches to the Editor,
+  which opens the sticker only after Discard. **Replace** (preserves position + emoji;
+  validated drop-in or via Editor, §5 replacement rules below); **Send to pack…**; **Open in
+  explorer** (folder opens with the file selected; the button ends with an "opens in another
+  program" icon, as every Open in explorer button does); **Delete** (confirmation dialog
+  showing preview + emoji, then permanent; Delete key shortcut). No double-click behavior in
+  v1.
 
 ### Aggregate panel (multiple selection)
 - "N stickers selected" + combined file size. Exactly two actions: **Send to pack…** and
@@ -420,8 +421,9 @@ stickers, Missing stickers, and the thumbnail.
     (ADR-0003) and an empty Emoji String (flagged in the Pack Manager, like bulk imports).
     The Library core checks the file as a sticker once more before it enters the pack.
   - After a save the dialog closes, the unsaved-changes flag clears, the session stays open,
-    and a neutral note names the file, its position, the pack and the file size. A Pack
-    Manager showing that pack re-reads it when its tab is shown again.
+    and a neutral note follows: for a new sticker it names the file, its position, the pack
+    and the file size (a replace's note is above). A Pack Manager showing that pack re-reads
+    it when its tab is shown again.
   - PNG is encoded once at the best lossless compression: it has no quality knob. WEBP is
     lossless when that fits the cap, otherwise lossy at the highest quality that fits (alpha
     stays lossless); the quality is found automatically, there is no quality slider.
