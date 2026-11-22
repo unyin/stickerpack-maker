@@ -427,6 +427,10 @@ stickers, Missing stickers, and the thumbnail.
 - Trash/recovery area for deleted stickers.
 - Bulk emoji-set: rejected as unnecessary — not planned.
 - Editor: every edge of the selection box is grabbable for resizing, not just the corners.
+- Editor: holding Shift while resizing a layer with its handles (not the free-resize field)
+  scales it around its centre instead of anchoring the opposite corner (owner, 2026-11-22).
+  Note: Konva's transformer already does this with Alt held, and Shift is free while
+  resizing (the ratio is always kept); Shift while rotating already snaps to 15° steps.
 - Editor: custom canvas resizing (in v1 only Fit and Longest side change the canvas).
 - Drag and drop an image file to open it in the Editor. (v3 idea: drag and drop onto an
   open session to add it as a layer.)
