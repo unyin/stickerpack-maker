@@ -305,6 +305,10 @@
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--panel);
+  /* Every tool's bar has the height of the one with buttons, so switching
+     between Outline, Glow and Warp does not shift the canvas. */
+  min-height: 52px;
+  box-sizing: border-box;
 }
 
 .editor-effect-bar[hidden],

@@ -335,9 +335,35 @@ stickers, Missing stickers, and the thumbnail.
     anchoring the opposite corner; holding **Shift** while dragging the rotation handle
     snaps the rotation to 15° steps.
 - **Enlarge selected parts**: local warp/bulge (strength + radius), paints on the selected layer.
+  Details (SPM-8; owner decision 2026-11-21: a destructive brush): the **Warp** tool paints
+  on the selected image layer, or the base image (the bottom layer) when nothing is
+  selected; text layers are not warped (merge them into an image first), and with several
+  layers selected it says to select one. A click magnifies the pixels around it in place
+  (meme style), within the brush radius; a drag adds a bulge every half radius along the
+  way. Strength and radius are set in the tool's bar (radius in on-screen document px).
+  The layer keeps its size and transform (one piece). Each stroke is one undo step.
 - **Background removal**: one-click offline ONNX auto removal + manual refine brush.
 - **Outline** and **fuzzy glow**: target the selected layer, or the base image when nothing
-  is selected.
+  is selected. Details (SPM-8):
+  - One-shot (owner decision 2026-11-22): while the **Outline** or **Glow** tool is active,
+    a live preview shows the effect with the current settings (outline: colour, width;
+    glow: colour, radius, softness, opacity); **Apply** bakes it into the layer's pixels as
+    ONE undo step and returns to the Move tool; changing settings is not an undo step.
+    Normal blending only (owner decision 2026-11-21). The preview is drawn by Rust with
+    Apply's own code, so the preview is the result (ADR-0008).
+  - The unapplied preview (owner decision 2026-11-22) exists only until Apply: switching
+    tool (or **Cancel**), changing the selected layer, undo/redo, and closing the Editor
+    all discard it, and it never enters the undo history. An unapplied preview alone does
+    not make the document dirty, so closing warns only about applied, unsaved changes.
+    While the tool stays active after a discard, the preview is drawn afresh for the
+    current layer and document.
+  - The effect grows the layer: an outline or glow reaching past the layer's edge makes
+    the layer larger (its top-left moves out), not clipped; the save still clips to the
+    canvas. Sizes are in on-screen document px, so a scaled layer looks the same.
+  - In the effect tools a click on the canvas picks the target layer (nothing moves).
+    With several layers selected the tool says to select one (merge them first to treat
+    them as one). A text layer gets the effect too: Apply rasterises it in Rust and it
+    becomes an image layer with the same name and place; a neutral note says so.
 - **Text**: own layer, movable/resizable until save (system fonts, size, color). Details
   (owner confirmed 2026-11-21, SPM-9):
   - **Add text** opens a text box centred on the canvas; double-click a text layer (or
