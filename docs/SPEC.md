@@ -328,6 +328,10 @@ stickers, Missing stickers, and the thumbnail.
     decision 2026-11-22).
   - Floating parts are moved and resized with the same handles as every layer (corner
     anchors, aspect kept, rotation), at any time.
+  - Handle modifiers are Konva's built-in ones (owner decision 2026-11-22): holding **Alt**
+    while dragging a corner handle resizes the layer around its centre instead of
+    anchoring the opposite corner; holding **Shift** while dragging the rotation handle
+    snaps the rotation to 15° steps.
 - **Enlarge selected parts**: local warp/bulge (strength + radius), paints on the selected layer.
 - **Background removal**: one-click offline ONNX auto removal + manual refine brush.
 - **Outline** and **fuzzy glow**: target the selected layer, or the base image when nothing
@@ -427,10 +431,6 @@ stickers, Missing stickers, and the thumbnail.
 - Trash/recovery area for deleted stickers.
 - Bulk emoji-set: rejected as unnecessary — not planned.
 - Editor: every edge of the selection box is grabbable for resizing, not just the corners.
-- Editor: holding Shift while resizing a layer with its handles (not the free-resize field)
-  scales it around its centre instead of anchoring the opposite corner (owner, 2026-11-22).
-  Note: Konva's transformer already does this with Alt held, and Shift is free while
-  resizing (the ratio is always kept); Shift while rotating already snaps to 15° steps.
 - Editor: custom canvas resizing (in v1 only Fit and Longest side change the canvas).
 - Drag and drop an image file to open it in the Editor. (v3 idea: drag and drop onto an
   open session to add it as a layer.)
@@ -442,8 +442,6 @@ stickers, Missing stickers, and the thumbnail.
 - Editor: real clipboard for Cut/Copy: Ctrl+C copies the selected pixels (or the selected
   layer) to the system clipboard as PNG, Ctrl+X does the same and leaves a transparent
   hole, so stickers can be copied between sessions and apps (owner, 2026-11-21).
-- Editor: hold Shift while rotating a layer to snap to fixed angles (e.g. 15° steps) or
-  to a grid.
 - Editor: hold Shift while moving a layer to snap to whole pixels or to a grid. Note:
   Shift+click already toggles a layer in or out of the selection, so a Shift-drag must
   not also toggle it; and the Editor has no grid yet (owner, 2026-11-21).
