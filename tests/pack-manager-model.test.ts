@@ -25,7 +25,7 @@ import {
 } from "../src/pack-manager/model/messages";
 import { dropPosition, escapeAction, selectionActive, slotAt, toggleMode } from "../src/pack-manager/model/modes";
 import { importOrder } from "../src/pack-manager/model/import-order";
-import { defaultPackId } from "../src/pack-manager/model/pack-memory";
+import { defaultPackId, initialFocus } from "../src/pack-manager/model/pack-memory";
 import {
   clickSticker,
   clickThumbnail,
@@ -297,4 +297,12 @@ test("pack pickers start on the open pack, else the last pack saved into, else n
   // A remembered pack that is gone (deleted, another Library) is skipped.
   expect(defaultPackId([1], { openPackId: 2, lastSavedPackId: 3 })).toBeNull();
   expect(defaultPackId([], { openPackId: null, lastSavedPackId: null })).toBeNull();
+});
+
+test("Save focuses its button when a pack is chosen; Send to pack always starts in the pack field", () => {
+  expect(initialFocus("save", true)).toBe("submit");
+  expect(initialFocus("save", false)).toBe("picker");
+  // Enter must never send to a remembered pack at once (owner decision 2026-11-22).
+  expect(initialFocus("send", true)).toBe("picker");
+  expect(initialFocus("send", false)).toBe("picker");
 });

@@ -13,6 +13,20 @@ export interface PackMemory {
 /** The app's one memory, set by the Pack Manager and the Editor. */
 export const packMemory: PackMemory = { openPackId: null, lastSavedPackId: null };
 
+/** Which dialog a pack picker sits in. */
+export type PickerDialog = "save" | "send";
+
+/**
+ * Where a picker dialog puts focus first (owner decisions 2026-11-22): Save
+ * focuses its Save button when a pack is already chosen, so Enter saves at
+ * once; Send to pack always focuses the pack field, so Enter never sends
+ * stickers to a remembered pack before the user has looked; with no pack
+ * chosen, both start in the pack field.
+ */
+export function initialFocus(dialog: PickerDialog, packChosen: boolean): "submit" | "picker" {
+  return dialog === "save" && packChosen ? "submit" : "picker";
+}
+
 /** Forget both: the Library changed, so their ids belong to another one. */
 export function resetPackMemory(): void {
   packMemory.openPackId = null;

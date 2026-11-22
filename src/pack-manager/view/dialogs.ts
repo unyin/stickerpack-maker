@@ -3,7 +3,7 @@
 // that are not valid stickers.
 import { el, errorMessage } from "../../ui";
 import { Combobox } from "../../combobox";
-import { defaultPackId, packMemory } from "../model/pack-memory";
+import { defaultPackId, initialFocus, packMemory } from "../model/pack-memory";
 import {
   createPack,
   isSendFailure,
@@ -262,7 +262,8 @@ export function packPicker(options: { message: HTMLElement; excludeId?: number; 
   });
   combo.onChange(onChange);
   const choose = (p: PackSummary) => {
-    combo.value = p;
+    // The dialog may have focused the field (opening its list) before the packs loaded.
+    combo.select(p);
     onChange();
   };
   const listed = () => packs.filter((p) => p.id !== excludeId);
@@ -388,8 +389,7 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
   );
   syncSend();
   await picker.load();
-  // A chosen pack: Enter sends at once. None: the pack field, to choose one.
-  if (picker.selected()) handle.buttons.get("send")?.focus();
+  if (initialFocus("send", picker.selected() !== null) === "submit") handle.buttons.get("send")?.focus();
   else picker.focus();
   return (await handle.result) === "send" ? sent : null;
 }

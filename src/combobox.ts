@@ -135,6 +135,16 @@ export class Combobox<T> {
     if (!this.opened) this.showCurrent();
   }
 
+  /**
+   * Choose `item` for the user (a default, a pack just created): unlike
+   * setting `value`, it also closes an open list, so the field shows it at
+   * once. No change is reported.
+   */
+  select(item: T): void {
+    this.current = item;
+    this.closeList();
+  }
+
   set disabled(disabled: boolean) {
     this.input.disabled = disabled;
     if (disabled) this.closeList();

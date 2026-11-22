@@ -8,6 +8,7 @@ import { openDialog, type DialogHandle } from "../../dialog";
 import { el, errorMessage } from "../../ui";
 import { packPicker } from "../../pack-manager/view/dialogs";
 import type { PackSummary } from "../../pack-manager/api";
+import { initialFocus } from "../../pack-manager/model/pack-memory";
 import type { ConstraintSet } from "../model/constraints";
 import { FORMAT_LABEL, type SaveFormat } from "../save";
 
@@ -97,8 +98,7 @@ export async function saveDialog(options: SaveDialogOptions): Promise<void> {
   );
   syncSave();
   await picker.load();
-  // A chosen pack: Enter saves at once. None: the pack field, to choose one.
-  if (picker.selected()) handle.buttons.get("save")?.focus();
+  if (initialFocus("save", picker.selected() !== null) === "submit") handle.buttons.get("save")?.focus();
   else picker.focus();
   await handle.result;
 }

@@ -153,7 +153,9 @@ stickers, Missing stickers, and the thumbnail.
 ### Send to pack (single and bulk; the unified Duplicate/Move command)
 - Dialog: the pack picker (a searchable pack field with Draft/Live badges, described in §6
   Save), current pack excluded, with inline **New pack…** (Title → auto Short Name, Draft)
-  beside it (owner decision 2026-11-22).
+  beside it (owner decision 2026-11-22). The dialog always opens with focus in the pack
+  field, even when a pack is already chosen, so Enter never sends at once (owner decision
+  2026-11-22).
 - Checkbox **"Delete originals after sending"**, default off. Off = Duplicate; on = Move.
 - Stickers append at the target's end in source-pack order, each with its emoji string
   copied — independent copies (ADR-0002).
@@ -395,7 +397,8 @@ stickers, Missing stickers, and the thumbnail.
     pick; Esc or leaving the field keeps the current pack. **New pack…** sits beside the
     field and creates a Draft pack inline (Title → auto Short Name), which is then chosen.
     The field starts on the pack open in the Pack Manager, else the last pack saved into
-    this session, else empty. The format starts on the session's last save's (PNG the
+    this session, else empty. When a pack is already chosen, the dialog opens with focus on
+    **Save**, so Enter saves at once; otherwise in the pack field. The format starts on the session's last save's (PNG the
     first time); the PNG/WEBP choice is a two-way toggle (its look is for the SPM-15 pass).
   - A save appends a new sticker at the pack's end with an order-encoded file name
     (ADR-0003) and an empty Emoji String (flagged in the Pack Manager, like bulk imports).
