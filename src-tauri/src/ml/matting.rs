@@ -106,7 +106,7 @@ mod tests {
     use super::*;
 
     fn spec(side: u32) -> ModelSpec {
-        ModelSpec { input_side: side, mean: [0.5, 0.5, 0.5], std: [1.0, 1.0, 1.0], ..super::super::model::MODEL }
+        ModelSpec { input_side: side, mean: [0.5, 0.5, 0.5], std: [1.0, 1.0, 1.0], ..super::super::model::DEFAULT_MODEL }
     }
 
     fn solid(width: u32, height: u32, px: [u8; 4]) -> Rgba {
