@@ -47,16 +47,6 @@
   font-size: 14px;
 }
 
-button.pm-link {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--accent-ink);
-  text-decoration: underline;
-  cursor: pointer;
-  font-size: inherit;
-}
-
 /* ---- Badges and flags ---- */
 
 .pm-badge {

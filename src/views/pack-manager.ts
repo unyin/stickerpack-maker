@@ -15,21 +15,19 @@ export interface PackManagerNav {
   openInEditor(path: string, origin?: StickerOrigin): void;
 }
 
-let cached: {
-  library: string | null;
-  root: HTMLElement;
-  shown(): void;
-  reveal(packId: number, stickerId: number): Promise<boolean>;
-  dispose(): void;
-} | null = null;
+let cached: { library: string | null; root: HTMLElement; shown(): void; dispose(): void } | null = null;
+
+/** A sticker to show the next time the Pack Manager is shown (the Editor's saved-note link). */
+let pendingReveal: { packId: number; stickerId: number } | null = null;
 
 /**
- * Open pack `packId` (unless it is open) and show sticker `stickerId` there:
- * the saved note's link (SPM-10). Call after the Pack Manager is on screen.
- * False when the sticker is not in that pack.
+ * Show sticker `stickerId` of pack `packId` when the Pack Manager is next
+ * shown (SPM-10): the shell sets this, then shows the Pack Manager, which
+ * opens the pack (unless open) and selects the sticker instead of only
+ * re-reading what is open.
  */
-export function revealStickerInPackManager(packId: number, stickerId: number): Promise<boolean> {
-  return cached ? cached.reveal(packId, stickerId) : Promise.resolve(false);
+export function revealStickerOnShow(packId: number, stickerId: number): void {
+  pendingReveal = { packId, stickerId };
 }
 
 export function renderPackManager(library: string | null, nav: PackManagerNav): HTMLElement {
@@ -54,10 +52,12 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
   const root = el("div", { class: "pm" });
   const list = buildPackList((id) => void openPack(id));
   let pack: PackViewHandle | null = null;
+  let openId: number | null = null;
 
   function showList(): void {
     pack?.destroy();
     pack = null;
+    openId = null;
     packMemory.openPackId = null;
     root.replaceChildren(list.element);
     void list.reload();
@@ -68,6 +68,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
       const handle = await buildPackView(packId, { back: showList, openInEditor: nav.openInEditor });
       pack?.destroy();
       pack = handle;
+      openId = packId;
       packMemory.openPackId = packId; // pack pickers start on it
       root.replaceChildren(handle.element);
       return true;
@@ -78,22 +79,28 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
     }
   }
 
+  /** Open pack `packId` unless it is open, then select sticker `stickerId` there. */
+  async function showSticker(packId: number, stickerId: number): Promise<void> {
+    if (openId === packId && pack) pack.reveal(stickerId, false);
+    else if (await openPack(packId)) pack?.reveal(stickerId, true);
+  }
+
   root.replaceChildren(list.element);
   return {
     library,
     root,
     shown: () => {
+      const reveal = pendingReveal;
+      pendingReveal = null;
+      if (reveal) void showSticker(reveal.packId, reveal.stickerId);
       // The Editor may have saved into a pack meanwhile (SPM-10).
-      if (pack) pack.reload();
+      else if (pack) pack.reload();
       else void list.reload();
-    },
-    async reveal(packId, stickerId) {
-      if (packMemory.openPackId !== packId && !(await openPack(packId))) return false;
-      return pack ? pack.reveal(stickerId) : false;
     },
     dispose: () => {
       pack?.destroy();
       pack = null;
+      openId = null;
       packMemory.openPackId = null;
     },
   };

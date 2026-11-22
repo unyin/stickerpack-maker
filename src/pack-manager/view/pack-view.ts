@@ -69,10 +69,12 @@ export interface PackViewHandle {
   /** Re-read the pack without a Missing scan (e.g. the Editor saved into it). */
   reload(): void;
   /**
-   * Re-read the pack and show sticker `id`: Normal mode, that sticker alone
-   * selected (detail panel), scrolled into view. False when it is not in the pack.
+   * Show sticker `id` (the Editor's saved-note link): re-read the pack unless
+   * `fresh` (just opened), then Normal mode, that sticker alone selected
+   * (detail panel), scrolled into view. Runs like every pack action: one at
+   * a time, errors (and a sticker gone meanwhile) in the message line.
    */
-  reveal(id: number): Promise<boolean>;
+  reveal(id: number, fresh: boolean): void;
   destroy(): void;
 }
 
@@ -555,21 +557,18 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   return {
     element: root,
     reload: () => void run(reread),
-    async reveal(id) {
-      await reread();
-      if (!view.stickers.some((s) => s.id === id)) {
+    reveal: (id, fresh) =>
+      void run(async () => {
+        if (!fresh) await reread();
+        if (!view.stickers.some((s) => s.id === id)) throw new Error("That sticker is no longer in this pack.");
+        // Design decision 2026-11-22: the link leaves Reorder mode and replaces the selection.
+        mode = "normal";
+        selection = { ids: [id], thumbnail: false, anchor: id };
         render();
-        return false;
-      }
-      // Design decision 2026-11-22: the link leaves Reorder mode and replaces the selection.
-      if (mode !== "normal") setMode("normal");
-      selection = { ids: [id], thumbnail: false, anchor: id };
-      render();
-      const tile = grid.querySelector<HTMLElement>(`.pm-tile[data-id="${id}"]`);
-      tile?.scrollIntoView({ block: "nearest" });
-      tile?.focus({ preventScroll: true });
-      return true;
-    },
+        const tile = grid.querySelector<HTMLElement>(`.pm-tile[data-id="${id}"]`);
+        tile?.scrollIntoView({ block: "nearest" });
+        tile?.focus({ preventScroll: true });
+      }),
     destroy() {
       document.removeEventListener("keydown", onKey);
       unlistenDrop?.();

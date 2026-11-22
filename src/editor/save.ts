@@ -151,12 +151,17 @@ export function exhaustedText(maxKilobytes: number): string {
 
 /** The saved note's link to the sticker: visible text and accessible name. */
 export function showStickerLink(sticker: Sticker, packTitle: string): { text: string; label: string } {
-  return { text: "Show in Pack Manager", label: `Show sticker #${sticker.position} of “${packTitle}” in the Pack Manager` };
+  // The accessible name starts with the visible text (WCAG 2.5.3, label in name).
+  return { text: "Show in Pack Manager", label: `Show in Pack Manager: sticker #${sticker.position} of “${packTitle}”` };
 }
 
-/** Clicking the saved note's link when the sticker is gone (owner decision 2026-11-22). */
-export function stickerGoneText(position: number, packTitle: string): string {
-  return `Sticker #${position} of “${packTitle}” no longer exists (it was deleted or moved since it was saved).`;
+/**
+ * Clicking the saved note's link when the sticker is gone (owner decision
+ * 2026-11-22): deleted or moved since, or saved into the Library used before.
+ */
+export function stickerGoneText(position: number, packTitle: string, otherLibrary = false): string {
+  const why = otherLibrary ? "it was saved into the Library used before" : "it was deleted or moved since it was saved";
+  return `Sticker #${position} of “${packTitle}” no longer exists (${why}).`;
 }
 
 /** The neutral note after a save: which file, where, and the emoji still to add. */

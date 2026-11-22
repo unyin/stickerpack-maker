@@ -139,6 +139,8 @@ function buildEditor(): HTMLElement {
   let lastFormat: SaveFormat = "png";
   // The sticker this session edits when the Pack Manager's Edit opened it, else null (SPM-10).
   let origin: StickerOrigin | null = null;
+  // Counts Library changes, so a saved note's link knows its sticker is from an old one.
+  let libraryGeneration = 0;
 
   const message = el("p", { class: "message editor-message", role: "alert" });
   const canvasHost = el("div", { class: "editor-canvas" }) as HTMLDivElement;
@@ -350,8 +352,14 @@ function buildEditor(): HTMLElement {
     const { text, label } = showStickerLink(sticker, packTitle);
     const link = el("button", { type: "button", class: "editor-link", "aria-label": label, title: label }, text);
     // Not through run(): that clears the message line, and the note (with its link) should stay.
+    const generation = libraryGeneration;
     link.addEventListener("click", async () => {
       if (busy) return;
+      // Its ids belong to the Library it was saved into: never look them up in another.
+      if (generation !== libraryGeneration) {
+        say(stickerGoneText(sticker.position, packTitle, true));
+        return;
+      }
       let present = false;
       try {
         present = (await loadPackView(sticker.packId)).stickers.some((s) => s.id === sticker.id);
@@ -1038,7 +1046,7 @@ function buildEditor(): HTMLElement {
   // The dialog then says why Replace is gone, rather than silently dropping it.
   forgetOriginHook = () => {
     if (origin) origin = { ...origin, otherLibrary: true };
-    clearNote(); // a saved note's link points into the old Library
+    libraryGeneration++; // a saved note's link now points into the old Library
   };
 
   refresh();

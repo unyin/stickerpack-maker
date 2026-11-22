@@ -2,7 +2,7 @@ import type { AppState } from "./api";
 import { clear, el } from "./ui";
 import { forgetEditorOrigin, openFileInEditor, renderEditor, setEditorNav } from "./views/editor";
 import type { StickerOrigin } from "./shared/sticker-origin";
-import { forgetPackManager, renderPackManager, revealStickerInPackManager } from "./views/pack-manager";
+import { forgetPackManager, renderPackManager, revealStickerOnShow } from "./views/pack-manager";
 import { resetPackMemory } from "./pack-manager/model/pack-memory";
 import { renderSettings } from "./views/settings";
 
@@ -47,8 +47,8 @@ export function renderShell(
   // Editor -> Pack Manager: the saved note's link shows the sticker there (SPM-10).
   setEditorNav({
     showSticker: (packId, stickerId) => {
+      revealStickerOnShow(packId, stickerId);
       show("pack-manager");
-      void revealStickerInPackManager(packId, stickerId);
     },
   });
 

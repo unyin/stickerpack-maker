@@ -160,7 +160,8 @@ test("the saved note's link names the sticker; a gone sticker is reported", () =
   const out = saved("png") as Extract<SaveOutcome, { kind: "saved" }>;
   expect(showStickerLink(out.sticker, "Cats")).toEqual({
     text: "Show in Pack Manager",
-    label: "Show sticker #4 of “Cats” in the Pack Manager",
+    label: "Show in Pack Manager: sticker #4 of “Cats”",
   });
   expect(stickerGoneText(4, "Cats")).toBe("Sticker #4 of “Cats” no longer exists (it was deleted or moved since it was saved).");
+  expect(stickerGoneText(4, "Cats", true)).toContain("saved into the Library used before");
 });

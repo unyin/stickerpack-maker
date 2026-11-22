@@ -26,8 +26,9 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
   - Every two-option confirmation in the app (deletes, Draft/Live, invalid import, creating
     a Library) uses the one shared in-app dialog: the safe choice is the default (focused,
     primary), and Esc and closing choose the safe option. Buttons read action first, safe
-    choice last. Forms that collect input (New pack, Send to pack) are not confirmations:
-    their submit button stays primary.
+    choice last (one exception: the "even WEBP is too large" question, §6 Save). Forms
+    that collect input (New pack, Send to pack) are not confirmations: their submit button
+    stays primary.
   - Disabled controls look disabled (faded) and still show their reason as a tooltip.
   - Every message that stays until dismissed has an **X** close button on its left as well as
     **Dismiss** on its right; both do the same (owner decision 2026-11-22). The red message
@@ -427,8 +428,9 @@ stickers, Missing stickers, and the thumbnail.
     button styled as a link, named after the sticker; owner decision 2026-11-22): it
     switches to the Pack Manager, opens that pack, selects the sticker alone (detail
     panel) and scrolls it into view, leaving Reorder mode if it was on; the Editor session
-    stays as it is. If the sticker no longer exists (deleted, moved), the message line
-    says so instead and nothing else happens; a Library change clears the note.
+    stays as it is. If the sticker no longer exists (deleted, moved, or saved into the
+    Library used before a Library change), the message line says so instead and nothing
+    else happens.
   - PNG is encoded once at the best lossless compression: it has no quality knob. WEBP is
     lossless when that fits the cap, otherwise lossy at the highest quality that fits (alpha
     stays lossless); the quality is found automatically, there is no quality slider.
