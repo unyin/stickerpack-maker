@@ -3,10 +3,11 @@
 // the last point), a drag draws freehand, and the two mix in one lasso. It
 // closes by pressing on its start point, by releasing a drag there, by a
 // double-click on one spot, or by Enter; Esc cancels it and Backspace
-// removes the last point. No button is held between points, so the view
-// can be panned and zoomed mid-lasso. Pure: no Konva, no DOM. Points are
-// document pixels; distances come in document pixels too (the caller
-// divides screen px by the zoom).
+// removes the last segment: the last waypoint, or the whole last freehand
+// stroke (as GIMP's Backspace does). No button is held between points, so
+// the view can be panned and zoomed mid-lasso. Pure: no Konva, no DOM.
+// Points are document pixels; distances come in document pixels too (the
+// caller divides screen px by the zoom).
 import type { Point } from "../model/document";
 
 /** One press of the left button on the lasso. */
@@ -32,8 +33,11 @@ export interface LassoDraft {
   readonly press: LassoPress | null;
   /** The press before `press`, for the double-click test (null when there is none). */
   readonly previous: LassoPress | null;
-  /** Where `press`'s points begin in `points`. */
-  readonly pressIndex: number;
+  /**
+   * Where each press's points begin in `points`, oldest first (the first is
+   * 0): a press is one segment, a waypoint or a whole freehand stroke.
+   */
+  readonly starts: readonly number[];
 }
 
 /** What a press or release did: the draft after it, and whether the lasso closed. */
@@ -56,14 +60,15 @@ function closesAt(points: readonly Point[], at: Point, radius: number): boolean 
  * The left button goes down at `at`: start a lasso, close it on its start
  * point, or add a waypoint (which also starts a freehand stroke if the
  * pointer then moves). A new press becomes `press`, the one before it
- * `previous`, and its points start at `pressIndex`.
+ * `previous`, and its points start a new entry in `starts`.
  */
 export function lassoPress(draft: LassoDraft | null, at: Point, closeRadius: number): LassoStep {
   const press = { from: at, moved: false };
-  if (!draft) return { draft: { points: [at], pressed: true, press, previous: null, pressIndex: 0 }, close: false };
+  if (!draft) return { draft: { points: [at], pressed: true, press, previous: null, starts: [0] }, close: false };
   if (closesAt(draft.points, at, closeRadius)) return { draft, close: true };
   const points = [...draft.points, at];
-  return { draft: { points, pressed: true, press, previous: draft.press, pressIndex: draft.points.length }, close: false };
+  const starts = [...draft.starts, draft.points.length];
+  return { draft: { points, pressed: true, press, previous: draft.press, starts }, close: false };
 }
 
 /**
@@ -104,14 +109,18 @@ export function lassoDoubleClick(draft: LassoDraft, radius: number): LassoStep {
   if (!press || !previous || press.moved || previous.moved || distance(press.from, previous.from) > radius) {
     return { draft, close: false };
   }
-  return { draft: { ...draft, points: draft.points.slice(0, draft.pressIndex), pressed: false }, close: true };
+  const points = draft.points.slice(0, draft.starts[draft.starts.length - 1]);
+  return { draft: { ...draft, points, pressed: false, starts: draft.starts.slice(0, -1) }, close: true };
 }
 
-/** Backspace: drop the last point; dropping the only one cancels the lasso (null). */
+/**
+ * Backspace: drop the last segment (the last press's waypoint, or its whole
+ * freehand stroke); dropping the first one cancels the lasso (null).
+ */
 export function lassoUndo(draft: LassoDraft): LassoDraft | null {
-  if (draft.points.length <= 1) return null;
-  const points = draft.points.slice(0, -1);
-  return { points, pressed: false, press: null, previous: null, pressIndex: points.length };
+  if (draft.starts.length <= 1) return null;
+  const points = draft.points.slice(0, draft.starts[draft.starts.length - 1]);
+  return { points, pressed: false, press: null, previous: null, starts: draft.starts.slice(0, -1) };
 }
 
 /**

@@ -305,7 +305,8 @@ stickers, Missing stickers, and the thumbnail.
     rubber band to the pointer. It closes by pressing on its start point (or releasing a
     freehand stroke there), by a double-click on one spot (two clicks, not a stroke), or by
     Enter. While it is open, Esc cancels it (the previous selection stays) and Backspace
-    removes its last point. A closed lasso with no area clears the selection.
+    removes its last segment: the last waypoint, or the whole last freehand stroke, as in
+    GIMP (owner re-test 2026-11-22). A closed lasso with no area clears the selection.
   - **Cut** works on exactly one selected image layer that the selection touches (its
     tooltip says why not). The selected pixels (whole pixels whose centres lie inside the
     selection; a lasso that crosses itself leaves the overlap out) move into a new floating
@@ -344,7 +345,7 @@ stickers, Missing stickers, and the thumbnail.
     named after its first line. Blank text creates or changes nothing (delete a text layer
     with Delete). While text is typed, every key (Delete, undo/redo, Esc) acts on the text,
     never on the layers. The text box follows the view when it is panned or zoomed while
-    typing.
+    typing, and the wheel zooms even with the pointer over the text box.
   - The font list is the system's installed families, shown in a font picker where each
     name is drawn in its own typeface and typing filters the list (names starting with
     the typed text first); arrow keys move, Enter or a click picks, Esc or leaving the
@@ -422,6 +423,12 @@ stickers, Missing stickers, and the thumbnail.
   see ADR-0004 (SPM-2).
 - Small UX defaults assumed unless preferences emerge: system fonts + size/color for text;
   color/width for outline; color/radius/softness for glow; strength/radius for warp.
+
+### Ignored edge cases
+Known rough edges the owner has looked at and chosen not to fix for now (each with its date).
+- Editor, Lasso: drawing a freehand stroke while panning with the middle button at the same
+  time can give a messy outline, because the view lags the pointer slightly during the pan
+  (owner, 2026-11-22: rare combination, not worth fixing now).
 
 ### v2 parking lot (UX)
 - Double-click shortcuts (e.g. double-click a sticker to open the Editor).

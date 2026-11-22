@@ -92,7 +92,7 @@ test("a click on the start point right after starting does not close", () => {
   expect(lassoRelease(first.draft!, { x: 0, y: 0 }, R).close).toBe(false);
 });
 
-test("Backspace drops the last point, and dropping the only one cancels", () => {
+test("Backspace drops the last waypoint, and dropping the only one cancels", () => {
   const draft = clicks([0, 0], [10, 0]);
   const one = lassoUndo(draft)!;
   expect(one.points).toEqual([{ x: 0, y: 0 }]);
@@ -200,4 +200,28 @@ test("a click undone with Backspace never pairs with the next click as a double-
   draft = lassoUndo(draft)!;
   draft = lassoRelease(lassoPress(draft, { x: 50, y: 50 }, R).draft!, { x: 50, y: 50 }, R).draft!;
   expect(lassoDoubleClick(draft, R).close).toBe(false);
+});
+
+test("Backspace drops a whole freehand stroke at once, like GIMP's segments (owner re-test 2026-11-22)", () => {
+  let draft = clicks([0, 0], [100, 0]);
+  draft = lassoPress(draft, { x: 100, y: 100 }, R).draft!;
+  for (let x = 96; x >= 20; x -= 4) draft = lassoDrag(draft, { x, y: 100 }, STEP, SLOP);
+  draft = lassoRelease(draft, { x: 20, y: 100 }, R).draft!;
+  expect(draft.points.length).toBeGreaterThan(20);
+  const undone = lassoUndo(draft)!;
+  expect(undone.points).toEqual([
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+  ]);
+  // Then waypoint by waypoint, and the first one cancels.
+  expect(lassoUndo(undone)!.points).toEqual([{ x: 0, y: 0 }]);
+  expect(lassoUndo(lassoUndo(undone)!)).toBeNull();
+});
+
+test("a lasso started with a freehand stroke is one segment: Backspace cancels it", () => {
+  let draft = lassoPress(null, { x: 0, y: 0 }, R).draft!;
+  draft = lassoDrag(draft, { x: 10, y: 0 }, STEP, SLOP);
+  draft = lassoDrag(draft, { x: 10, y: 10 }, STEP, SLOP);
+  draft = lassoRelease(draft, { x: 10, y: 10 }, R).draft!;
+  expect(lassoUndo(draft)).toBeNull();
 });

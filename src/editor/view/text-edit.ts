@@ -30,7 +30,15 @@ export class TextEditOverlay {
   /** Marks the open overlay as decided, so removing it (blur) does not commit. */
   private settle: (() => void) | null = null;
 
-  constructor(private readonly host: HTMLElement) {}
+  /**
+   * `onWheel` gets the wheel events that land on the open overlay: it sits
+   * above the canvas, so without it the wheel would not zoom while the
+   * pointer is over the text.
+   */
+  constructor(
+    private readonly host: HTMLElement,
+    private readonly onWheel: (e: WheelEvent) => void,
+  ) {}
 
   get isOpen(): boolean {
     return this.textarea !== null;
@@ -72,6 +80,14 @@ export class TextEditOverlay {
     });
     area.addEventListener("blur", () => finish(true));
     area.addEventListener("input", () => this.fit(area));
+    area.addEventListener(
+      "wheel",
+      (e) => {
+        e.preventDefault(); // zoom the canvas, never scroll the text box
+        this.onWheel(e);
+      },
+      { passive: false },
+    );
     this.host.appendChild(area);
     this.textarea = area;
     this.place(request.placement);

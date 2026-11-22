@@ -169,7 +169,7 @@ function buildEditor(): HTMLElement {
   moveToolButton.title = "Drag layers to move them, or empty space to pan";
   rectToolButton.title = "Drag on the canvas to select a rectangle to cut";
   lassoToolButton.title =
-    "Click to place points, drag to draw freehand; click the start point, double-click or press Enter to close (Backspace removes the last point, Esc cancels)";
+    "Click to place points, drag to draw freehand; click the start point, double-click or press Enter to close (Backspace removes the last point or stroke, Esc cancels)";
   const cutTitle = "Move the selected pixels into a new floating layer at the same spot";
   const pasteTitle = "Paste an image from the clipboard as a new layer (Ctrl+V)";
   // Text tool (SPM-9): the controls style the selected text layers, or the next new text.
@@ -298,7 +298,8 @@ function buildEditor(): HTMLElement {
   );
 
   const workspace = el("div", { class: "editor-workspace" }, canvasHost, layersPanel);
-  const textOverlay = new TextEditOverlay(canvasHost);
+  // The wheel over the typing overlay zooms the canvas like anywhere else (owner re-test 2026-11-22).
+  const textOverlay = new TextEditOverlay(canvasHost, (e) => stage?.zoomAtClient(e.clientX, e.clientY, e.deltaY));
   const view = el("section", { class: "view editor" }, toolbar, message, empty, workspace);
 
   /**

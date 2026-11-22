@@ -270,8 +270,9 @@ export class EditorStage {
 
   /**
    * A key for the lasso in progress (SPM-9): Enter closes it, Escape cancels
-   * it, Backspace removes its last point. True when the key was used, so
-   * the Editor's own shortcuts (Esc dropping the selection) do not also run.
+   * it, Backspace removes its last segment (a waypoint or a whole freehand
+   * stroke). True when the key was used, so the Editor's own shortcuts (Esc
+   * dropping the selection) do not also run.
    */
   handleLassoKey(key: string): boolean {
     if (!this.lasso) return false;
@@ -499,6 +500,16 @@ export class EditorStage {
       return;
     }
     this.setHandView(panView(pan.view, pan.pointer, { x: e.clientX, y: e.clientY }));
+  }
+
+  /**
+   * Zoom one wheel notch around a point given in client (window) px: for
+   * wheel events that land on something above the canvas, such as the text
+   * overlay, which Konva never sees.
+   */
+  zoomAtClient(clientX: number, clientY: number, deltaY: number): void {
+    const box = this.container.getBoundingClientRect();
+    this.setHandView(zoomAround(this.view(), { x: clientX - box.left, y: clientY - box.top }, deltaY));
   }
 
   private onWheel(e: Konva.KonvaEventObject<WheelEvent>): void {
