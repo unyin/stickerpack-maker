@@ -25,6 +25,7 @@ import {
 } from "../src/pack-manager/model/messages";
 import { dropPosition, escapeAction, selectionActive, slotAt, toggleMode } from "../src/pack-manager/model/modes";
 import { importOrder } from "../src/pack-manager/model/import-order";
+import { defaultPackId } from "../src/pack-manager/model/pack-memory";
 import {
   clickSticker,
   clickThumbnail,
@@ -288,8 +289,7 @@ test("packCountText: singular and plural", () => {
   expect(packCountText(12)).toBe("12 packs");
 });
 
-test("pack pickers start on the open pack, else the last pack saved into, else none", async () => {
-  const { defaultPackId } = await import("../src/pack-manager/model/pack-memory");
+test("pack pickers start on the open pack, else the last pack saved into, else none", () => {
   expect(defaultPackId([1, 2, 3], { openPackId: 2, lastSavedPackId: 3 })).toBe(2);
   // Send to pack does not list the pack it sends from: the last saved pack instead.
   expect(defaultPackId([1, 3], { openPackId: 2, lastSavedPackId: 3 })).toBe(3);

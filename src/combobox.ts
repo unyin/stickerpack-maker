@@ -101,7 +101,11 @@ export class Combobox<T> {
     this.changed = listener;
   }
 
-  /** The items to offer; the options are rebuilt only when the keys or names change. */
+  /**
+   * The items to offer. The options are rebuilt only when the keys or names
+   * change, so other content an option shows (a pack's sticker count) is
+   * drawn once per item list: give a fresh picker for fresh data.
+   */
   setItems(items: readonly T[]): void {
     const { key, text } = this.config;
     const same =

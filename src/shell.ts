@@ -2,6 +2,7 @@ import type { AppState } from "./api";
 import { clear, el } from "./ui";
 import { openFileInEditor, renderEditor } from "./views/editor";
 import { forgetPackManager, renderPackManager } from "./views/pack-manager";
+import { resetPackMemory } from "./pack-manager/model/pack-memory";
 import { renderSettings } from "./views/settings";
 
 type ViewId = "editor" | "pack-manager" | "settings";
@@ -36,6 +37,7 @@ export function renderShell(
     else
       renderSettings(content, state, () => {
         forgetPackManager(); // a new Library may sit at the same path
+        resetPackMemory(); // pack pickers must not start on a pack of the old one
         onChanged();
       });
   }

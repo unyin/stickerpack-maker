@@ -271,6 +271,7 @@ export function packPicker(options: { message: HTMLElement; excludeId?: number; 
   const newPackButton = el("button", { class: "secondary", type: "button" }, "New pack…") as HTMLButtonElement;
   newPackButton.addEventListener("click", () => {
     newPackButton.disabled = true;
+    newPackButton.title = "Create the pack below first";
     const sync = () => {
       const why = form.problem();
       create.disabled = why !== null;
@@ -287,6 +288,7 @@ export function packPicker(options: { message: HTMLElement; excludeId?: number; 
         combo.setItems(listed());
         newPackArea.replaceChildren();
         newPackButton.disabled = false;
+        newPackButton.title = "";
         choose(pack);
       } catch (err) {
         message.textContent = errorMessage(err);

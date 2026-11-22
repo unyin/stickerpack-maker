@@ -13,6 +13,12 @@ export interface PackMemory {
 /** The app's one memory, set by the Pack Manager and the Editor. */
 export const packMemory: PackMemory = { openPackId: null, lastSavedPackId: null };
 
+/** Forget both: the Library changed, so their ids belong to another one. */
+export function resetPackMemory(): void {
+  packMemory.openPackId = null;
+  packMemory.lastSavedPackId = null;
+}
+
 /**
  * The pack a picker starts on: the first remembered pack that it lists
  * (Send to pack does not list the pack it sends from), else null.
