@@ -6,8 +6,11 @@
 import "../editor/editor.css";
 import { baseName } from "../api";
 import {
+  backgroundModelStatus,
+  cancelBackgroundDownload,
   cropImages,
   cutImage,
+  downloadBackgroundModel,
   IMPORT_MAX_SIDE,
   importImage,
   importPasted,
@@ -16,9 +19,12 @@ import {
   pickImageFile,
   probeImage,
   probePasted,
+  removeImageBackground,
   renderText,
   type ImageInfo,
 } from "../editor/api";
+import { backgroundTarget, downloadProgressText, megabytes, refineLayerPixels } from "../editor/model/background";
+import { BRUSH_SIZE, brushSizeProblem } from "../editor/model/brush";
 import {
   addRasterLayer,
   addTextLayer,
@@ -208,6 +214,41 @@ function buildEditor(): HTMLElement {
     if (isHexColor(colorInput.value)) restyle({ color: colorInput.value.toLowerCase() });
     colorInput.blur();
   });
+  // Background removal and the refine brush (SPM-7): on the selected image layer, or the base image.
+  const removeBackgroundButton = button("Remove background", () => run(removeBackground));
+  const removeBackgroundTitle =
+    "Make the background of the selected image layer (or the base image) transparent; works offline after a one-time model download";
+  const eraseToolButton = button("Erase", () => setTool("erase"));
+  const restoreToolButton = button("Restore", () => setTool("restore"));
+  eraseToolButton.title = "Paint on the selected image layer (or the base image) to make it transparent";
+  restoreToolButton.title = "Paint on the selected image layer (or the base image) to bring back what was removed or erased";
+  const brushSizeInput = el("input", {
+    class: "editor-side-input",
+    type: "number",
+    min: String(BRUSH_SIZE.min),
+    max: String(BRUSH_SIZE.max),
+    step: "1",
+    value: String(BRUSH_SIZE.initial),
+    "aria-label": "Brush size in pixels",
+  }) as HTMLInputElement;
+  brushSizeInput.title = `Brush size in canvas px (${BRUSH_SIZE.min}–${BRUSH_SIZE.max})`;
+  let brushSize: number = BRUSH_SIZE.initial;
+  brushSizeInput.addEventListener("change", () => {
+    const size = Number(brushSizeInput.value);
+    const problem = brushSizeProblem(size);
+    if (problem) {
+      say(problem);
+      brushSizeInput.value = String(brushSize);
+      return;
+    }
+    say(""); // a valid size replaces an earlier complaint, as any command does
+    brushSize = size;
+    stage?.setBrushSize(size);
+    brushSizeInput.blur();
+  });
+  // Shown only while the model downloads; stays usable while everything else waits.
+  const cancelDownloadButton = button("Cancel download", () => void cancelBackgroundDownload());
+  cancelDownloadButton.hidden = true;
   const textTitle = "Type a new text layer in the chosen font, size and colour (Enter to finish, Shift+Enter for a new line)";
   const editTextTitle = "Edit the selected text layer's text (or double-click it)";
 
@@ -270,6 +311,15 @@ function buildEditor(): HTMLElement {
       lassoToolButton,
       cutButton,
       pasteButton,
+    ),
+    el(
+      "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Background" },
+      removeBackgroundButton,
+      cancelDownloadButton,
+      eraseToolButton,
+      restoreToolButton,
+      el("label", { class: "editor-side" }, "Brush ", brushSizeInput, " px"),
     ),
     el(
       "span",
@@ -394,6 +444,8 @@ function buildEditor(): HTMLElement {
     stage.setCropGuidesVisible(showBox);
     stage.setTool(tool);
     stage.onEditText((id) => editText(id));
+    stage.setBrushSize(brushSize);
+    stage.onBrushBlocked((reason) => say(reason));
     refresh(); // place the crop box overlay
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
@@ -570,6 +622,61 @@ function buildEditor(): HTMLElement {
       return;
     }
     await pasteImage(new Uint8Array(await blob.arrayBuffer()));
+  }
+
+  // ---- Background removal (SPM-7, ADR-0006) ----
+
+  /**
+   * Remove background: Rust runs the model on the target layer (the selected
+   * image layer, or the base image) and the result is ONE undo step that
+   * keeps the original pixels for the Restore brush. The first use downloads
+   * the model, after asking. Notes show progress in the neutral tone; any
+   * failure replaces them in the error tone.
+   */
+  async function removeBackground(): Promise<void> {
+    const current = session;
+    if (!current || "reason" in backgroundTarget(current.doc, current.selection)) return;
+    try {
+      if (!(await ensureBackgroundModel())) return;
+      say("Removing the background…", "note");
+      await editAsync(
+        current,
+        { doing: "removing the background", done: "changed" },
+        async (doc) => {
+          const target = backgroundTarget(doc, current.selection);
+          if ("reason" in target) throw new Error(target.reason);
+          return { id: target.layer.id, image: await removeImageBackground(target.layer.image) };
+        },
+        ({ id, image }) => {
+          current.apply((d) => refineLayerPixels(d, id, image));
+          say("");
+        },
+      );
+    } catch (err) {
+      say(errorMessage(err));
+    }
+  }
+
+  /**
+   * True when the model is ready: already cached, or downloaded now after
+   * the user agreed. Cancel in the dialog, or Cancel download, leaves it be.
+   */
+  async function ensureBackgroundModel(): Promise<boolean> {
+    const status = await backgroundModelStatus();
+    if (status.downloaded) return true;
+    if (!(await confirmModelDownload(status.sizeBytes))) return false;
+    say(downloadProgressText({ received: 0, total: status.sizeBytes }), "note");
+    cancelDownloadButton.hidden = false;
+    try {
+      const outcome = await downloadBackgroundModel((p) => say(downloadProgressText(p), "note"));
+      if (outcome === "cancelled") {
+        say("The model download was cancelled.", "note");
+        return false;
+      }
+      return true;
+    } finally {
+      cancelDownloadButton.hidden = true;
+    }
   }
 
   // ---- Text (SPM-9) ----
@@ -799,6 +906,8 @@ function buildEditor(): HTMLElement {
       [moveToolButton, "move"],
       [rectToolButton, "rect"],
       [lassoToolButton, "lasso"],
+      [eraseToolButton, "erase"],
+      [restoreToolButton, "restore"],
     ] as const) {
       b.setAttribute("aria-pressed", String(tool === t));
       b.disabled = busy;
@@ -808,6 +917,12 @@ function buildEditor(): HTMLElement {
     cutButton.title = cutReason ?? cutTitle;
     pasteButton.disabled = busy;
     pasteButton.title = pasteTitle;
+    // Background removal (SPM-7); the brushes say why on a press instead.
+    const bgTarget = backgroundTarget(doc, current.selection);
+    const removeReason = "reason" in bgTarget ? bgTarget.reason : null;
+    removeBackgroundButton.disabled = busy || removeReason !== null;
+    removeBackgroundButton.title = removeReason ?? removeBackgroundTitle;
+    brushSizeInput.disabled = busy;
     // Text tool (SPM-9): the controls show the first selected text layer's
     // style, else the next new text's.
     const texts = current.selectedTexts;
@@ -931,6 +1046,18 @@ function confirmDiscard(): Promise<boolean> {
     "Unsaved changes",
     [el("p", {}, "The editor has unsaved changes. Do you want to discard these or continue editing?")],
     { actionLabel: "Discard", keepLabel: "Keep editing", danger: true },
+  );
+}
+
+/** The first Remove background asks before the one-time model download (ADR-0006); Cancel is the safe choice. */
+function confirmModelDownload(sizeBytes: number): Promise<boolean> {
+  return confirmChoice(
+    "Download the background removal model?",
+    [
+      el("p", {}, `Background removal needs a one-time download of its model (${megabytes(sizeBytes)}).`),
+      el("p", {}, "After that it works offline. You can cancel the download while it runs."),
+    ],
+    { actionLabel: "Download", keepLabel: "Cancel" },
   );
 }
 
