@@ -65,7 +65,7 @@ import {
   type NextStyle,
 } from "../editor/model/text";
 import { EditorSession } from "../editor/model/session";
-import { applyEffectResult, effectBasis, effectDiscarded, effectKindOf, effectTarget, effectTextNotice, warpTarget, type EffectBasis, type EffectResult } from "../editor/model/effects";
+import { applyEffectResult, effectBasis, effectKindOf, nextEffectBasis, effectTarget, effectTextNotice, warpTarget, type EffectBasis, type EffectResult } from "../editor/model/effects";
 import {
   cropBlocker,
   cropTextNotice,
@@ -893,9 +893,13 @@ function buildEditor(): HTMLElement {
       return;
     }
     // A discard (another target picked, undo/redo, any edit) ends the Outline/Glow tool.
-    if (basis && effectDiscarded(basis, current.doc, current.selection)) {
-      setTool("move"); // refreshes again, with the Move tool
-      return;
+    if (basis) {
+      const next = nextEffectBasis(basis, current.doc, current.selection);
+      if (next === "discard") {
+        setTool("move"); // refreshes again, with the Move tool
+        return;
+      }
+      basis = next;
     }
     renderLayers(current);
     const doc = current.doc;

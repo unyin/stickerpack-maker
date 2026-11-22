@@ -17,7 +17,7 @@ import {
 import {
   applyEffectResult,
   effectBasis,
-  effectDiscarded,
+  nextEffectBasis,
   effectTarget,
   effectTextNotice,
   GLOW_DEFAULTS,
@@ -26,6 +26,7 @@ import {
   outlineEffect,
   warpTarget,
   type Effect,
+  type EffectBasis,
   type EffectResult,
 } from "../src/editor/model/effects";
 import { bulgeDab, moveWarpGesture, restoreRect, startWarpGesture, warpAmount, warpReadout, WARP_DEFAULTS, WARP_RADIUS } from "../src/editor/model/warp";
@@ -74,14 +75,25 @@ test("warp paints on the selected image layer, else the base image; never on tex
 test("only a change of target or document discards an effect tool; re-picking the target does not", () => {
   const doc = threeLayers();
   const base = effectBasis(doc, []); // nothing selected: the base image is the target
-  expect(effectDiscarded(base, doc, [])).toBe(false);
-  expect(effectDiscarded(base, doc, ["layer-1"])).toBe(false); // clicking the base image itself
-  expect(effectDiscarded(base, doc, ["layer-2"])).toBe(true); // another layer
-  expect(effectDiscarded(base, doc, ["layer-1", "layer-2"])).toBe(true); // no single target any more
-  expect(effectDiscarded(base, { ...doc }, [])).toBe(true); // undo/redo or any edit
+  expect(nextEffectBasis(base, doc, [])).toEqual(base);
+  expect(nextEffectBasis(base, doc, ["layer-1"])).toEqual(base); // clicking the base image itself
+  expect(nextEffectBasis(base, doc, ["layer-2"])).toBe("discard"); // another layer
+  expect(nextEffectBasis(base, doc, ["layer-1", "layer-2"])).toBe("discard"); // no single target any more
+  expect(nextEffectBasis(base, { ...doc }, [])).toBe("discard"); // undo/redo or any edit
   const top = effectBasis(doc, ["layer-2"]);
-  expect(effectDiscarded(top, doc, ["layer-2"])).toBe(false); // re-clicking the selected layer
-  expect(effectDiscarded(top, doc, [])).toBe(true); // deselecting: the base image becomes the target
+  expect(nextEffectBasis(top, doc, ["layer-2"])).toEqual(top); // re-clicking the selected layer
+  expect(nextEffectBasis(top, doc, [])).toBe("discard"); // deselecting: the base image becomes the target
+});
+
+test("with no target yet (several selected), choosing one layer makes it the target instead of discarding", () => {
+  const doc = threeLayers();
+  const blocked = effectBasis(doc, ["layer-1", "layer-2"]);
+  expect(blocked.targetId).toBeNull();
+  expect(nextEffectBasis(blocked, doc, ["layer-2", "layer-3"])).toEqual({ doc, targetId: null });
+  const chosen = nextEffectBasis(blocked, doc, ["layer-2"]);
+  expect(chosen).toEqual({ doc, targetId: "layer-2" });
+  // From then on, picking another layer is a discard as usual.
+  expect(nextEffectBasis(chosen as EffectBasis, doc, ["layer-3"])).toBe("discard");
 });
 
 // ---- Settings on the wire ----

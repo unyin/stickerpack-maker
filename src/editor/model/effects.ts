@@ -110,16 +110,20 @@ export function effectBasis(doc: Doc, selection: readonly string[]): EffectBasis
 }
 
 /**
- * True when the preview of a tool chosen on `basis` must be discarded,
- * returning to Move (owner decisions 2026-11-22, CMT-243 and after): the
- * document changed (undo/redo, any edit) or the selection now targets
- * another layer. Re-picking the layer that is already the target (e.g. the
- * base image while nothing was selected) keeps the tool and its preview.
+ * Where an Outline/Glow tool chosen on `basis` stands after a change
+ * (owner decisions 2026-11-22, CMT-243 and after): "discard" (back to Move)
+ * when the document changed (undo/redo, any edit) or the selection now
+ * targets another layer than the previewed one; otherwise the basis to keep.
+ * Re-picking the layer that is already the target (e.g. the base image while
+ * nothing was selected) keeps the tool and its preview. While the tool has
+ * no target (several layers selected, so no preview), choosing one is not a
+ * discard: it becomes the target.
  */
-export function effectDiscarded(basis: EffectBasis, doc: Doc, selection: readonly string[]): boolean {
-  if (doc !== basis.doc) return true;
+export function nextEffectBasis(basis: EffectBasis, doc: Doc, selection: readonly string[]): EffectBasis | "discard" {
+  if (doc !== basis.doc) return "discard";
   const next = effectBasis(doc, selection);
-  return next.targetId !== basis.targetId;
+  if (basis.targetId === null || next.targetId === basis.targetId) return next;
+  return "discard";
 }
 
 /**
