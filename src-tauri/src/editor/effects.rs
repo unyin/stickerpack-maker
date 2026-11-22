@@ -11,8 +11,12 @@
 //! - **Fuzzy glow** (colour, radius, softness, opacity): the silhouette
 //!   grown by the hard part of the radius, `radius * (1 - softness)`, then
 //!   blurred over the rest: three box blurs (imageproc), a close Gaussian
-//!   approximation whose reach is exactly finite, so the glow ends inside
-//!   the layer's new border and is never clipped.
+//!   approximation (ADR-0005's "Gaussian blur") whose reach is exactly
+//!   finite, so the layer grows by exactly that reach and the glow is never
+//!   clipped. The blur radius is rounded to whole pixels (at least one when
+//!   there is any softness), so the reach can differ from the set radius by
+//!   up to about a pixel and a half, except that a glow with under ~1.5 px
+//!   of softness still blurs by one pixel per pass (3 px in all).
 //!
 //! Sizes are in document px (what the user sees); a scaled layer gets them
 //! in its own pixels (divided by its scale), so the effect looks the same at
@@ -122,41 +126,41 @@ pub fn apply(layer: &LayerInput, effect: &Effect) -> Result<EffectResult, String
     }
     let t = &layer.transform;
     let placed = transform_of(t)?; // also rejects non-finite transforms
-    let (pad, pixels) = match effect {
-        Effect::Outline { color, width } => {
-            let color = parse_color(color)?;
-            let width = layer_px(*width, t, "outline width")?;
-            let pad = width.ceil() as u32;
-            check_extent(image.width + 2 * pad, image.height + 2 * pad, "outlined layer")?;
-            let mut pixels = grown(image, pad);
-            let mask = grown_mask(&pixels, image.width + 2 * pad, image.height + 2 * pad, width);
-            draw_behind(&mut pixels, &mask, color, 1.0);
-            (pad, pixels)
-        }
+    // What differs between the effects: the colour, the hard spread around
+    // the silhouette, the box blur radius after it, and the opacity.
+    let (color, spread, blur, opacity) = match effect {
+        Effect::Outline { color, width } => (color, layer_px(*width, t, "outline width")?, 0, 1.0),
         Effect::Glow { color, radius, softness, opacity } => {
-            let color = parse_color(color)?;
             let radius = layer_px(*radius, t, "glow radius")?;
             let (softness, opacity) = (fraction(*softness, "softness")?, fraction(*opacity, "opacity")?);
-            let pad = radius.ceil() as u32;
-            check_extent(image.width + 2 * pad, image.height + 2 * pad, "glowing layer")?;
             let spread = radius * (1.0 - softness);
-            // Each box pass reaches `blur` px; together they fill the radius
-            // left over by the hard spread, never more (see the module doc).
-            let blur = ((radius - spread) / BLUR_PASSES as f32).floor() as u32;
-            let mut pixels = grown(image, pad);
-            let mut mask = grown_mask(&pixels, image.width + 2 * pad, image.height + 2 * pad, spread);
-            for _ in 0..if blur > 0 { BLUR_PASSES } else { 0 } {
-                mask = box_filter(&mask, blur, blur);
-            }
-            draw_behind(&mut pixels, &mask, color, opacity);
-            (pad, pixels)
+            // The passes together roughly fill the radius left over by the
+            // spread (rounded to whole pixels; see the module doc); any
+            // softness blurs by at least one pixel, so a small soft glow still shows.
+            let soft = radius - spread;
+            let blur = if soft > 0.0 { ((soft / BLUR_PASSES as f32).round() as u32).max(1) } else { 0 };
+            (color, spread, blur, opacity)
         }
     };
+    let color = parse_color(color)?;
+    // The effect's exact reach: the spread (its anti-aliased edge ends
+    // within ceil(spread)) plus each blur pass's radius.
+    let pad = spread.ceil() as u32 + BLUR_PASSES * blur;
+    let (w, h) = (image.width + 2 * pad, image.height + 2 * pad);
+    check_extent(w, h, "layer with the effect")?;
+    let mut pixels = grown(image, pad);
+    let mut mask = grown_mask(&pixels, w, h, spread);
+    if blur > 0 {
+        for _ in 0..BLUR_PASSES {
+            mask = box_filter(&mask, blur, blur);
+        }
+    }
+    draw_behind(&mut pixels, &mask, color, opacity);
     let mut origin = [Point::from_xy(-(pad as f32), -(pad as f32))];
     placed.map_points(&mut origin);
     Ok(EffectResult {
         transform: LayerTransform { x: origin[0].x, y: origin[0].y, ..*t },
-        image: Rgba { width: image.width + 2 * pad, height: image.height + 2 * pad, pixels },
+        image: Rgba { width: w, height: h, pixels },
     })
 }
 
@@ -324,13 +328,22 @@ mod tests {
     }
 
     #[test]
+    fn a_small_soft_glow_still_shows() {
+        let out = apply(&layer(square(10, 3, 7, [255, 0, 0]), LayerTransform::IDENTITY), &glow(2.0, 1.0, 1.0)).unwrap();
+        assert_eq!(out.image.width, 16, "one blur pass radius 1, three passes");
+        assert!(px(&out.image, 4, 8)[3] > 0, "the glow reaches past the edge");
+    }
+
+    #[test]
     fn glow_softness_zero_is_a_hard_spread_and_opacity_scales_it() {
         let hard = apply(&layer(square(10, 3, 7, [255, 0, 0]), LayerTransform::IDENTITY), &glow(3.0, 0.0, 0.5)).unwrap();
         // A 3 px spread at half opacity: (4, 8) is 2 px left of the square at 6..10.
         assert_eq!(px(&hard.image, 4, 8)[3], 128);
         assert_eq!(px(&hard.image, 2, 8)[3], 0);
         let none = apply(&layer(square(10, 3, 7, [255, 0, 0]), LayerTransform::IDENTITY), &glow(3.0, 0.5, 0.0)).unwrap();
-        assert!((0..16).all(|x| px(&none.image, x, 8)[3] == if (6..10).contains(&x) { 255 } else { 0 }));
+        let square_at = (none.image.width - 4) / 2; // the 4 px square stays centred
+        assert!((0..none.image.width)
+            .all(|x| px(&none.image, x, square_at + 1)[3] == if (square_at..square_at + 4).contains(&x) { 255 } else { 0 }));
     }
 
     #[test]

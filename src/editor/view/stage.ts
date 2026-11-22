@@ -14,6 +14,7 @@ import {
   type Transform,
 } from "../model/document";
 import { lassoRegion, rectRegion, type Region } from "../model/region";
+import { effectKindOf } from "../model/effects";
 import type { EditorSession } from "../model/session";
 import { fitView, panView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
 import { distance, lassoDoubleClick, lassoDrag, lassoPress, lassoPreview, lassoRelease, lassoUndo, type LassoDraft } from "./lasso";
@@ -49,7 +50,7 @@ export interface LayerOverride {
 
 /** The tools that only pick a layer, for an effect preview (SPM-8). */
 function picksLayer(tool: CanvasTool): boolean {
-  return tool === "outline" || tool === "glow";
+  return effectKindOf(tool) !== null;
 }
 
 /** Lasso points closer than this many screen px to the previous one are skipped. */

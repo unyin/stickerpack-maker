@@ -17,6 +17,7 @@ import {
   type GlowSettings,
   type OutlineSettings,
   type Range,
+  effectKindOf,
 } from "../model/effects";
 import { WARP_DEFAULTS, WARP_RADIUS, WARP_STRENGTH, type WarpSettings } from "../model/warp";
 import { isHexColor } from "../model/text";
@@ -75,7 +76,7 @@ export class EffectControls {
         "Warp",
         this.slider("Strength", WARP_STRENGTH, "%", () => this.brush.strength, (v) => (this.brush.strength = v)),
         this.slider("Radius", WARP_RADIUS, "px", () => this.brush.radius, (v) => (this.brush.radius = v)),
-        el("span", { class: "muted" }, "Click or drag on the layer to enlarge it; each stroke is one undo step."),
+        el("span", { class: "muted" }, "Click or drag on the layer to enlarge it; each stroke is one undo step. Pick the layer in the Layers list."),
       ),
     };
     this.element = el(
@@ -101,7 +102,7 @@ export class EffectControls {
 
   update(state: EffectBarState): void {
     const { tool, busy, blocker } = state;
-    const kind = tool === "outline" || tool === "glow" || tool === "warp" ? tool : null;
+    const kind = tool === "warp" ? tool : effectKindOf(tool);
     this.element.hidden = kind === null;
     if (!kind) return;
     for (const [name, group] of Object.entries(this.groups)) group.hidden = name !== kind;

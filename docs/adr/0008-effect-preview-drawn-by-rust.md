@@ -54,5 +54,8 @@ does not draw again.**
 - A preview costs a round trip per settings change actually drawn. If very large layers feel
   slow on the owner's machine, the next step is caching the layer's bytes on the Rust side
   between previews (only the settings would cross), not a different renderer.
+- The glow's blur is three box blurs (imageproc `box_filter`), a close Gaussian approximation
+  with an exactly finite reach, in place of the "Gaussian blur" ADR-0005 lists: a true Gaussian
+  of the same reach costs a kernel per pixel and has an infinite tail the layer would clip.
 - Effect parameter ranges are UI choices kept in src/editor/model/effects.ts; Rust only refuses
   invalid values and results larger than `MAX_LAYER_SIDE`.

@@ -65,7 +65,7 @@ import {
   type NextStyle,
 } from "../editor/model/text";
 import { EditorSession } from "../editor/model/session";
-import { applyEffectResult, effectTarget, effectTextNotice, warpTarget, type EffectKind, type EffectResult } from "../editor/model/effects";
+import { applyEffectResult, effectKindOf, effectTarget, effectTextNotice, warpTarget, type EffectResult } from "../editor/model/effects";
 import {
   cropBlocker,
   cropTextNotice,
@@ -613,11 +613,6 @@ function buildEditor(): HTMLElement {
 
   // ---- Effects (SPM-8) ----
 
-  /** The effect a tool previews and applies, or null for the other tools. */
-  function effectKindOf(t: CanvasTool): EffectKind | null {
-    return t === "outline" || t === "glow" ? t : null;
-  }
-
   /**
    * What the preview should show now: the active effect tool's settings on
    * its target layer in the current document, or nothing. Called on every
@@ -687,9 +682,14 @@ function buildEditor(): HTMLElement {
     if (!finished || !current) return;
     stage?.setOverride(null);
     const image = finished.finish();
-    // Nothing painted, or the layer changed mid-stroke (e.g. Ctrl+Z): drop the stroke.
+    if (!image) return; // the stroke never touched the layer
+    // The target layer changed mid-stroke (e.g. Ctrl+Z): the stroke was painted on old pixels, so it is dropped.
     const now = current.doc.layers.find((l) => l.id === finished.layer.id);
-    if (image && now === finished.layer) current.apply((d) => setLayerImage(d, finished.layer.id, image));
+    if (now !== finished.layer) {
+      say("The layers changed while warping; the stroke was dropped. Try again.");
+      return;
+    }
+    current.apply((d) => setLayerImage(d, finished.layer.id, image));
   }
 
   // ---- Text (SPM-9) ----

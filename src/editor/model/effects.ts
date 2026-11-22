@@ -9,6 +9,11 @@ import type { RgbaImage } from "./image";
 /** The effects with settings and an Apply button. */
 export type EffectKind = "outline" | "glow";
 
+/** The effect a canvas tool previews and applies, or null for every other tool. */
+export function effectKindOf(tool: string): EffectKind | null {
+  return tool === "outline" || tool === "glow" ? tool : null;
+}
+
 /** Outline settings as the controls hold them: a #rrggbb colour and a width in document px. */
 export interface OutlineSettings {
   readonly color: string;
@@ -123,5 +128,5 @@ export function applyEffectResult(doc: Doc, id: string, result: EffectResult): D
 /** The neutral note after an effect turned a text layer into an image (as after Crop), else null. */
 export function effectTextNotice(layer: Layer, kind: EffectKind): string | null {
   if (layer.kind !== "text") return null;
-  return `The text layer was converted to an image for the ${kind === "outline" ? "outline" : "glow"}.`;
+  return `The text layer was converted to an image for the ${kind}.`;
 }
