@@ -31,10 +31,10 @@ import {
 } from "../api";
 import {
   fileNameOf,
-  REVEAL_BUSY,
-  REVEAL_GONE,
   importSummary,
   missingSummary,
+  REVEAL_BUSY,
+  REVEAL_GONE,
   SHORT_NAME_LOCKED,
   stickerCountText,
   thumbnailFormat,
