@@ -16,6 +16,8 @@ import {
 } from "../src/editor/model/document";
 import {
   applyEffectResult,
+  effectBasis,
+  effectDiscarded,
   effectTarget,
   effectTextNotice,
   GLOW_DEFAULTS,
@@ -67,6 +69,19 @@ test("warp paints on the selected image layer, else the base image; never on tex
   expect("blocker" in text && text.blocker).toContain("Text layers can't be warped");
   const both = warpTarget(doc, ["layer-1", "layer-2"]);
   expect("blocker" in both && both.blocker).toContain("one layer");
+});
+
+test("only a change of target or document discards an effect tool; re-picking the target does not", () => {
+  const doc = threeLayers();
+  const base = effectBasis(doc, []); // nothing selected: the base image is the target
+  expect(effectDiscarded(base, doc, [])).toBe(false);
+  expect(effectDiscarded(base, doc, ["layer-1"])).toBe(false); // clicking the base image itself
+  expect(effectDiscarded(base, doc, ["layer-2"])).toBe(true); // another layer
+  expect(effectDiscarded(base, doc, ["layer-1", "layer-2"])).toBe(true); // no single target any more
+  expect(effectDiscarded(base, { ...doc }, [])).toBe(true); // undo/redo or any edit
+  const top = effectBasis(doc, ["layer-2"]);
+  expect(effectDiscarded(top, doc, ["layer-2"])).toBe(false); // re-clicking the selected layer
+  expect(effectDiscarded(top, doc, [])).toBe(true); // deselecting: the base image becomes the target
 });
 
 // ---- Settings on the wire ----

@@ -65,7 +65,7 @@ import {
   type NextStyle,
 } from "../editor/model/text";
 import { EditorSession } from "../editor/model/session";
-import { applyEffectResult, effectKindOf, effectTarget, effectTextNotice, warpTarget, type EffectResult } from "../editor/model/effects";
+import { applyEffectResult, effectBasis, effectDiscarded, effectKindOf, effectTarget, effectTextNotice, warpTarget, type EffectBasis, type EffectResult } from "../editor/model/effects";
 import {
   cropBlocker,
   cropTextNotice,
@@ -200,10 +200,10 @@ function buildEditor(): HTMLElement {
   );
   // The warp press in progress, if any.
   let warp: WarpInProgress | null = null;
-  // What the Outline/Glow tool was chosen on: the document and the selected
-  // layers. Any change to either discards the preview AND returns to Move
-  // (owner decision 2026-11-22, CMT-243).
-  let effectBasis: { doc: Doc; selection: string } | null = null;
+  // What the Outline/Glow tool was chosen on: the document and its target.
+  // A change of either discards the preview AND returns to Move (owner
+  // decisions 2026-11-22, CMT-243 and after).
+  let basis: EffectBasis | null = null;
   const pasteTitle = "Paste an image from the clipboard as a new layer (Ctrl+V)";
   // Text tool (SPM-9): the controls style the selected text layers, or the next new text.
   const textButton = button("Add text", () => editText(null));
@@ -535,7 +535,7 @@ function buildEditor(): HTMLElement {
     if (session.isDirty && !(await confirmDiscard())) return false;
     preview.request(null);
     warp = null;
-    effectBasis = null;
+    basis = null;
     textOverlay.close();
     stage?.destroy();
     stage = null;
@@ -548,7 +548,7 @@ function buildEditor(): HTMLElement {
 
   function setTool(next: CanvasTool): void {
     tool = next;
-    effectBasis = session && effectKindOf(next) ? { doc: session.doc, selection: selectionKey(session) } : null;
+    basis = session && effectKindOf(next) ? effectBasis(session.doc, session.selection) : null;
     stage?.setTool(next);
     refresh();
   }
@@ -892,8 +892,8 @@ function buildEditor(): HTMLElement {
       layersList.replaceChildren();
       return;
     }
-    // A discard (another layer picked, undo/redo, any edit) ends the Outline/Glow tool.
-    if (effectBasis && (current.doc !== effectBasis.doc || selectionKey(current) !== effectBasis.selection)) {
+    // A discard (another target picked, undo/redo, any edit) ends the Outline/Glow tool.
+    if (basis && effectDiscarded(basis, current.doc, current.selection)) {
       setTool("move"); // refreshes again, with the Move tool
       return;
     }
@@ -997,11 +997,6 @@ function buildEditor(): HTMLElement {
     });
     stage?.setBrushRadius(effectControls.warp.radius);
     preview.request(previewRequest());
-  }
-
-  /** The selected layers as one comparable value. */
-  function selectionKey(s: EditorSession): string {
-    return s.selection.join("\n");
   }
 
   /** A target layer's name, saying when it is the base image by default. */

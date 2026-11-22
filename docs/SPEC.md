@@ -360,7 +360,9 @@ stickers, Missing stickers, and the thumbnail.
     Normal blending only (owner decision 2026-11-21). The preview is drawn by Rust with
     Apply's own code, so the preview is the result (ADR-0008).
   - The unapplied preview (owner decision 2026-11-22) exists only until Apply: switching
-    tool (or **Cancel**), picking another layer (in the Layers list or with Esc),
+    tool (or **Cancel**), picking another layer as the target (in the Layers list or with
+    Esc; re-picking the layer that is already the target, such as the base image while
+    nothing was selected, keeps the tool and its preview; owner decision 2026-11-22),
     undo/redo, any other edit, and closing the Editor all discard it, and it never enters
     the undo history. Every discard also returns to the Move tool (owner decision
     2026-11-22). An unapplied preview alone does not make the document dirty, so closing

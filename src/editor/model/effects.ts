@@ -98,6 +98,30 @@ export function effectTarget(doc: Doc, selection: readonly string[]): Target {
   return { id };
 }
 
+/** What an Outline/Glow tool was chosen on: the document and the layer it targets (null when blocked). */
+export interface EffectBasis {
+  readonly doc: Doc;
+  readonly targetId: string | null;
+}
+
+export function effectBasis(doc: Doc, selection: readonly string[]): EffectBasis {
+  const target = effectTarget(doc, selection);
+  return { doc, targetId: "id" in target ? target.id : null };
+}
+
+/**
+ * True when the preview of a tool chosen on `basis` must be discarded,
+ * returning to Move (owner decisions 2026-11-22, CMT-243 and after): the
+ * document changed (undo/redo, any edit) or the selection now targets
+ * another layer. Re-picking the layer that is already the target (e.g. the
+ * base image while nothing was selected) keeps the tool and its preview.
+ */
+export function effectDiscarded(basis: EffectBasis, doc: Doc, selection: readonly string[]): boolean {
+  if (doc !== basis.doc) return true;
+  const next = effectBasis(doc, selection);
+  return next.targetId !== basis.targetId;
+}
+
 /**
  * The layer the warp/bulge brush paints on: the selected image layer, or
  * the base image when nothing is selected. Text is not warped (like Cut):
