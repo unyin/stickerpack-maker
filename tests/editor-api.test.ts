@@ -58,6 +58,12 @@ mock.module("@tauri-apps/api/core", () => ({
       return out.buffer;
     }
     if (cmd === "editor_probe_pasted") return { width: 30, height: 20, exceedsCap: false };
+    if (cmd === "editor_background_model_status") return { downloaded: false, sizeBytes: 178648008 };
+    if (cmd === "editor_download_background_model") {
+      (args?.onProgress as { onmessage: (p: unknown) => void }).onmessage({ received: 5, total: 10 });
+      return "done";
+    }
+    if (cmd === "editor_cancel_background_download") return null;
     return frame(2, 1, 7);
   },
   Channel: class {},
@@ -252,4 +258,29 @@ test("pasted images are probed and imported from their bytes with the scale-to-f
   expect(calls[calls.length - 1].cmd).toBe("editor_import_pasted");
   expect((options[options.length - 1] as { headers: Record<string, string> }).headers).toEqual({ "x-scale-to-fit": "true" });
   expect([img.width, img.height]).toEqual([2, 1]);
+});
+
+test("background removal: model status, download with progress, cancel, and the raw removal request", async () => {
+  calls.length = 0;
+  options.length = 0;
+  expect(await api.backgroundModelStatus()).toEqual({ downloaded: false, sizeBytes: 178648008 });
+  const seen: unknown[] = [];
+  expect(await api.downloadBackgroundModel((p) => seen.push(p))).toBe("done");
+  expect(seen).toEqual([{ received: 5, total: 10 }]);
+  await api.cancelBackgroundDownload();
+  const layer = { width: 2, height: 1, pixels: new Uint8ClampedArray([1, 2, 3, 4, 5, 6, 7, 8]) };
+  const out = await api.removeImageBackground(layer);
+  expect(calls.map((c) => c.cmd)).toEqual([
+    "editor_background_model_status",
+    "editor_download_background_model",
+    "editor_cancel_background_download",
+    "editor_remove_background",
+  ]);
+  // Rust's parameter is on_progress: Tauri maps the camelCase key.
+  expect(Object.keys(calls[1].args ?? {})).toEqual(["onProgress"]);
+  expect(Array.from(calls[3].args as unknown as Uint8Array)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  expect(options[3]).toEqual({ headers: { [api.REMOVE_BACKGROUND_HEADER]: JSON.stringify({ width: 2, height: 1 }) } });
+  expect(api.REMOVE_BACKGROUND_HEADER).toBe("x-remove-background");
+  expect(out.width).toBe(2);
+  expect(out.height).toBe(1);
 });

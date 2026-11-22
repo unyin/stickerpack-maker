@@ -22,6 +22,14 @@ export interface RasterLayer {
   readonly name: string;
   readonly transform: Transform;
   readonly image: RgbaImage;
+  /**
+   * The layer's pixels from before its first background removal, the same
+   * size as `image`: what the Restore brush paints back (SPM-7). Kept while
+   * only removal and brush strokes change the pixels; any other pixel
+   * operation (`setLayerImage`, cut, Crop across it, merge) drops it,
+   * because its pixels would no longer line up.
+   */
+  readonly restoreSource?: RgbaImage;
 }
 
 /**
@@ -227,12 +235,22 @@ export function setTransform(doc: Doc, id: string, transform: Transform): Doc {
   return replaceAt(doc, id, (layer) => ({ ...layer, transform }));
 }
 
-/** Replace a raster layer's pixels (pixel operations, brush strokes). */
+/**
+ * Replace a raster layer's pixels (pixel operations). Its restore source is
+ * dropped: the new pixels need not line up with it. Background removal and
+ * the refine brush keep it (src/editor/model/background.ts).
+ */
 export function setLayerImage(doc: Doc, id: string, image: RgbaImage): Doc {
   return replaceAt(doc, id, (layer) => {
     if (layer.kind !== "raster") throw new Error(`layer ${id} is not a raster layer`);
-    return { ...layer, image };
+    return withoutRestoreSource({ ...layer, image });
   });
+}
+
+/** A raster layer without its restore source (SPM-7). */
+export function withoutRestoreSource(layer: RasterLayer): RasterLayer {
+  const { kind, id, name, transform, image } = layer;
+  return { kind, id, name, transform, image };
 }
 
 /** Move a layer to stack position `toIndex`, clamped to the stack. */
@@ -704,7 +722,8 @@ export function cutLayer(doc: Doc, sourceId: string, cut: CutResult): Doc {
     image: cut.cutout,
   };
   const layers = doc.layers.slice();
-  layers[index] = { ...source, image: cut.hole };
+  // The hole would line up with a restore source, but restoring it would copy the cutout back.
+  layers[index] = withoutRestoreSource({ ...source, image: cut.hole });
   layers.splice(index + 1, 0, cutout);
   return withLayers(doc, layers, doc.nextId + 1);
 }

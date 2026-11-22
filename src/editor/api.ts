@@ -1,8 +1,9 @@
 // Typed wrappers around the Editor's Rust commands (src-tauri/src/commands.rs,
 // "Editor" section; pixel work lives in src-tauri/src/editor/, ADR-0005).
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
+import type { DownloadProgress } from "./model/background";
 import { textStyleOf, type CropInput, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
 
 import { IMPORT_EXTENSIONS } from "../shared/import-extensions";
@@ -229,4 +230,44 @@ export function probePasted(bytes: Uint8Array): Promise<ImageInfo> {
 export async function importPasted(bytes: Uint8Array, scaleToFit: boolean): Promise<RgbaImage> {
   const frame = await invokeRaw("editor_import_pasted", bytes, SCALE_TO_FIT_HEADER, scaleToFit);
   return decodeFrame(frame);
+}
+
+// ---- Background removal (SPM-7, ADR-0006) ----
+
+/** Whether the background removal model is cached yet, and its download size (serde camelCase). */
+export interface BackgroundModelStatus {
+  downloaded: boolean;
+  sizeBytes: number;
+}
+
+export function backgroundModelStatus(): Promise<BackgroundModelStatus> {
+  return invoke<BackgroundModelStatus>("editor_background_model_status");
+}
+
+/**
+ * Download the model once (Rust checks its size and SHA-256 before keeping
+ * it), reporting progress. Resolves "cancelled" after `cancelBackgroundDownload`.
+ */
+export function downloadBackgroundModel(onProgress: (p: DownloadProgress) => void): Promise<"done" | "cancelled"> {
+  const channel = new Channel<DownloadProgress>();
+  channel.onmessage = onProgress;
+  return invoke<"done" | "cancelled">("editor_download_background_model", { onProgress: channel });
+}
+
+export function cancelBackgroundDownload(): Promise<void> {
+  return invoke<void>("editor_cancel_background_download");
+}
+
+/** Header carrying the layer size of a removal; mirrors REMOVE_BACKGROUND_HEADER. */
+export const REMOVE_BACKGROUND_HEADER = "x-remove-background";
+
+/** The layer with its background made transparent, in Rust (alpha only; colours unchanged). */
+export async function removeImageBackground(image: RgbaImage): Promise<RgbaImage> {
+  const meta = { width: image.width, height: image.height };
+  const frame = await invokeRaw("editor_remove_background", bytesOf(image), REMOVE_BACKGROUND_HEADER, meta);
+  const out = decodeFrame(frame);
+  if (out.width !== image.width || out.height !== image.height) {
+    throw new Error("background removal returned an image of another size");
+  }
+  return out;
 }
