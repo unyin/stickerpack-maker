@@ -104,10 +104,12 @@ test("the size messages say how large and what the limit is", () => {
   expect(pngTooLargeText(tooLarge("png")).join(" ")).toContain(`${limits.sticker.maxKilobytes + 88}.0 KB, over the ${cap}`);
   expect(pngTooLargeText(tooLarge("png")).join(" ")).toContain("WEBP");
   expect(declinedText(tooLarge("png"))).toStartWith("Not saved:");
-  const exhausted = exhaustedText(tooLarge("webp"));
-  expect(exhausted).toContain("Congratulations");
-  expect(exhausted).toContain("Nothing was saved");
-  expect(exhausted).toContain(cap);
+  expect(exhaustedText(limits.sticker.maxKilobytes)).toBe(
+    "Congratulations, you've somehow managed to make an image so weird that even WEBP at its lowest " +
+      `quality won't save below ${limits.sticker.maxKilobytes} KB. Go back to the editor and try to fix it, ` +
+      "or fuck it all and start over. Up to you.",
+  );
+  expect(exhaustedText(limits.thumbnail.maxKilobytes)).toContain(`below ${limits.thumbnail.maxKilobytes} KB.`);
 });
 
 test("the saved note names the file, the slot, the pack and the size", () => {

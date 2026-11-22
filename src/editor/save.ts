@@ -87,16 +87,18 @@ export function declinedText(outcome: TooLarge): string {
   return `Not saved: as PNG it is ${overCap(outcome)}. Choose WEBP, or simplify the image.`;
 }
 
+/** Title of the "even WEBP is too large" dialog. */
+export const EXHAUSTED_TITLE = "Too large even as WEBP";
+
 /**
- * Even WEBP at its lowest quality is over the cap (owner, CMT-149: tongue in
- * cheek, then back to the Editor to fix it or start over). Playful about the
- * image, never about the person. Exact copy is a parked owner decision.
+ * Even WEBP at its lowest quality is over the cap: the owner's own words
+ * (decision 2026-11-22, CMT-241), with the active constraint set's limit.
  */
-export function exhaustedText(outcome: TooLarge): string {
+export function exhaustedText(maxKilobytes: number): string {
   return (
-    "Congratulations: you have made an image so gloriously busy that even WEBP at its lowest quality " +
-    `comes to ${overCap(outcome)}. Nothing was saved. Back to the editor with you: tame it ` +
-    "(less fine detail, noise or soft glow) or start over."
+    "Congratulations, you've somehow managed to make an image so weird that even WEBP at its lowest " +
+    `quality won't save below ${maxKilobytes} KB. Go back to the editor and try to fix it, or fuck it ` +
+    "all and start over. Up to you."
   );
 }
 

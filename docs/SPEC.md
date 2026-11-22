@@ -151,8 +151,9 @@ stickers, Missing stickers, and the thumbnail.
   single selection.
 
 ### Send to pack (single and bulk; the unified Duplicate/Move command)
-- Dialog: searchable target-pack list with Draft/Live badges, current pack excluded, inline
-  **New pack…** (Title → auto Short Name, Draft).
+- Dialog: the pack picker (a searchable pack field with Draft/Live badges, described in §6
+  Save), current pack excluded, with inline **New pack…** (Title → auto Short Name, Draft)
+  beside it (owner decision 2026-11-22).
 - Checkbox **"Delete originals after sending"**, default off. Off = Duplicate; on = Move.
 - Stickers append at the target's end in source-pack order, each with its emoji string
   copied — independent copies (ADR-0002).
@@ -387,9 +388,15 @@ stickers, Missing stickers, and the thumbnail.
     same. While the canvas misses the constraint set it is disabled, with the reason (the
     live readout's text and the sizing tool that fixes it) as its tooltip; Ctrl+S then shows
     that reason in the message line.
-  - The dialog uses the same searchable pack list as Send to pack, with Draft/Live badges and
-    inline **New pack…** (Title → auto Short Name, Draft), which selects the new pack. It
-    starts on the pack and format of the session's last save (PNG the first time).
+  - The pack is chosen in the same pack picker as Send to pack (owner decision 2026-11-22): a
+    field like the font picker. Clicking or typing opens the list of packs (Title, Short
+    Name, sticker count, Draft/Live badge); typing filters it (Titles starting with the text
+    first, then Titles or Short Names containing it); the arrow keys and Enter or a click
+    pick; Esc or leaving the field keeps the current pack. **New pack…** sits beside the
+    field and creates a Draft pack inline (Title → auto Short Name), which is then chosen.
+    The field starts on the pack open in the Pack Manager, else the last pack saved into
+    this session, else empty. The format starts on the session's last save's (PNG the
+    first time); the PNG/WEBP choice is a two-way toggle (its look is for the SPM-15 pass).
   - A save appends a new sticker at the pack's end with an order-encoded file name
     (ADR-0003) and an empty Emoji String (flagged in the Pack Manager, like bulk imports).
     The Library core checks the file as a sticker once more before it enters the pack. A
@@ -404,9 +411,13 @@ stickers, Missing stickers, and the thumbnail.
   - **Over the size cap** (owner decision 2026-11-21): a PNG over the cap says so (its size
     and the limit) in the shared dialog, **Save as WEBP** / **Cancel** (Cancel, the default,
     returns to the save dialog with "Not saved: …"). If even WEBP at its lowest quality is
-    over the cap, nothing is saved: the dialog closes and the message line says so in a
-    playful, tongue-in-cheek tone (exact copy to confirm with the owner), sending the user
-    back to the Editor to fix it or start over.
+    over the cap, nothing is saved: the save dialog closes and the shared dialog says, in
+    the owner's words (owner decision 2026-11-22): "Congratulations, you've somehow managed
+    to make an image so weird that even WEBP at its lowest quality won't save below
+    {limit}. Go back to the editor and try to fix it, or fuck it all and start over. Up to
+    you." ({limit} is the active constraint set's size cap, e.g. 512 KB.) **Maybe I can fix
+    it**, the default, returns to the Editor; **Nah fuck it** (red) closes the session at
+    once, without the unsaved-changes question: the button is the discard choice.
 - **Saving is blocked unless constraints are met** — no warn-and-proceed path:
   - Sticker mode: longest side exactly **512 px** and file ≤ **512 KB**.
   - Thumbnail mode: exactly **100×100 px** and file ≤ **128 KB**, PNG/WEBP.
@@ -473,8 +484,7 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 - Bulk emoji-set: rejected as unnecessary — not planned.
 - Editor: every edge of the selection box is grabbable for resizing, not just the corners.
 - Editor: custom canvas resizing (in v1 only Fit and Longest side change the canvas).
-- Drag and drop an image file to open it in the Editor. (v3 idea: drag and drop onto an
-  open session to add it as a layer.)
+- Drag and drop an image file to open it in the Editor.
 - Editor: Crop could also drop a layer that crosses the box edge when its part inside the
   box is fully transparent. In v1 such a layer is kept; only layers entirely outside the box
   are discarded (owner, 2026-11-21: may revisit).
@@ -490,8 +500,25 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
   selection (owner, 2026-11-21).
 - Editor: layer locking, so a locked layer cannot be selected, moved or edited by accident
   (owner, 2026-11-22).
-- v3 idea: in Reorder mode the sticker images wiggle (as on phone home screens), instead of
-  or as well as the green tint (owner, 2026-11-21: animations are a bigger job).
+- Editor save dialog: an Emoji String field, so a new sticker gets its emoji as it is saved
+  (owner, 2026-11-22; in v1 it is saved without emoji and flagged in the Pack Manager).
+- Settings: Editor defaults (the tool settings a session starts with) configurable in the
+  Settings tab. In v1 Editor settings last only until the app closes and always start from
+  the defaults (owner, 2026-11-22).
+
+### v3 parking lot
+- Drag and drop an image file onto an open session to add it as a layer (owner, 2026-11-20).
+- Pack Manager: in Reorder mode the sticker images wiggle (as on phone home screens),
+  instead of or as well as the green tint (owner, 2026-11-21: animations are a bigger job).
+- Editor, warp: hold Alt to pinch (shrink) instead of bulge (owner, 2026-11-22).
+- Editor: speech bubbles, e.g. with Konva's Label and Tag (owner, 2026-11-22).
+- Editor: arrows and shapes (owner, 2026-11-22).
+- Editor: text along a curve, e.g. with Konva's TextPath (owner, 2026-11-22).
+- Editor: colour filters (owner, 2026-11-22).
+
+### v4 parking lot
+- Editor: a "deep fry" tool: colour filters, grain, noise and the like in one go (owner,
+  2026-11-22).
 
 ## 10. Draft work packages (for review — not yet filed as issues)
 

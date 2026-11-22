@@ -5,6 +5,7 @@
 // checks run on pack open and Refresh only, SPEC §4).
 import "../pack-manager/pack-manager.css";
 import { el, errorMessage } from "../ui";
+import { packMemory } from "../pack-manager/model/pack-memory";
 import { buildPackList } from "../pack-manager/view/pack-list";
 import { buildPackView, type PackViewHandle } from "../pack-manager/view/pack-view";
 
@@ -31,6 +32,7 @@ export function renderPackManager(library: string | null, nav: PackManagerNav): 
 export function forgetPackManager(): void {
   cached?.dispose();
   cached = null;
+  packMemory.lastSavedPackId = null; // an id from the previous Library
 }
 
 function build(library: string | null, nav: PackManagerNav): NonNullable<typeof cached> {
@@ -41,6 +43,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
   function showList(): void {
     pack?.destroy();
     pack = null;
+    packMemory.openPackId = null;
     root.replaceChildren(list.element);
     void list.reload();
   }
@@ -50,6 +53,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
       const handle = await buildPackView(packId, { back: showList, openInEditor: nav.openInEditor });
       pack?.destroy();
       pack = handle;
+      packMemory.openPackId = packId; // pack pickers start on it
       root.replaceChildren(handle.element);
     } catch (err) {
       showList();
@@ -69,6 +73,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
     dispose: () => {
       pack?.destroy();
       pack = null;
+      packMemory.openPackId = null;
     },
   };
 }

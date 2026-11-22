@@ -22,6 +22,7 @@ import {
 } from "../editor/api";
 import {
   declinedText,
+  EXHAUSTED_TITLE,
   exhaustedText,
   pngTooLargeText,
   runSave,
@@ -31,6 +32,7 @@ import {
   type SaveTarget,
 } from "../editor/save";
 import { saveDialog } from "../editor/view/save-dialog";
+import { packMemory } from "../pack-manager/model/pack-memory";
 import {
   addRasterLayer,
   addTextLayer,
@@ -126,8 +128,8 @@ function buildEditor(): HTMLElement {
   // The style the next new text gets: the text controls edit it while no
   // text layer is selected.
   let nextStyle: NextStyle = { fontFamily: "", fontSize: DEFAULT_FONT_SIZE, color: DEFAULT_TEXT_COLOR };
-  // The save dialog starts from the last save's pack and format (SPM-10).
-  let lastSave: { packId: number | null; format: SaveFormat } = { packId: null, format: "png" };
+  // The save dialog starts on the last save's format (SPM-10); its pack comes from packMemory.
+  let lastFormat: SaveFormat = "png";
 
   const message = el("p", { class: "message editor-message", role: "alert" });
   const canvasHost = el("div", { class: "editor-canvas" }) as HTMLDivElement;
@@ -508,12 +510,17 @@ function buildEditor(): HTMLElement {
   async function closeSession(): Promise<boolean> {
     if (!session) return true;
     if (session.isDirty && !(await confirmDiscard())) return false;
+    endSession();
+    return true;
+  }
+
+  /** End the session at once, unsaved changes included (the caller has asked). */
+  function endSession(): void {
     textOverlay.close();
     stage?.destroy();
     stage = null;
     session = null;
     tool = "move";
-    return true;
   }
 
   // ---- Save (SPM-10) ----
@@ -530,10 +537,10 @@ function buildEditor(): HTMLElement {
     const current = session;
     if (!current || saveBlocker(current.doc, constraints)) return;
     const doc = current.doc;
+    let exhausted = false;
     await saveDialog({
       constraints,
-      preselect: lastSave.packId,
-      format: lastSave.format,
+      format: lastFormat,
       submit: async ({ pack, format }, setFormat) => {
         const target: SaveTarget = { kind: "append", packId: pack.id };
         const result = await runSave(format, {
@@ -546,16 +553,22 @@ function buildEditor(): HTMLElement {
         });
         if (result.kind === "declined") return declinedText(result.outcome);
         if (result.kind === "exhausted") {
-          say(exhaustedText(result.outcome));
-          return null; // back to the Editor
+          exhausted = true;
+          return null; // the save dialog closes; the question below follows
         }
-        lastSave = { packId: pack.id, format: result.outcome.sticker.format };
+        packMemory.lastSavedPackId = pack.id;
+        lastFormat = result.outcome.sticker.format;
         // The session cannot change while the dialog is open; check anyway.
         if (current.doc === doc) current.markSaved();
         say(savedText(result.outcome, pack.title, target), "note");
         return null;
       },
     });
+    // Even WEBP at its lowest quality is too large (owner decision 2026-11-22):
+    // back to the Editor, or give up on this session without the unsaved-changes question.
+    if (exhausted && (await confirmGiveUp(exhaustedText(constraints.maxKilobytes))) && session === current) {
+      endSession();
+    }
   }
 
   // ---- Cut and paste (SPM-9) ----
@@ -1002,6 +1015,19 @@ function confirmDiscard(): Promise<boolean> {
     [el("p", {}, "The editor has unsaved changes. Do you want to discard these or continue editing?")],
     { actionLabel: "Discard", keepLabel: "Keep editing", danger: true },
   );
+}
+
+/**
+ * Even WEBP is too large (owner decision 2026-11-22, the owner's copy):
+ * "Maybe I can fix it", the default, returns to the Editor; "Nah fuck it"
+ * closes the Editor at once, unsaved changes and all. Resolves true for that.
+ */
+function confirmGiveUp(text: string): Promise<boolean> {
+  return confirmChoice(EXHAUSTED_TITLE, [el("p", {}, text)], {
+    actionLabel: "Nah fuck it",
+    keepLabel: "Maybe I can fix it",
+    danger: true,
+  });
 }
 
 /** Ctrl+S (Cmd+S): Save. */

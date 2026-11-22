@@ -18,8 +18,7 @@
 
 .pm-input:focus-visible,
 .pm-tile:focus-visible,
-.pm-pack-open:focus-visible,
-.pm-target-list li:focus-visible {
+.pm-pack-open:focus-visible {
   outline: 2px solid var(--accent-ink);
   outline-offset: 2px;
 }
@@ -714,29 +713,35 @@ button.pm-link {
   font-size: 16px;
 }
 
-.pm-target-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  max-height: 240px;
-  overflow: auto;
+/* The pack picker (Save and Send to pack): the shared combobox (src/combobox.css)
+   with New pack… beside it; each option shows Title, Short Name, count and badge. */
+.pack-combo-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
-.pm-target-list li[role="option"] {
+.pack-combo {
+  flex: 1;
+  min-width: 0;
+}
+
+.pack-combo-input {
+  width: 100%;
+}
+
+.pack-combo-list {
+  width: 100%;
+  max-width: none;
+  max-height: 240px;
+}
+
+.pack-combo-list li.pack-combo-option {
   display: grid;
   grid-template-columns: 1fr auto auto auto;
   gap: 10px;
   align-items: center;
-  padding: 8px 10px;
-  cursor: pointer;
-  border-bottom: 1px solid var(--border);
-}
-
-.pm-target-list li[aria-selected="true"] {
-  box-shadow: inset 3px 0 0 var(--accent-ink);
-  background: var(--bg);
+  padding: 6px 10px;
 }
 
 .pm-target-title {

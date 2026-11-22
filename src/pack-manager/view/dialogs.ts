@@ -1,7 +1,9 @@
 // The Pack Manager's dialogs (SPEC §5): create pack, sticker delete
 // confirmations with previews, Send to pack, and the hard block for files
 // that are not valid stickers.
-import { el, errorMessage, onActivate } from "../../ui";
+import { el, errorMessage } from "../../ui";
+import { Combobox } from "../../combobox";
+import { defaultPackId, packMemory } from "../model/pack-memory";
 import {
   createPack,
   isSendFailure,
@@ -17,7 +19,7 @@ import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import {
   fileNameOf,
   GO_LIVE_CONFIRMATION,
-  matchesSearch,
+  matchPacks,
   REVERT_TO_DRAFT_WARNING,
   sendReportText,
   statusLabel,
@@ -215,48 +217,60 @@ export function invalidFileDialog(path: string, reason: string): Promise<boolean
   );
 }
 
-/** A pack the picker can choose: listed, or just created inline. */
-export type PickedPack = PackSummary | Pack;
-
 export interface PackPicker {
-  /** The search field, the list and the inline New pack area, in order. */
+  /** The pack field with New pack… beside it, then the inline New pack form. */
   readonly elements: HTMLElement[];
   /** The chosen pack, or null. */
-  selected(): PickedPack | null;
-  /** Load the packs (errors go to the message line), then render. */
+  selected(): PackSummary | null;
+  /** Load the packs (errors go to the message line) and choose the default. */
   load(): Promise<void>;
   focus(): void;
 }
 
+/** One pack in the picker's list: title, Short Name, sticker count and badge. */
+function packOption(p: PackSummary, li: HTMLLIElement): void {
+  li.classList.add("pack-combo-option");
+  li.append(
+    el("span", { class: "pm-target-title" }, p.title),
+    el("span", { class: "muted pm-mono" }, p.shortName),
+    el("span", { class: "muted" }, stickerCountText(p.stickerCount)),
+    statusBadge(p.status),
+  );
+}
+
 /**
  * The target-pack picker of Send to pack and the Editor's save dialog
- * (SPEC §5-6): a searchable list with Draft/Live badges and an inline
- * **New pack…** (Title → auto Short Name, Draft) that selects the new pack.
- * `excludeId` hides a pack (Send's current one); `preselect` chooses one
- * when it is listed; `onChange` fires whenever the choice changes.
+ * (SPEC §5-6; owner decision 2026-11-22: a combobox like the font picker).
+ * Typing filters the packs by Title (or Short Name); **New pack…** beside it
+ * creates a Draft pack inline (Title → auto Short Name) and chooses it. It
+ * starts on the pack open in the Pack Manager, else the last pack saved into
+ * this session, else none (pack-memory.ts). `excludeId` hides a pack (Send's
+ * own); `onChange` fires whenever the choice changes.
  */
-export function packPicker(options: {
-  message: HTMLElement;
-  excludeId?: number;
-  preselect?: number | null;
-  onChange: () => void;
-}): PackPicker {
+export function packPicker(options: { message: HTMLElement; excludeId?: number; onChange: () => void }): PackPicker {
   const { message, excludeId, onChange } = options;
-  const search = el("input", { class: "pm-input", type: "search", placeholder: "Search packs", "aria-label": "Search packs" }) as HTMLInputElement;
-  const list = el("ul", { class: "pm-target-list", role: "listbox", "aria-label": "Target pack" });
   let packs: PackSummary[] = [];
-  let target: PickedPack | null = null;
-
-  const choose = (p: PickedPack | null) => {
-    target = p;
-    renderList();
+  const combo = new Combobox<PackSummary>({
+    label: "Target pack",
+    className: "pack-combo",
+    emptyText: "No pack matches.",
+    placeholder: "Choose a pack…",
+    key: (p) => String(p.id),
+    text: (p) => p.title,
+    match: matchPacks,
+    renderOption: packOption,
+  });
+  combo.onChange(onChange);
+  const choose = (p: PackSummary) => {
+    combo.value = p;
     onChange();
   };
+  const listed = () => packs.filter((p) => p.id !== excludeId);
 
   const newPackArea = el("div", { class: "pm-new-pack" });
   const newPackButton = el("button", { class: "secondary", type: "button" }, "New pack…") as HTMLButtonElement;
   newPackButton.addEventListener("click", () => {
-    newPackButton.hidden = true;
+    newPackButton.disabled = true;
     const sync = () => {
       const why = form.problem();
       create.disabled = why !== null;
@@ -268,11 +282,11 @@ export function packPicker(options: {
       if (form.problem()) return;
       try {
         const { title, shortName } = form.read();
-        const pack = await createPack(title, shortName);
-        packs = [...packs, { ...pack, stickerCount: 0 }];
+        const pack: PackSummary = { ...(await createPack(title, shortName)), stickerCount: 0 };
+        packs = [...packs, pack];
+        combo.setItems(listed());
         newPackArea.replaceChildren();
-        newPackButton.hidden = false;
-        newPackArea.append(newPackButton);
+        newPackButton.disabled = false;
         choose(pack);
       } catch (err) {
         message.textContent = errorMessage(err);
@@ -283,50 +297,25 @@ export function packPicker(options: {
     sync();
     form.title.focus();
   });
-  newPackArea.append(newPackButton);
-
-  function renderList(): void {
-    const shown = packs.filter((p) => p.id !== excludeId && matchesSearch(p, search.value));
-    list.replaceChildren(
-      ...shown.map((p) => {
-        const item = el(
-          "li",
-          { role: "option", tabindex: "0", "aria-selected": String(target?.id === p.id), class: target?.id === p.id ? "selected" : "" },
-          el("span", { class: "pm-target-title" }, p.title),
-          el("span", { class: "muted pm-mono" }, p.shortName),
-          el("span", { class: "muted" }, stickerCountText(p.stickerCount)),
-          statusBadge(p.status),
-        );
-        item.addEventListener("click", () => choose(p));
-        onActivate(item, () => choose(p));
-        return item;
-      }),
-    );
-    const others = packs.filter((p) => p.id !== excludeId).length;
-    if (shown.length === 0) list.append(el("li", { class: "muted pm-empty-item" }, others === 0 ? emptyText(excludeId) : "No pack matches."));
-  }
-  search.addEventListener("input", renderList);
 
   return {
-    elements: [search, list, newPackArea],
-    selected: () => target,
+    elements: [el("div", { class: "pack-combo-row" }, combo.element, newPackButton), newPackArea],
+    selected: () => combo.value,
     async load() {
-      renderList();
       try {
         packs = await listPacks();
       } catch (err) {
         message.textContent = errorMessage(err);
       }
-      const preselected = packs.find((p) => p.id === options.preselect && p.id !== excludeId);
-      if (preselected && target === null) choose(preselected);
-      else renderList();
+      const offered = listed();
+      combo.setItems(offered);
+      if (offered.length === 0) combo.placeholder = excludeId === undefined ? "No packs yet: create one." : "No other packs yet: create one.";
+      const id = defaultPackId(offered.map((p) => p.id), packMemory);
+      const preselected = offered.find((p) => p.id === id);
+      if (preselected && combo.value === null) choose(preselected);
     },
-    focus: () => search.focus(),
+    focus: () => combo.focus(),
   };
-}
-
-function emptyText(excludeId: number | undefined): string {
-  return excludeId === undefined ? "No packs yet: create one." : "No other packs yet: create one.";
 }
 
 /**
@@ -397,6 +386,8 @@ export async function sendDialog(currentPackId: number, stickers: readonly Stick
   );
   syncSend();
   await picker.load();
-  picker.focus();
+  // A chosen pack: Enter sends at once. None: the pack field, to choose one.
+  if (picker.selected()) handle.buttons.get("send")?.focus();
+  else picker.focus();
   return (await handle.result) === "send" ? sent : null;
 }

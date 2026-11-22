@@ -13,7 +13,7 @@ import {
   formatBytes,
   importSummary,
   REVERT_TO_DRAFT_WARNING,
-  matchesSearch,
+  matchPacks,
   MISSING_REASON,
   missingSummary,
   packCountText,
@@ -196,12 +196,17 @@ test("import and send reports say what happened", () => {
   expect(sendReportText(report, "Dogs")).toContain("Moved 0 stickers to “Dogs”. Not finished: x.");
 });
 
-test("send dialog search matches Title or Short Name", () => {
+test("the pack picker searches Titles first, then Titles or Short Names", () => {
   const pack = { title: "Happy Cats", shortName: "happy_cats" };
-  expect(matchesSearch(pack, "")).toBe(true);
-  expect(matchesSearch(pack, "CATS")).toBe(true);
-  expect(matchesSearch(pack, "y_c")).toBe(true);
-  expect(matchesSearch(pack, "dogs")).toBe(false);
+  expect(matchPacks([pack], "")).toEqual([pack]);
+  expect(matchPacks([pack], "CATS")).toEqual([pack]);
+  expect(matchPacks([pack], "y_c")).toEqual([pack]);
+  expect(matchPacks([pack], "dogs")).toEqual([]);
+  // Titles starting with the query come first, then Titles or Short Names containing it.
+  const a = { title: "Best cats", shortName: "best" };
+  const b = { title: "Cats two", shortName: "two" };
+  const c = { title: "Misc", shortName: "old_cats" };
+  expect(matchPacks([a, c, b], "cat")).toEqual([b, a, c]);
 });
 
 test("Open in editor is offered only for files the Editor can import", () => {
@@ -281,4 +286,15 @@ test("packCountText: singular and plural", () => {
   expect(packCountText(0)).toBe("0 packs");
   expect(packCountText(1)).toBe("1 pack");
   expect(packCountText(12)).toBe("12 packs");
+});
+
+test("pack pickers start on the open pack, else the last pack saved into, else none", async () => {
+  const { defaultPackId } = await import("../src/pack-manager/model/pack-memory");
+  expect(defaultPackId([1, 2, 3], { openPackId: 2, lastSavedPackId: 3 })).toBe(2);
+  // Send to pack does not list the pack it sends from: the last saved pack instead.
+  expect(defaultPackId([1, 3], { openPackId: 2, lastSavedPackId: 3 })).toBe(3);
+  expect(defaultPackId([1, 3], { openPackId: null, lastSavedPackId: 3 })).toBe(3);
+  // A remembered pack that is gone (deleted, another Library) is skipped.
+  expect(defaultPackId([1], { openPackId: 2, lastSavedPackId: 3 })).toBeNull();
+  expect(defaultPackId([], { openPackId: null, lastSavedPackId: null })).toBeNull();
 });

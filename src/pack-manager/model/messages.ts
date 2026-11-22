@@ -3,6 +3,7 @@
 import limits from "../../shared/limits.json";
 import { STICKER } from "../../editor/model/constraints";
 import { KB } from "../../shared/units";
+import { matchNames } from "../../shared/match-names";
 import type { FileInfo, PackStatus, SendReport, StickerFormat, StickerView, Warning } from "../api";
 
 export const PACK_MAX_STICKERS = limits.pack.maxStickers;
@@ -121,10 +122,12 @@ export function sendReportText(report: SendReport, targetTitle: string): string 
   return parts.join(" ");
 }
 
-/** Case-insensitive search over Title and Short Name for the Send dialog. */
-export function matchesSearch(pack: { title: string; shortName: string }, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  return q === "" || pack.title.toLowerCase().includes(q) || pack.shortName.toLowerCase().includes(q);
+/**
+ * The pack picker's type-to-search (Save and Send to pack): case-insensitive,
+ * Titles starting with the query first, then Titles or Short Names containing it.
+ */
+export function matchPacks<P extends { title: string; shortName: string }>(packs: readonly P[], query: string): readonly P[] {
+  return matchNames(packs, query, (p) => p.title, (p) => p.shortName);
 }
 
 /** The last path segment, for listing dropped files. */

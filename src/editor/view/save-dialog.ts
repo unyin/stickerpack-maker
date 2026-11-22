@@ -6,19 +6,18 @@ import "../../pack-manager/pack-manager.css";
 import "../editor.css";
 import { openDialog, type DialogHandle } from "../../dialog";
 import { el, errorMessage } from "../../ui";
-import { packPicker, type PickedPack } from "../../pack-manager/view/dialogs";
+import { packPicker } from "../../pack-manager/view/dialogs";
+import type { PackSummary } from "../../pack-manager/api";
 import type { ConstraintSet } from "../model/constraints";
 import { FORMAT_LABEL, type SaveFormat } from "../save";
 
 export interface SaveChoice {
-  readonly pack: PickedPack;
+  readonly pack: PackSummary;
   readonly format: SaveFormat;
 }
 
 export interface SaveDialogOptions {
   readonly constraints: ConstraintSet;
-  /** The pack chosen last time, chosen again when it still exists. */
-  readonly preselect: number | null;
   readonly format: SaveFormat;
   /**
    * Save with the choice. Resolve null to close the dialog, or a line to
@@ -34,7 +33,6 @@ export async function saveDialog(options: SaveDialogOptions): Promise<void> {
   let handle: DialogHandle<"save" | "cancel"> | null = null;
   const picker = packPicker({
     message,
-    preselect: options.preselect,
     onChange: () => syncSave(),
   });
   const radios = new Map<SaveFormat, HTMLInputElement>();
@@ -99,6 +97,8 @@ export async function saveDialog(options: SaveDialogOptions): Promise<void> {
   );
   syncSave();
   await picker.load();
-  picker.focus();
+  // A chosen pack: Enter saves at once. None: the pack field, to choose one.
+  if (picker.selected()) handle.buttons.get("save")?.focus();
+  else picker.focus();
   await handle.result;
 }

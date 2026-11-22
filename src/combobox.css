@@ -1,0 +1,71 @@
+/* The app's combobox (src/combobox.ts): a field with a list that opens
+   below it. Each use adds its own sizes (e.g. .font-picker-input). */
+.combobox {
+  position: relative;
+}
+
+.combobox-input {
+  padding: 6px 8px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: inherit;
+  text-overflow: ellipsis;
+}
+
+.combobox-input:disabled {
+  opacity: 0.6;
+}
+
+.combobox-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  width: max-content;
+  min-width: 100%;
+  max-width: 360px;
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
+}
+
+.combobox-list li {
+  padding: 4px 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.combobox-list li:hover {
+  background: var(--bg);
+}
+
+.combobox-list li[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.combobox-empty {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  margin: 0;
+  padding: 4px 12px;
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  white-space: nowrap;
+}
