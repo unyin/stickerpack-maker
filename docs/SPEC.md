@@ -398,8 +398,9 @@ stickers, Missing stickers, and the thumbnail.
     field and creates a Draft pack inline (Title → auto Short Name), which is then chosen.
     The field starts on the pack open in the Pack Manager, else the last pack saved into
     this session, else empty. When a pack is already chosen, the dialog opens with focus on
-    **Save**, so Enter saves at once; otherwise in the pack field. The format starts on the session's last save's (PNG the
-    first time); the PNG/WEBP choice is a two-way toggle (its look is for the SPM-15 pass).
+    **Save**, so Enter saves at once; otherwise in the pack field. The format starts on the
+    session's last save's (PNG the first time); the PNG/WEBP choice is a two-way toggle (its
+    look is for the SPM-15 pass).
   - A save appends a new sticker at the pack's end with an order-encoded file name
     (ADR-0003) and an empty Emoji String (flagged in the Pack Manager, like bulk imports).
     The Library core checks the file as a sticker once more before it enters the pack. A

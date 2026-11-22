@@ -1,6 +1,7 @@
-// Which pack a pack picker starts on (owner decision 2026-11-22): the pack
-// open in the Pack Manager, else the last pack the Editor saved into this
-// session, else none. Both last only until the app closes.
+// How a pack picker dialog starts (owner decisions 2026-11-22): on which
+// pack (the pack open in the Pack Manager, else the last pack the Editor
+// saved into this session, else none; both remembered only until the app
+// closes), and where focus goes first (initialFocus).
 
 /** The packs the picker's default comes from, most wanted first. */
 export interface PackMemory {
