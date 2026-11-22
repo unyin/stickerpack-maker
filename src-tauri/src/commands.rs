@@ -259,6 +259,26 @@ pub fn editor_cut_layer(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::
     Ok(tauri::ipc::Response::new(cut.to_frame()))
 }
 
+/// Header carrying the effect request's layer size, transform (or text)
+/// and effect settings (JSON `EffectMeta`); a raster layer's pixels travel
+/// as the raw body.
+pub const EFFECT_HEADER: &str = "x-effect";
+
+/// Draw an outline or fuzzy glow on one layer (SPM-8): both the live
+/// preview and the result Apply bakes in (ADR-0008). Request: raw body =
+/// the raster layer's RGBA bytes (none for a text layer, which Rust
+/// rasterises), header `x-effect`. Response: `EffectResult::to_frame` (the
+/// new transform, then the grown image).
+#[tauri::command(async)]
+pub fn editor_apply_effect(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let body = raw_body(&request, "effect")?;
+    let meta: editor::effects::EffectMeta = serde_json::from_str(header(&request, EFFECT_HEADER)?)
+        .map_err(|e| format!("the effect header is invalid: {e}"))?;
+    let layer = meta.decode_layer(body, editor::text::system_fonts())?;
+    let result = editor::effects::apply(&layer, &meta.effect)?;
+    Ok(tauri::ipc::Response::new(result.to_frame()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

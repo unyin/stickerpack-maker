@@ -70,7 +70,7 @@ pub fn split_layers(meta: &[LayerMeta], body: &[u8], fonts: &Database) -> Result
 }
 
 /// An already-drawn image as an aligned input: its pixels at its whole-pixel origin.
-fn aligned_input(placed: PlacedImage) -> Result<LayerInput, String> {
+pub(super) fn aligned_input(placed: PlacedImage) -> Result<LayerInput, String> {
     let transform = LayerTransform { x: placed.x as f32, y: placed.y as f32, ..LayerTransform::IDENTITY };
     Ok(LayerInput { image: placed.image, transform })
 }

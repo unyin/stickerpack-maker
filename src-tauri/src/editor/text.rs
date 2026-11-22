@@ -93,7 +93,7 @@ pub fn families(fonts: &Database) -> Vec<String> {
 }
 
 /// `#rrggbb` -> [r, g, b].
-fn parse_color(color: &str) -> Result<[u8; 3], String> {
+pub(super) fn parse_color(color: &str) -> Result<[u8; 3], String> {
     let hex = color.strip_prefix('#').filter(|h| h.len() == 6 && h.bytes().all(|b| b.is_ascii_hexdigit()));
     let hex = hex.ok_or_else(|| format!("the text colour {color:?} is not a #rrggbb colour"))?;
     let channel = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).map_err(|e| e.to_string());

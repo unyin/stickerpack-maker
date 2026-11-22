@@ -62,6 +62,7 @@ pub fn run() {
             commands::editor_list_fonts,
             commands::editor_render_text,
             commands::editor_cut_layer,
+            commands::editor_apply_effect,
             pack_commands::list_packs,
             pack_commands::suggest_short_name,
             pack_commands::create_pack,

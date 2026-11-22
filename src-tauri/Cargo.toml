@@ -40,6 +40,9 @@ tauri-plugin-opener = "2"
 # exactly the same for the view, merge, Crop and the save flatten.
 fontdb = "0.24"
 ab_glyph = "0.2"
+# Outline and fuzzy glow (SPM-8): Euclidean distance transform and box
+# blurs. No default features: no rayon, and `image` stays as configured above.
+imageproc = { version = "0.25", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
@@ -48,3 +51,13 @@ tempfile = "3"
 strip = true
 lto = true
 codegen-units = 1
+
+# The outline/glow preview (SPM-8, ADR-0008) re-runs imageproc while a
+# slider moves: optimise the pixel crates even in `tauri dev`, where an
+# unoptimised distance transform is several times slower. Our own crate
+# stays fast to rebuild.
+[profile.dev.package.imageproc]
+opt-level = 3
+
+[profile.dev.package.image]
+opt-level = 3
