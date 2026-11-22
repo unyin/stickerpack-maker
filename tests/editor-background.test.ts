@@ -18,11 +18,10 @@ import {
 } from "../src/editor/model/document";
 import {
   backgroundTarget,
-  downloadProgressText,
-  megabytes,
   refineLayerPixels,
   restoreBlocker,
 } from "../src/editor/model/background";
+import { downloadProgressText, megabytes } from "../src/editor/view/download-text";
 import { beginStroke, BRUSH_SIZE, brushSizeProblem, docToLocal, finishStroke, strokeTo } from "../src/editor/model/brush";
 import { EditorSession } from "../src/editor/model/session";
 

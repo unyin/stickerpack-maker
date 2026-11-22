@@ -6,6 +6,8 @@
 import { layerIndex, type Doc, type Layer, type RasterLayer } from "./document";
 import type { RgbaImage } from "./image";
 
+const SELECT_ONE_IMAGE = "Select one image layer, or none for the base image.";
+
 /** The layer a background tool works on, or why there is none. */
 export type BackgroundTarget = { readonly layer: RasterLayer } | { readonly reason: string };
 
@@ -15,10 +17,10 @@ export type BackgroundTarget = { readonly layer: RasterLayer } | { readonly reas
  * pixels to change; text is merged into an image first.
  */
 export function backgroundTarget(doc: Doc, selection: readonly string[]): BackgroundTarget {
-  if (selection.length > 1) return { reason: "Select one image layer, or none for the base image." };
+  if (selection.length > 1) return { reason: SELECT_ONE_IMAGE };
   const layer: Layer | undefined =
     selection.length === 1 ? doc.layers.find((l) => l.id === selection[0]) : doc.layers[0];
-  if (!layer) return { reason: "Select one image layer, or none for the base image." };
+  if (!layer) return { reason: SELECT_ONE_IMAGE };
   if (layer.kind === "text") {
     return {
       reason:
@@ -54,21 +56,4 @@ export function refineLayerPixels(doc: Doc, id: string, image: RgbaImage): Doc {
   const layers = doc.layers.slice();
   layers[index] = { ...layer, image, restoreSource: layer.restoreSource ?? layer.image };
   return { ...doc, layers };
-}
-
-/** A download's progress as Rust reports it (bytes). */
-export interface DownloadProgress {
-  readonly received: number;
-  readonly total: number;
-}
-
-/** Bytes as whole megabytes (10^6, as download sizes are usually shown). */
-export function megabytes(bytes: number): string {
-  return `${Math.max(0, Math.round(bytes / 1e6))} MB`;
-}
-
-/** The message line while the model downloads. */
-export function downloadProgressText(p: DownloadProgress): string {
-  const percent = p.total > 0 ? Math.min(100, Math.floor((p.received / p.total) * 100)) : 0;
-  return `Downloading the background removal model: ${percent}% (${Math.round(p.received / 1e6)} of ${megabytes(p.total)})…`;
 }

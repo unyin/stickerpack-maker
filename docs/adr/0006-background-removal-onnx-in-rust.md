@@ -23,7 +23,7 @@ webview.**
     (single-threaded unless the page is cross-origin isolated, which Tauri does not set up by
     default) or WebGPU (not yet available in every WebView2/WebKitGTK build), so the same model
     would be several times slower and behave differently per webview: the risk ADR-0001 flags.
-  - The model file is read from disk by Rust; the webview never holds 170 MB of weights.
+  - The model file is read from disk by Rust; the webview never holds 179 MB of weights.
 - **Linking: `download-binaries`, static.** At build time `ort` fetches pyke's prebuilt ONNX
   Runtime for the target and links it into the executable (on Linux a `libonnxruntime.a`, on
   Windows an `onnxruntime.lib`): no `onnxruntime.dll` to ship, find or version-match. The cost
@@ -40,26 +40,35 @@ webview.**
   - Every model fact (file name, URL, SHA-256, size, input side, mean, std) lives in one
     `ModelSpec` constant (`src-tauri/src/ml/model.rs`), so another model of the same
     family is a one-constant change.
+  - The model code lives in `src-tauri/src/ml/` (Tauri-free, unit-tested like
+    `src-tauri/src/editor/`), a sibling of ADR-0005's editor pixel code because it also
+    owns the download and cache.
 - **Download: once, on first use, verified, cached.**
   - The first **Remove background** asks first, in the shared two-option dialog (SPEC §2):
-    the download is about 170 MB. **Download** fetches it; **Cancel**, the safe default,
+    the download is about 179 MB. **Download** fetches it; **Cancel**, the safe default,
     does nothing.
+  - The pinned source is rembg's release asset
+    `https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx`,
+    SHA-256 `60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a`,
+    178,648,008 bytes.
   - Rust downloads over HTTPS (`ureq`, rustls with bundled roots: no OS TLS dependency),
     reports progress to the Editor's message line, and can be cancelled. It writes
     `<file>.part`, hashes while writing, and renames it into place only when the size and
     the SHA-256 match; anything else deletes the part file and says so.
   - Cache: `<app data>/models/isnet-general-use.onnx` (on Windows
-    `%APPDATA%\com.stickerpackmaker.desktop\models\`). It is machine-local, like the config (not in the
-    Library, which is portable and holds only packs).
+    `%APPDATA%\com.stickerpackmaker.desktop\models\`). It is machine-local, like the
+    config (not in the Library, which is portable and holds only packs).
   - The file is hashed again the first time it is loaded in each run of the app, so a
     damaged or replaced file is deleted and downloaded afresh rather than run.
 - **Offline behaviour.** With the model cached, removal never touches the network. Without it
   and without a connection, the download fails with a plain message ("Could not reach the
-  download server…") and nothing else changes; the next click tries again.
+  model download server (…). Check your internet connection and try again.") and nothing
+  else changes; the next click tries again.
 - **The refine brush stays in the webview** (ADR-0005): Erase and Restore paint alpha into the
   layer while the stroke happens; a finished stroke is one undo step. Restore paints back the
-  layer's pixels from before its first background removal, which the layer keeps with it until
-  a pixel operation that changes its pixel grid (cut, Crop across it, merge) replaces it.
+  layer's pixels from before its first background removal or Erase stroke, which the layer
+  keeps with it until a pixel operation that changes its pixel grid (cut, Crop across it,
+  merge) replaces it.
 
 ## Model comparison (2026-11-22, rembg's release assets)
 
@@ -80,9 +89,10 @@ owner decides whether that is acceptable (parked).
 
 ## Rejected alternatives
 
-- **onnxruntime-web in the webview.** No native library, but slower (WASM threads need cross-origin
-  isolation; WebGPU is not everywhere), different per webview, and the weights would live in
-  the webview's memory. ADR-0005 already moved one-shot pixel work out of the webview.
+- **onnxruntime-web in the webview.** No native library, but slower (WASM threads need
+  cross-origin isolation; WebGPU is not everywhere), different per webview, and the weights
+  would live in the webview's memory. ADR-0005 already moved one-shot pixel work out of the
+  webview.
 - **`ort` with `load-dynamic`** (ship `onnxruntime.dll` beside the executable). A smaller
   executable, but the installer must bundle and locate the DLL, a second ONNX Runtime on the
   PATH can be picked up instead, and the total download is the same.
@@ -101,12 +111,13 @@ owner decides whether that is acceptable (parked).
   the archive is cached. The Windows build is where the static linking and the executable size
   are checked (owner test step, like libwebp in SPM-10).
 - **Installed size grows by the static ONNX Runtime** (measured on Windows); the model's
-  170 MB is downloaded only by users who use background removal, into the app data folder,
+  179 MB is downloaded only by users who use background removal, into the app data folder,
   where uninstalling may leave it (a "remove downloaded model" setting is a possible follow-up).
 - **The download host is a third party** (rembg's GitHub release) until the owner mirrors the
   file to the project's own release: the pinned SHA-256 makes a changed file fail safely, but a
   removed one breaks the first download (parked decision).
 - **Third-party notices:** ISNet (Apache-2.0) and ONNX Runtime (MIT) need crediting wherever
   the app lists its licences.
-- **A raster layer may carry a restore source** (its pixels before background removal) in the
-  document model. History counts it in the memory budget like any pixel buffer.
+- **A raster layer may carry a restore source** (its pixels before its first background
+  removal or Erase stroke) in the document model. History counts it in the memory budget
+  like any pixel buffer.

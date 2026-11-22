@@ -29,7 +29,9 @@ pub struct ModelStatus {
     pub size_bytes: u64,
 }
 
-/// What the Editor says when removal is asked for before the download.
+/// What the Editor says when removal is asked for before the download. Unlike the
+/// crate's lowercase internal error fragments, this and `NOTHING_FOUND` are full
+/// sentences shown as-is in the Editor's message line.
 pub const NOT_DOWNLOADED: &str = "The background removal model has not been downloaded yet.";
 
 /// What the Editor says when the model finds nothing to keep.
@@ -62,17 +64,22 @@ impl BackgroundRemover {
     }
 
     /// Download the model unless it is already cached. `progress` gets the
-    /// bytes received so far.
+    /// bytes received so far, starting with 0 once the download has begun:
+    /// the cancel flag is cleared just before that first report, so the
+    /// Editor offers Cancel download only from then on, and a Cancel pressed
+    /// after an earlier download ended never stops the next one.
     pub fn download(&self, progress: &mut dyn FnMut(u64)) -> Result<DownloadOutcome, String> {
         let _one_at_a_time = lock(&self.downloading);
         self.cancel.store(false, Ordering::Relaxed);
         if download::is_cached(&self.cache_dir, &self.spec) {
             return Ok(DownloadOutcome::Done);
         }
+        progress(0);
         download::download(&self.cache_dir, &self.spec, progress, &self.cancel)
     }
 
-    /// Stop a download in progress (it ends as `Cancelled`).
+    /// Stop the download in progress (it ends as `Cancelled`); a cancel
+    /// before a download begins is cleared when it begins.
     pub fn cancel_download(&self) {
         self.cancel.store(true, Ordering::Relaxed);
     }
@@ -165,6 +172,20 @@ mod tests {
     }
 
     #[test]
+    fn a_stale_cancel_is_cleared_when_a_download_begins() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = ModelSpec { file_name: "model.onnx", size_bytes: 4, ..model::MODEL };
+        let path = download::model_path(dir.path(), &spec);
+        std::fs::write(&path, [1, 2, 3, 4]).unwrap();
+        let remover = BackgroundRemover::new(dir.path().to_path_buf(), spec);
+        remover.cancel_download(); // pressed after an earlier download ended
+        let mut reports = Vec::new();
+        assert_eq!(remover.download(&mut |n| reports.push(n)), Ok(DownloadOutcome::Done));
+        assert!(!remover.cancel.load(Ordering::Relaxed), "cleared when the download began");
+        assert!(reports.is_empty(), "a cached model reports no progress");
+    }
+
+    #[test]
     fn a_layer_body_must_match_its_size() {
         let size = LayerSize { width: 2, height: 1 };
         assert_eq!(size.decode(&[1, 2, 3, 4, 5, 6, 7, 8]).unwrap().pixels, vec![1, 2, 3, 4, 5, 6, 7, 8]);
@@ -180,7 +201,7 @@ mod tests {
     }
 
     /// A red disc on a white background: the model must keep the disc and
-    /// drop the corners. Downloads the real model (~170 MB) into
+    /// drop the corners. Downloads the real model (~179 MB) into
     /// `SPM_MODEL_DIR` (default `target/test-models`) on its first run.
     #[test]
     #[ignore = "downloads and runs the real background removal model"]

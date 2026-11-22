@@ -3,7 +3,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
-import type { DownloadProgress } from "./model/background";
 import { textStyleOf, type CropInput, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
 
 import { IMPORT_EXTENSIONS } from "../shared/import-extensions";
@@ -244,14 +243,23 @@ export function backgroundModelStatus(): Promise<BackgroundModelStatus> {
   return invoke<BackgroundModelStatus>("editor_background_model_status");
 }
 
+/** A download's progress as Rust reports it (bytes). */
+export interface DownloadProgress {
+  readonly received: number;
+  readonly total: number;
+}
+
+/** How a download ended; mirrors Rust's `ml::DownloadOutcome` (serde camelCase). */
+export type DownloadOutcome = "done" | "cancelled";
+
 /**
  * Download the model once (Rust checks its size and SHA-256 before keeping
  * it), reporting progress. Resolves "cancelled" after `cancelBackgroundDownload`.
  */
-export function downloadBackgroundModel(onProgress: (p: DownloadProgress) => void): Promise<"done" | "cancelled"> {
+export function downloadBackgroundModel(onProgress: (p: DownloadProgress) => void): Promise<DownloadOutcome> {
   const channel = new Channel<DownloadProgress>();
   channel.onmessage = onProgress;
-  return invoke<"done" | "cancelled">("editor_download_background_model", { onProgress: channel });
+  return invoke<DownloadOutcome>("editor_download_background_model", { onProgress: channel });
 }
 
 export function cancelBackgroundDownload(): Promise<void> {

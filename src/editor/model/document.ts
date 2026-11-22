@@ -249,8 +249,8 @@ export function setLayerImage(doc: Doc, id: string, image: RgbaImage): Doc {
 
 /** A raster layer without its restore source (SPM-7). */
 export function withoutRestoreSource(layer: RasterLayer): RasterLayer {
-  const { kind, id, name, transform, image } = layer;
-  return { kind, id, name, transform, image };
+  const { restoreSource: _dropped, ...rest } = layer;
+  return rest;
 }
 
 /** Move a layer to stack position `toIndex`, clamped to the stack. */

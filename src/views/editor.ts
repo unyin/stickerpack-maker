@@ -23,7 +23,8 @@ import {
   renderText,
   type ImageInfo,
 } from "../editor/api";
-import { backgroundTarget, downloadProgressText, megabytes, refineLayerPixels } from "../editor/model/background";
+import { backgroundTarget, refineLayerPixels } from "../editor/model/background";
+import { downloadProgressText, megabytes } from "../editor/view/download-text";
 import { BRUSH_SIZE, brushSizeProblem } from "../editor/model/brush";
 import {
   addRasterLayer,
@@ -653,6 +654,7 @@ function buildEditor(): HTMLElement {
         },
       );
     } catch (err) {
+      // withMessage would keep the neutral note tone set by "Removing the background…", so say errors again in the error tone.
       say(errorMessage(err));
     }
   }
@@ -666,15 +668,24 @@ function buildEditor(): HTMLElement {
     if (status.downloaded) return true;
     if (!(await confirmModelDownload(status.sizeBytes))) return false;
     say(downloadProgressText({ received: 0, total: status.sizeBytes }), "note");
-    cancelDownloadButton.hidden = false;
+    // Progress reports travel apart from the command's reply: one arriving
+    // after it must not bring the button or the progress note back.
+    let active = true;
     try {
-      const outcome = await downloadBackgroundModel((p) => say(downloadProgressText(p), "note"));
+      // Cancel download appears with Rust's first report, sent once the
+      // download has begun (and its cancel flag is cleared), so a press is never lost.
+      const outcome = await downloadBackgroundModel((p) => {
+        if (!active) return;
+        cancelDownloadButton.hidden = false;
+        say(downloadProgressText(p), "note");
+      });
       if (outcome === "cancelled") {
         say("The model download was cancelled.", "note");
         return false;
       }
       return true;
     } finally {
+      active = false;
       cancelDownloadButton.hidden = true;
     }
   }

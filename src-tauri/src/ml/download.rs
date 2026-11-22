@@ -61,7 +61,8 @@ pub fn file_sha256(path: &Path) -> Result<String, String> {
     Ok(hex(&hasher.finalize()))
 }
 
-/// What the Editor says when the cached model is damaged.
+/// What the Editor says when the cached model is damaged. Like the download
+/// errors below, a full sentence shown as-is in the Editor's message line.
 pub const DAMAGED_MODEL: &str =
     "The downloaded background removal model was damaged, so it was deleted. Click Remove background again to download it afresh.";
 

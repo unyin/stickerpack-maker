@@ -106,7 +106,10 @@ export function strokeTo(stroke: Stroke, at: Point): Rect | null {
   const x1 = Math.min(width, Math.ceil(Math.max(...corners.map((c) => c.x))));
   const y1 = Math.min(height, Math.ceil(Math.max(...corners.map((c) => c.y))));
   if (x1 <= x0 || y1 <= y0) return null;
-  let dirty: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
   const { coverage } = stroke;
   const start = stroke.start.pixels;
   const source = stroke.source.pixels;
@@ -140,12 +143,13 @@ export function strokeTo(stroke: Stroke, at: Point): Rect | null {
       }
       if (!changed) continue;
       stroke.changed ||= out[p] !== start[p] || out[p + 1] !== start[p + 1] || out[p + 2] !== start[p + 2] || out[p + 3] !== start[p + 3];
-      dirty = dirty
-        ? { x0: Math.min(dirty.x0, u), y0: Math.min(dirty.y0, v), x1: Math.max(dirty.x1, u + 1), y1: Math.max(dirty.y1, v + 1) }
-        : { x0: u, y0: v, x1: u + 1, y1: v + 1 };
+      minX = Math.min(minX, u);
+      minY = Math.min(minY, v);
+      maxX = Math.max(maxX, u + 1);
+      maxY = Math.max(maxY, v + 1);
     }
   }
-  return dirty && { x: dirty.x0, y: dirty.y0, width: dirty.x1 - dirty.x0, height: dirty.y1 - dirty.y0 };
+  return maxX < 0 ? null : { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
 /**
