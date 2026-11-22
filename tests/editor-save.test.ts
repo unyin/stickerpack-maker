@@ -11,6 +11,8 @@ import {
   pngTooLargeText,
   replaceLabel,
   resolveOrigin,
+  showStickerLink,
+  stickerGoneText,
   runSave,
   saveBlocker,
   savedText,
@@ -152,4 +154,13 @@ test("after a save the session edits the saved sticker, and a replace says so", 
 test("after a Library change the origin sticker is reported, not looked up", () => {
   const gone = resolveOrigin({ ...origin, otherLibrary: true }, viewWith([{ id: 9, position: 4, format: "png" }]));
   expect("gone" in gone && gone.gone).toContain("belongs to the Library used before");
+});
+
+test("the saved note's link names the sticker; a gone sticker is reported", () => {
+  const out = saved("png") as Extract<SaveOutcome, { kind: "saved" }>;
+  expect(showStickerLink(out.sticker, "Cats")).toEqual({
+    text: "Show in Pack Manager",
+    label: "Show sticker #4 of “Cats” in the Pack Manager",
+  });
+  expect(stickerGoneText(4, "Cats")).toBe("Sticker #4 of “Cats” no longer exists (it was deleted or moved since it was saved).");
 });

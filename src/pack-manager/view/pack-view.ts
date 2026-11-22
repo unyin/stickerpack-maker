@@ -68,6 +68,11 @@ export interface PackViewHandle {
   element: HTMLElement;
   /** Re-read the pack without a Missing scan (e.g. the Editor saved into it). */
   reload(): void;
+  /**
+   * Re-read the pack and show sticker `id`: Normal mode, that sticker alone
+   * selected (detail panel), scrolled into view. False when it is not in the pack.
+   */
+  reveal(id: number): Promise<boolean>;
   destroy(): void;
 }
 
@@ -540,15 +545,31 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     if (!panel.contains(document.activeElement) || !editing) renderPanel();
   }
 
+  /** Re-read the pack (no Missing scan); the Editor may have replaced a file, whose cached preview is stale. */
+  async function reread(): Promise<void> {
+    for (const id of takeChangedStickers()) previews.forget(id);
+    setView(await loadPackView(packId));
+  }
+
   render();
   return {
     element: root,
-    reload: () =>
-      void run(async () => {
-        // The Editor may have replaced a sticker's file: its cached preview is stale.
-        for (const id of takeChangedStickers()) previews.forget(id);
-        setView(await loadPackView(packId));
-      }),
+    reload: () => void run(reread),
+    async reveal(id) {
+      await reread();
+      if (!view.stickers.some((s) => s.id === id)) {
+        render();
+        return false;
+      }
+      // Design decision 2026-11-22: the link leaves Reorder mode and replaces the selection.
+      if (mode !== "normal") setMode("normal");
+      selection = { ids: [id], thumbnail: false, anchor: id };
+      render();
+      const tile = grid.querySelector<HTMLElement>(`.pm-tile[data-id="${id}"]`);
+      tile?.scrollIntoView({ block: "nearest" });
+      tile?.focus({ preventScroll: true });
+      return true;
+    },
     destroy() {
       document.removeEventListener("keydown", onKey);
       unlistenDrop?.();

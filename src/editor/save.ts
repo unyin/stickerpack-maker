@@ -149,6 +149,16 @@ export function exhaustedText(maxKilobytes: number): string {
   );
 }
 
+/** The saved note's link to the sticker: visible text and accessible name. */
+export function showStickerLink(sticker: Sticker, packTitle: string): { text: string; label: string } {
+  return { text: "Show in Pack Manager", label: `Show sticker #${sticker.position} of “${packTitle}” in the Pack Manager` };
+}
+
+/** Clicking the saved note's link when the sticker is gone (owner decision 2026-11-22). */
+export function stickerGoneText(position: number, packTitle: string): string {
+  return `Sticker #${position} of “${packTitle}” no longer exists (it was deleted or moved since it was saved).`;
+}
+
 /** The neutral note after a save: which file, where, and the emoji still to add. */
 export function savedText(outcome: Saved, packTitle: string, target: SaveTarget): string {
   const { sticker } = outcome;

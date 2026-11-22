@@ -423,7 +423,12 @@ stickers, Missing stickers, and the thumbnail.
   - After a save the dialog closes, the unsaved-changes flag clears, the session stays open,
     and a neutral note follows: for a new sticker it names the file, its position, the pack
     and the file size (a replace's note is above). A Pack Manager showing that pack re-reads
-    it when its tab is shown again.
+    it when its tab is shown again. The note ends with a **Show in Pack Manager** link (a
+    button styled as a link, named after the sticker; owner decision 2026-11-22): it
+    switches to the Pack Manager, opens that pack, selects the sticker alone (detail
+    panel) and scrolls it into view, leaving Reorder mode if it was on; the Editor session
+    stays as it is. If the sticker no longer exists (deleted, moved), the message line
+    says so instead and nothing else happens; a Library change clears the note.
   - PNG is encoded once at the best lossless compression: it has no quality knob. WEBP is
     lossless when that fits the cap, otherwise lossy at the highest quality that fits (alpha
     stays lossless); the quality is found automatically, there is no quality slider.
@@ -436,7 +441,9 @@ stickers, Missing stickers, and the thumbnail.
     {limit}. Go back to the editor and try to fix it, or fuck it all and start over. Up to
     you." ({limit} is the active constraint set's size cap, e.g. 512 KB.) **Maybe I can fix
     it**, the default, returns to the Editor; **Nah fuck it** (red) closes the session at
-    once, without the unsaved-changes question: the button is the discard choice.
+    once, without the unsaved-changes question: the button is the discard choice. Unlike
+    the other two-option dialogs (§2: action first), this one puts **Maybe I can fix it**
+    first (owner decision 2026-11-22).
   - Dev-only test hook (owner approved 2026-11-22): in a debug build (`bun run tauri dev`),
     the environment variable `SPM_DEBUG_SAVE_CAP_KB` set to a whole number of KB (at least
     1) replaces the size cap the Rust save holds the file to, for PNG and the WEBP quality

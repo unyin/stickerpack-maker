@@ -13,4 +13,11 @@ describe("two-option dialog rules", () => {
     expect(action.variant).toBe("danger");
     expect(keep.variant).toBe("primary");
   });
+  test("keepFirst puts the safe choice first, still primary (the even-WEBP question only)", () => {
+    const buttons = confirmButtons({ actionLabel: "Nah fuck it", keepLabel: "Maybe I can fix it", danger: true, keepFirst: true });
+    expect(buttons.map((b) => [b.label, b.value, b.variant])).toEqual([
+      ["Maybe I can fix it", "keep", "primary"],
+      ["Nah fuck it", "action", "danger"],
+    ]);
+  });
 });

@@ -1,8 +1,8 @@
 import type { AppState } from "./api";
 import { clear, el } from "./ui";
-import { forgetEditorOrigin, openFileInEditor, renderEditor } from "./views/editor";
+import { forgetEditorOrigin, openFileInEditor, renderEditor, setEditorNav } from "./views/editor";
 import type { StickerOrigin } from "./shared/sticker-origin";
-import { forgetPackManager, renderPackManager } from "./views/pack-manager";
+import { forgetPackManager, renderPackManager, revealStickerInPackManager } from "./views/pack-manager";
 import { resetPackMemory } from "./pack-manager/model/pack-memory";
 import { renderSettings } from "./views/settings";
 
@@ -43,6 +43,14 @@ export function renderShell(
         onChanged();
       });
   }
+
+  // Editor -> Pack Manager: the saved note's link shows the sticker there (SPM-10).
+  setEditorNav({
+    showSticker: (packId, stickerId) => {
+      show("pack-manager");
+      void revealStickerInPackManager(packId, stickerId);
+    },
+  });
 
   /** Pack Manager -> Editor: the Editor asks about unsaved changes, then switches tabs and opens the file. */
   function openInEditor(path: string, origin?: StickerOrigin): void {

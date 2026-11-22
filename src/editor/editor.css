@@ -259,3 +259,14 @@
 .editor-save-pack[hidden] {
   display: none;
 }
+
+/* The saved note's "Show in Pack Manager" link (SPM-10): a button that reads as a link. */
+button.editor-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: inherit;
+}

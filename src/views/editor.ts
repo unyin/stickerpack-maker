@@ -30,6 +30,8 @@ import {
   savedText,
   type SaveFormat,
   originAfterSave,
+  showStickerLink,
+  stickerGoneText,
   type SaveTarget,
   type TooLarge,
 } from "../editor/save";
@@ -37,6 +39,7 @@ import type { StickerOrigin } from "../shared/sticker-origin";
 import { saveDialog } from "../editor/view/save-dialog";
 import { packMemory } from "../pack-manager/model/pack-memory";
 import { markStickerFileChanged } from "../pack-manager/model/changed-files";
+import { loadPackView, type Sticker } from "../pack-manager/api";
 import {
   addRasterLayer,
   addTextLayer,
@@ -333,9 +336,32 @@ function buildEditor(): HTMLElement {
    * `run()` clears the line (and its tone) with `say("")` before an action,
    * so errors that `withMessage` writes directly always show in the error tone.
    */
-  function say(text: string, tone: "error" | "note" = "error"): void {
-    message.textContent = text;
+  function say(text: string, tone: "error" | "note" = "error", ...extra: (Node | string)[]): void {
+    message.replaceChildren(text, ...extra);
     message.classList.toggle("is-note", tone === "note");
+  }
+
+  /**
+   * The saved note's link (owner decision 2026-11-22): a link-styled button
+   * that shows the saved sticker in the Pack Manager, leaving this session
+   * as it is. A sticker gone since (deleted, moved) is reported here instead.
+   */
+  function stickerLink(sticker: Sticker, packTitle: string): HTMLElement {
+    const { text, label } = showStickerLink(sticker, packTitle);
+    const link = el("button", { type: "button", class: "editor-link", "aria-label": label, title: label }, text);
+    // Not through run(): that clears the message line, and the note (with its link) should stay.
+    link.addEventListener("click", async () => {
+      if (busy) return;
+      let present = false;
+      try {
+        present = (await loadPackView(sticker.packId)).stickers.some((s) => s.id === sticker.id);
+      } catch {
+        // the pack is gone too
+      }
+      if (!present) say(stickerGoneText(sticker.position, packTitle));
+      else editorNav?.showSticker(sticker.packId, sticker.id);
+    });
+    return link;
   }
 
   /** Undo and redo take the neutral note back with them (owner decision 2026-11-22); errors stay. */
@@ -579,7 +605,7 @@ function buildEditor(): HTMLElement {
         origin = originAfterSave(saved, packTitle);
         // The session cannot change while the dialog is open; check anyway.
         if (current.doc === doc) current.markSaved();
-        say(savedText(saved, packTitle, target), "note");
+        say(savedText(saved, packTitle, target), "note", " ", stickerLink(saved.sticker, packTitle));
         return null;
       },
     });
@@ -1012,6 +1038,7 @@ function buildEditor(): HTMLElement {
   // The dialog then says why Replace is gone, rather than silently dropping it.
   forgetOriginHook = () => {
     if (origin) origin = { ...origin, otherLibrary: true };
+    clearNote(); // a saved note's link points into the old Library
   };
 
   refresh();
@@ -1020,6 +1047,19 @@ function buildEditor(): HTMLElement {
 
 let openFileHook: ((path: string, showEditor: () => void, origin?: StickerOrigin) => Promise<void>) | null = null;
 let forgetOriginHook: (() => void) | null = null;
+
+/** What the Editor asks of the app shell. */
+export interface EditorNav {
+  /** Switch to the Pack Manager showing this sticker (the saved note's link). */
+  showSticker(packId: number, stickerId: number): void;
+}
+
+let editorNav: EditorNav | null = null;
+
+/** The shell tells the Editor how to reach the other views. */
+export function setEditorNav(nav: EditorNav): void {
+  editorNav = nav;
+}
 
 /**
  * The Library changed: a session opened with Edit no longer replaces its
@@ -1064,6 +1104,7 @@ function confirmGiveUp(text: string): Promise<boolean> {
     actionLabel: "Nah fuck it",
     keepLabel: "Maybe I can fix it",
     danger: true,
+    keepFirst: true, // the owner's order (2026-11-22), unlike the other dialogs
   });
 }
 
