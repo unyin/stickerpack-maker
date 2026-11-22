@@ -90,6 +90,7 @@ import { FontPicker } from "../editor/view/font-picker";
 import { EffectControls } from "../editor/view/effect-controls";
 import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
 import { WarpStroke } from "../editor/view/warp-brush";
+import { moveWarpGesture, startWarpGesture, warpReadout, type WarpGesture } from "../editor/model/warp";
 import { confirmChoice } from "../dialog";
 import { el, errorMessage, withMessage } from "../ui";
 
@@ -197,8 +198,12 @@ function buildEditor(): HTMLElement {
     (req, result) => stage?.setOverride(req && result ? { id: req.layerId, ...result } : null),
     (err) => say(errorMessage(err)),
   );
-  // The warp stroke being painted, if any.
-  let stroke: WarpStroke | null = null;
+  // The warp press being painted, if any: its pixels and its gesture.
+  let stroke: { brush: WarpStroke; gesture: WarpGesture } | null = null;
+  // What the Outline/Glow tool was chosen on: the document and the selected
+  // layers. Any change to either discards the preview AND returns to Move
+  // (owner decision 2026-11-22, CMT-243).
+  let effectBasis: { doc: Doc; selection: string } | null = null;
   const pasteTitle = "Paste an image from the clipboard as a new layer (Ctrl+V)";
   // Text tool (SPM-9): the controls style the selected text layers, or the next new text.
   const textButton = button("Add text", () => editText(null));
@@ -542,6 +547,7 @@ function buildEditor(): HTMLElement {
 
   function setTool(next: CanvasTool): void {
     tool = next;
+    effectBasis = session && effectKindOf(next) ? { doc: session.doc, selection: selectionKey(session) } : null;
     stage?.setTool(next);
     refresh();
   }
@@ -651,8 +657,12 @@ function buildEditor(): HTMLElement {
     );
   }
 
-  /** A warp stroke starts (SPM-8): dabs paint live into a copy of the target layer. */
-  function beginStroke(at: Point): void {
+  /**
+   * A warp press (SPM-8, CMT-243): ONE bulge at the press point, painted
+   * live into a copy of the target layer. A click keeps the bar's values; a
+   * drag sets the radius (Shift held: the strength) from the pointer.
+   */
+  function beginStroke(at: Point, shift: boolean): void {
     const current = session;
     if (!current || !stage || busy || stroke) return;
     const target = warpTarget(current.doc, current.selection);
@@ -661,35 +671,50 @@ function buildEditor(): HTMLElement {
       return;
     }
     const layer = current.doc.layers[layerIndex(current.doc, target.id)];
-    if (layer.kind !== "raster") return;
+    if (layer.kind !== "raster") return; // narrows the type: warpTarget already refused text
     say("");
-    stroke = new WarpStroke(layer, effectControls.warp);
-    stroke.press(at);
-    stage.setOverride({ id: layer.id, image: stroke.canvas, transform: layer.transform });
+    stroke = { brush: new WarpStroke(layer), gesture: startWarpGesture(at, effectControls.warp, shift) };
+    placeBulge(stroke);
+    stage.setOverride({ id: layer.id, image: stroke.brush.canvas, transform: layer.transform });
   }
 
-  function continueStroke(at: Point): void {
-    if (!stroke) return;
-    stroke.move(at);
-    stage?.redraw();
+  function continueStroke(at: Point, shift: boolean): void {
+    if (!stroke || !stage) return;
+    const before = stroke.gesture;
+    stroke.gesture = moveWarpGesture(before, at, shift, stage.view().scale);
+    const g = stroke.gesture;
+    if (!g.dragged) return;
+    stage.setBrushGesture({ center: g.center, radius: g.radius, readout: warpReadout(g) });
+    if (g.radius !== before.radius || g.strength !== before.strength) {
+      placeBulge(stroke);
+      stage.redraw();
+    }
   }
 
-  /** A warp stroke ends: its pixels become the layer's as ONE undo step (CMT-148). */
+  function placeBulge(s: { brush: WarpStroke; gesture: WarpGesture }): void {
+    s.brush.place(s.gesture.center, s.gesture.radius, s.gesture.strength);
+  }
+
+  /** A warp press ends: its pixels become the layer's as ONE undo step (CMT-148). */
   function endStroke(): void {
     const finished = stroke;
     stroke = null;
     const current = session;
     if (!finished || !current) return;
     stage?.setOverride(null);
-    const image = finished.finish();
-    if (!image) return; // the stroke never touched the layer
-    // The target layer changed mid-stroke (e.g. Ctrl+Z): the stroke was painted on old pixels, so it is dropped.
-    const now = current.doc.layers.find((l) => l.id === finished.layer.id);
-    if (now !== finished.layer) {
-      say("The layers changed while warping; the stroke was dropped. Try again.");
-      return;
+    stage?.setBrushGesture(null);
+    // A drag's radius and strength become the bar's, for the next click.
+    const g = finished.gesture;
+    if (g.dragged) effectControls.setWarp({ radius: g.radius, strength: g.strength });
+    const image = finished.brush.finish();
+    if (!image) return refresh(); // the bulge missed the layer
+    // The target layer changed mid-press (e.g. Ctrl+Z): the bulge was painted on old pixels, so it is dropped.
+    const layer = finished.brush.layer;
+    if (current.doc.layers.find((l) => l.id === layer.id) !== layer) {
+      say("The layers changed while warping; the bulge was dropped. Try again.");
+      return refresh();
     }
-    current.apply((d) => setLayerImage(d, finished.layer.id, image));
+    current.apply((d) => setLayerImage(d, layer.id, image));
   }
 
   // ---- Text (SPM-9) ----
@@ -870,6 +895,11 @@ function buildEditor(): HTMLElement {
       layersList.replaceChildren();
       return;
     }
+    // A discard (another layer picked, undo/redo, any edit) ends the Outline/Glow tool.
+    if (effectBasis && (current.doc !== effectBasis.doc || selectionKey(current) !== effectBasis.selection)) {
+      setTool("move"); // refreshes again, with the Move tool
+      return;
+    }
     renderLayers(current);
     const doc = current.doc;
     const single = current.selection.length === 1 ? current.selection[0] : null;
@@ -970,6 +1000,11 @@ function buildEditor(): HTMLElement {
     });
     stage?.setBrushRadius(effectControls.warp.radius);
     preview.request(previewRequest());
+  }
+
+  /** The selected layers as one comparable value. */
+  function selectionKey(s: EditorSession): string {
+    return s.selection.join("\n");
   }
 
   /** A target layer's name, saying when it is the base image by default. */

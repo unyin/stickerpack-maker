@@ -1,10 +1,12 @@
-// The warp/bulge brush's pixel maths (SPEC §6 "Enlarge selected parts",
-// SPM-8): a dab magnifies the pixels around its centre in place, meme
-// style, within its radius; pixels outside it are untouched and the image
-// keeps its size, so it stays one piece. A destructive brush (owner
-// decision 2026-11-21): the webview paints dabs live while the stroke
-// happens (ADR-0005), and the finished stroke is ONE undo step. No Konva,
-// no DOM.
+// The warp/bulge brush (SPEC §6 "Enlarge selected parts", SPM-8): its
+// pixel maths and its gesture. A bulge magnifies the pixels around its
+// centre in place, meme style, within its radius; pixels outside it are
+// untouched and the image keeps its size, so it stays one piece. A
+// destructive brush (owner decision 2026-11-21): each press places ONE
+// bulge, painted live in the webview (ADR-0005), and its release is ONE
+// undo step. A click uses the slider values; a press-drag sets the radius
+// (or, holding Shift, the strength) from the pointer's distance to the
+// press point (owner decision 2026-11-22, CMT-243). No Konva, no DOM.
 import type { Point, Rect } from "./document";
 import type { RgbaImage } from "./image";
 import type { Range } from "./effects";
@@ -24,8 +26,11 @@ export const WARP_DEFAULTS: WarpSettings = { strength: WARP_STRENGTH.initial, ra
 /** Strongest per-dab amount (at 100%): the centre is magnified 1 / (1 - this) = 10 times. Below 1, so it never folds. */
 const MAX_AMOUNT = 0.9;
 
-/** Dabs along a dragged stroke, as a fraction of the radius apart. */
-export const DAB_SPACING = 0.5;
+/** A press that travels more than this many screen px is a drag, not a click (as the lasso's). */
+export const WARP_DRAG_SLOP = 4;
+
+/** Strength percent per screen px of pointer travel while Shift is held ("about 1% per 2 px"). */
+const STRENGTH_PER_PX = 0.5;
 
 /** A strength percentage as a dab's amount, from 0 (nothing) to MAX_AMOUNT. */
 export function warpAmount(strength: number): number {
@@ -109,17 +114,74 @@ export function bulgeDab(image: RgbaImage, cx: number, cy: number, radius: numbe
   return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
 
+/** Which setting a press-drag changes: the radius, or (holding Shift) the strength. */
+export type WarpControl = "radius" | "strength";
+
 /**
- * The dabs a stroke drops moving from `from` (the last dab) to `to`, every
- * `spacing` along the way; `rest` is the last dab dropped (or `from`), where
- * the next move continues from.
+ * One press of the warp brush: ONE bulge at the press point. A drag changes
+ * the setting `mode` names from the pointer's distance to the centre,
+ * relative to `anchor` (the distance and value when that mode began), so a
+ * swap between radius and strength never makes either jump.
  */
-export function dabsAlong(from: Point, to: Point, spacing: number): { dabs: Point[]; rest: Point } {
-  const length = Math.hypot(to.x - from.x, to.y - from.y);
-  const dabs: Point[] = [];
-  if (spacing <= 0) return { dabs, rest: from };
-  const ux = (to.x - from.x) / length;
-  const uy = (to.y - from.y) / length;
-  for (let t = spacing; t <= length + 1e-9; t += spacing) dabs.push({ x: from.x + ux * t, y: from.y + uy * t });
-  return { dabs, rest: dabs.at(-1) ?? from };
+export interface WarpGesture {
+  /** Where the button went down, in document px: the bulge's centre. */
+  readonly center: Point;
+  /** In document px. */
+  readonly radius: number;
+  /** In percent. */
+  readonly strength: number;
+  readonly mode: WarpControl;
+  readonly anchor: { readonly distance: number; readonly value: number };
+  /** Moved past the drag slop: no longer a click. */
+  readonly dragged: boolean;
+}
+
+function clamp(value: number, range: Range): number {
+  return Math.max(range.min, Math.min(range.max, Math.round(value)));
+}
+
+/**
+ * A press at `center` with the bar's `settings`. The radius follows the
+ * pointer's distance itself (anchor 0, 0); with Shift already down the
+ * press starts on the strength, from the slider's value.
+ */
+export function startWarpGesture(center: Point, settings: WarpSettings, shift: boolean): WarpGesture {
+  return {
+    center,
+    radius: settings.radius,
+    strength: settings.strength,
+    mode: shift ? "strength" : "radius",
+    anchor: { distance: 0, value: shift ? settings.strength : 0 },
+    dragged: false,
+  };
+}
+
+/**
+ * The pointer moved to `at` (document px) with Shift `shift`, at view
+ * `zoom` (screen px per document px). Shift is read from every pointer
+ * event and acts only when it changes: holding it switches to the
+ * strength, letting go back to the radius, each continuing from its
+ * current value. The radius follows document px (it is drawn there); the
+ * strength follows screen px, so it feels the same at any zoom. Both stay
+ * within their slider's range.
+ */
+export function moveWarpGesture(g: WarpGesture, at: Point, shift: boolean, zoom: number): WarpGesture {
+  const distance = Math.hypot(at.x - g.center.x, at.y - g.center.y);
+  let { mode, anchor } = g;
+  const wanted: WarpControl = shift ? "strength" : "radius";
+  if (wanted !== mode) {
+    mode = wanted;
+    anchor = { distance, value: wanted === "strength" ? g.strength : g.radius };
+  }
+  const dragged = g.dragged || distance * zoom > WARP_DRAG_SLOP;
+  if (!dragged) return { ...g, mode, anchor };
+  const travel = distance - anchor.distance;
+  return mode === "radius"
+    ? { ...g, mode, anchor, dragged, radius: clamp(anchor.value + travel, WARP_RADIUS) }
+    : { ...g, mode, anchor, dragged, strength: clamp(anchor.value + travel * zoom * STRENGTH_PER_PX, WARP_STRENGTH) };
+}
+
+/** The readout beside the pointer while dragging. */
+export function warpReadout(g: WarpGesture): string {
+  return g.mode === "radius" ? `Radius ${g.radius} px` : `Strength ${g.strength}%`;
 }

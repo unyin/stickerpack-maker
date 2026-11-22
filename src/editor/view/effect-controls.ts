@@ -54,6 +54,8 @@ export class EffectControls {
   private readonly applyButton: HTMLButtonElement;
   private readonly cancelButton: HTMLButtonElement;
   private readonly inputs: HTMLInputElement[] = [];
+  /** Put each slider and its readout back in line with its setting. */
+  private readonly syncs: (() => void)[] = [];
 
   constructor(private readonly handlers: EffectControlHandlers) {
     this.applyButton = el("button", { class: "primary", onclick: () => handlers.apply() }, "Apply") as HTMLButtonElement;
@@ -76,7 +78,7 @@ export class EffectControls {
         "Warp",
         this.slider("Strength", WARP_STRENGTH, "%", () => this.brush.strength, (v) => (this.brush.strength = v)),
         this.slider("Radius", WARP_RADIUS, "px", () => this.brush.radius, (v) => (this.brush.radius = v)),
-        el("span", { class: "muted" }, "Click or drag on the layer to enlarge it; each stroke is one undo step. Pick the layer in the Layers list."),
+        el("span", { class: "muted" }, "Click to bulge; drag to size it (Shift: strength). Choose the layer in Layers."),
       ),
     };
     this.element = el(
@@ -98,6 +100,12 @@ export class EffectControls {
   /** The warp brush's current settings. */
   get warp(): WarpSettings {
     return { ...this.brush };
+  }
+
+  /** Take the warp settings a drag ended with (sliders and readouts follow). */
+  setWarp(settings: WarpSettings): void {
+    Object.assign(this.brush, settings);
+    for (const sync of this.syncs) sync();
   }
 
   update(state: EffectBarState): void {
@@ -145,8 +153,13 @@ export class EffectControls {
       step: "1",
       "aria-label": label,
     }) as HTMLInputElement;
-    input.value = String(get());
-    const shown = el("span", { class: "editor-effect-value" }, `${get()} ${unit}`);
+    const shown = el("span", { class: "editor-effect-value" });
+    const sync = (): void => {
+      input.value = String(get());
+      shown.textContent = `${get()} ${unit}`;
+    };
+    sync();
+    this.syncs.push(sync);
     input.addEventListener("input", () => {
       const value = Number(input.value);
       set(value);

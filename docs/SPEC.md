@@ -338,10 +338,18 @@ stickers, Missing stickers, and the thumbnail.
   Details (SPM-8; owner decision 2026-11-21: a destructive brush): the **Warp** tool paints
   on the selected image layer, or the base image (the bottom layer) when nothing is
   selected; text layers are not warped (merge them into an image first), and with several
-  layers selected it says to select one. A click magnifies the pixels around it in place
-  (meme style), within the brush radius; a drag adds a bulge every half radius along the
-  way. Strength and radius are set in the tool's bar (radius in on-screen document px).
-  The layer keeps its size and transform (one piece). Each stroke is one undo step.
+  layers selected it says to select one. Each press places ONE bulge, which magnifies the
+  pixels around the press point in place (meme style), within its radius (owner decision
+  2026-11-22): a click uses the bar's strength and radius (radius in on-screen document
+  px); a press-drag keeps the bulge at the press point and sets its **radius** to the
+  pointer's distance from it, live, with the ring following; holding **Shift** during the
+  drag sets the **strength** instead, relative to its value when Shift went down (about
+  1% per 2 screen px, 1–100%), with the radius frozen; letting go of Shift goes back to
+  the radius, continuing from its frozen value, so nothing jumps. Shift is read from each
+  pointer event (held, not tapped), and may already be down at the press. A readout
+  beside the pointer shows "Radius N px" or "Strength N%". A drag's final radius and
+  strength become the bar's values. The layer keeps its size and transform (one piece);
+  each press is one undo step on release. (Shrinking/pinch is parked for v3.)
 - **Background removal**: one-click offline ONNX auto removal + manual refine brush.
 - **Outline** and **fuzzy glow**: target the selected layer, or the base image when nothing
   is selected. Details (SPM-8):
@@ -352,15 +360,17 @@ stickers, Missing stickers, and the thumbnail.
     Normal blending only (owner decision 2026-11-21). The preview is drawn by Rust with
     Apply's own code, so the preview is the result (ADR-0008).
   - The unapplied preview (owner decision 2026-11-22) exists only until Apply: switching
-    tool (or **Cancel**), changing the selected layer, undo/redo, and closing the Editor
-    all discard it, and it never enters the undo history. An unapplied preview alone does
-    not make the document dirty, so closing warns only about applied, unsaved changes.
-    While the tool stays active after a discard, the preview is drawn afresh for the
-    current layer and document.
+    tool (or **Cancel**), picking another layer (in the Layers list or with Esc),
+    undo/redo, any other edit, and closing the Editor all discard it, and it never enters
+    the undo history. Every discard also returns to the Move tool (owner decision
+    2026-11-22). An unapplied preview alone does not make the document dirty, so closing
+    warns only about applied, unsaved changes. Settings keep their latest values until the
+    app closes (never saved; each app start uses the defaults).
   - The effect grows the layer: an outline or glow reaching past the layer's edge makes
     the layer larger (its top-left moves out), not clipped; the save still clips to the
     canvas. Sizes are in on-screen document px, so a scaled layer looks the same.
-  - In the effect tools a click on the canvas picks the target layer (nothing moves).
+  - The layer is chosen before the tool (owner decision 2026-11-22): in Outline and Glow
+    a click on the canvas selects nothing and nothing moves (empty space still pans).
     With several layers selected the tool says to select one (merge them first to treat
     them as one). A text layer gets the effect too: Apply rasterises it in Rust and it
     becomes an image layer with the same name and place; a neutral note says so.

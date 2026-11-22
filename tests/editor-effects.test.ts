@@ -26,7 +26,7 @@ import {
   type Effect,
   type EffectResult,
 } from "../src/editor/model/effects";
-import { bulgeDab, dabsAlong, warpAmount, WARP_DEFAULTS } from "../src/editor/model/warp";
+import { bulgeDab, moveWarpGesture, startWarpGesture, warpAmount, warpReadout, WARP_DEFAULTS, WARP_RADIUS } from "../src/editor/model/warp";
 import { EffectPreview, type PreviewRequest } from "../src/editor/view/effect-preview";
 import { EditorSession } from "../src/editor/model/session";
 
@@ -261,14 +261,50 @@ test("a dab past the image edge only touches the image", () => {
   expect(bulgeDab(image, -50, 10, 8, 0.5)).toBeNull();
 });
 
-test("a stroke drops dabs along its path at even spacing", () => {
-  expect(dabsAlong({ x: 0, y: 0 }, { x: 10, y: 0 }, 4)).toEqual({
-    dabs: [{ x: 4, y: 0 }, { x: 8, y: 0 }],
-    rest: { x: 8, y: 0 },
-  });
-  expect(dabsAlong({ x: 0, y: 0 }, { x: 3, y: 0 }, 4)).toEqual({ dabs: [], rest: { x: 0, y: 0 } });
+test("a click is one bulge with the slider values", () => {
+  const g = startWarpGesture({ x: 100, y: 100 }, { strength: 30, radius: 60 }, false);
+  expect([g.radius, g.strength, g.mode, g.dragged]).toEqual([60, 30, "radius", false]);
+  // Within the drag slop (4 screen px at 100%) it stays a click.
+  const still = moveWarpGesture(g, { x: 103, y: 100 }, false, 1);
+  expect([still.radius, still.dragged]).toEqual([60, false]);
   expect(warpAmount(0)).toBe(0);
   expect(warpAmount(WARP_DEFAULTS.strength)).toBeGreaterThan(0);
+});
+
+test("a press-drag sets the radius to the pointer's distance from the press point", () => {
+  let g = startWarpGesture({ x: 100, y: 100 }, { strength: 30, radius: 60 }, false);
+  g = moveWarpGesture(g, { x: 100, y: 140 }, false, 1);
+  expect([g.radius, g.strength, g.dragged]).toEqual([40, 30, true]);
+  expect(g.center).toEqual({ x: 100, y: 100 }); // the bulge stays where it was pressed
+  // Clamped to the slider's range.
+  expect(moveWarpGesture(g, { x: 101, y: 100 }, false, 1).radius).toBe(WARP_RADIUS.min);
+  expect(moveWarpGesture(g, { x: 900, y: 100 }, false, 1).radius).toBe(WARP_RADIUS.max);
+  expect(warpReadout(g)).toBe("Radius 40 px");
+});
+
+test("holding Shift switches the drag to strength, relative from the swap, radius frozen; releasing continues the radius", () => {
+  let g = startWarpGesture({ x: 0, y: 0 }, { strength: 30, radius: 60 }, false);
+  g = moveWarpGesture(g, { x: 50, y: 0 }, false, 1); // radius 50
+  g = moveWarpGesture(g, { x: 50, y: 0 }, true, 1); // Shift down: nothing jumps
+  expect([g.mode, g.radius, g.strength]).toEqual(["strength", 50, 30]);
+  g = moveWarpGesture(g, { x: 70, y: 0 }, true, 1); // +20 px = +10%
+  expect([g.radius, g.strength]).toEqual([50, 40]);
+  expect(warpReadout(g)).toBe("Strength 40%");
+  g = moveWarpGesture(g, { x: 10, y: 0 }, true, 1); // -60 px = -30%: 10%
+  expect(g.strength).toBe(10);
+  expect(moveWarpGesture(g, { x: 0, y: 0 }, true, 1).strength).toBe(10 - 5);
+  expect(moveWarpGesture(g, { x: 500, y: 0 }, true, 1).strength).toBe(100); // clamped
+  g = moveWarpGesture(g, { x: 10, y: 0 }, false, 1); // Shift up: back to radius, from 50
+  expect([g.mode, g.radius, g.strength]).toEqual(["radius", 50, 10]);
+  g = moveWarpGesture(g, { x: 30, y: 0 }, false, 1);
+  expect([g.radius, g.strength]).toEqual([70, 10]);
+});
+
+test("Shift already down at the press starts in strength mode; strength follows screen px at any zoom", () => {
+  let g = startWarpGesture({ x: 0, y: 0 }, { strength: 30, radius: 60 }, true);
+  expect(g.mode).toBe("strength");
+  g = moveWarpGesture(g, { x: 10, y: 0 }, true, 2); // 10 doc px = 20 screen px at 200%: +10%
+  expect([g.radius, g.strength, g.dragged]).toEqual([60, 40, true]);
 });
 
 test("docToLocal inverts localToDoc for a turned and scaled layer", () => {

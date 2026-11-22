@@ -23,18 +23,29 @@ import { distance, lassoDoubleClick, lassoDrag, lassoPress, lassoPreview, lassoR
  * What the left button does on the canvas: "move" moves the layer under
  * the pointer (or pans on empty space); "rect" drags the cut selection's
  * rectangle and "lasso" draws it from clicks and drags (SPM-9). Neither
- * selection tool moves layers. The effect tools "outline" and "glow" only
- * pick the layer the effect goes on (a click selects, empty space pans,
- * nothing moves: the layer shows its preview meanwhile); "warp" paints with
- * the brush handed to `onBrush` (SPM-8).
+ * selection tool moves layers. In the effect tools "outline" and "glow" the
+ * canvas selects nothing (the layer is chosen before the tool, owner
+ * decision 2026-11-22) and nothing moves; empty space pans, and the target
+ * shows its preview meanwhile. "warp" paints with the brush handed to
+ * `onBrush` (SPM-8).
  */
 export type CanvasTool = "move" | "rect" | "lasso" | "outline" | "glow" | "warp";
 
-/** The warp brush's side of a stroke, in document px (SPM-8). */
+/**
+ * The warp brush's side of a press, in document px (SPM-8). `shift` is the
+ * pointer event's own shiftKey, as Konva's Transformer reads it.
+ */
 export interface BrushHandler {
-  press(at: Point): void;
-  move(at: Point): void;
+  press(at: Point, shift: boolean): void;
+  move(at: Point, shift: boolean): void;
   release(): void;
+}
+
+/** A warp press being dragged: its bulge's centre and radius, and the readout beside the pointer. */
+export interface BrushGesture {
+  readonly center: Point;
+  readonly radius: number;
+  readonly readout: string;
 }
 
 /**
@@ -48,10 +59,13 @@ export interface LayerOverride {
   readonly transform: Transform;
 }
 
-/** The tools that only pick a layer, for an effect preview (SPM-8). */
-function picksLayer(tool: CanvasTool): boolean {
+/** The effect tools with a preview, where the canvas only pans (SPM-8). */
+function previews(tool: CanvasTool): boolean {
   return effectKindOf(tool) !== null;
 }
+
+/** Screen px between the pointer and the warp readout's top-left. */
+const READOUT_OFFSET = 14;
 
 /** Lasso points closer than this many screen px to the previous one are skipped. */
 const LASSO_STEP = 2;
@@ -159,8 +173,15 @@ export class EditorStage {
   });
   /** The warp brush's outline under the pointer (SPM-8). */
   private readonly brushRing = new Konva.Circle({ strokeWidth: 1, strokeScaleEnabled: false, listening: false, visible: false });
+  /** The radius or strength readout beside the pointer while a warp press is dragged. */
+  private readonly readout = new Konva.Label({ listening: false, visible: false });
+  private readonly readoutTag = new Konva.Tag({ cornerRadius: 4, strokeWidth: 1, strokeScaleEnabled: false });
+  private readonly readoutText = new Konva.Text({ padding: 4, fontSize: 13 });
   private brush?: BrushHandler;
   private brushing = false;
+  /** The warp press being dragged, which the ring follows instead of the pointer. */
+  private gesture: BrushGesture | null = null;
+  private brushRadius = 0;
   private override: LayerOverride | null = null;
   private readonly nodes = new Map<string, Konva.Image>();
   private readonly pending = new Set<string>();
@@ -220,7 +241,8 @@ export class EditorStage {
       strokeScaleEnabled: false,
       listening: false,
     });
-    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.brushRing);
+    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.brushRing, this.readout);
+    this.readout.add(this.readoutTag, this.readoutText);
     this.content.add(this.backdrop);
     this.content.add(this.transformer);
     this.stage.add(this.content);
@@ -240,12 +262,12 @@ export class EditorStage {
       this.viewChanged?.(this.view());
     });
     this.stage.on("click tap", (e) => {
-      if (e.target === this.stage && (this.tool === "move" || picksLayer(this.tool))) this.session.clearSelection();
+      if (e.target === this.stage && this.tool === "move") this.session.clearSelection();
     });
     this.stage.on("mousedown touchstart", (e) => {
-      if (!(e.evt instanceof MouseEvent) || e.evt.button === 0) this.pressRegion();
+      if (!(e.evt instanceof MouseEvent) || e.evt.button === 0) this.pressRegion(e.evt.shiftKey);
     });
-    this.stage.on("mousemove touchmove", () => this.extendRegion());
+    this.stage.on("mousemove touchmove", (e) => this.extendRegion(e.evt.shiftKey));
     this.stage.on("mouseleave", () => this.placeBrushRing(null));
     this.stage.on("dblclick dbltap", () => {
       if (!this.interactive || this.tool !== "lasso" || !this.lasso) return;
@@ -326,7 +348,30 @@ export class EditorStage {
 
   /** The warp brush's radius in document px, for the ring under the pointer. */
   setBrushRadius(radius: number): void {
-    this.brushRing.radius(radius);
+    this.brushRadius = radius;
+    if (!this.gesture) this.brushRing.radius(radius);
+    this.guides.batchDraw();
+  }
+
+  /**
+   * Show a warp press being dragged: the ring around its bulge and the
+   * readout beside the pointer; null goes back to the ring under the pointer.
+   */
+  setBrushGesture(gesture: BrushGesture | null): void {
+    this.gesture = gesture;
+    const pointer = this.pointer();
+    if (gesture) {
+      this.brushRing.radius(gesture.radius);
+      this.brushRing.position(gesture.center);
+      this.brushRing.visible(true);
+      this.readoutText.text(gesture.readout);
+      // Constant size on screen at any zoom, just below-right of the pointer.
+      const k = 1 / this.stage.scaleX();
+      this.readout.scale({ x: k, y: k });
+      if (pointer) this.readout.position({ x: pointer.x + READOUT_OFFSET * k, y: pointer.y + READOUT_OFFSET * k });
+    }
+    this.readout.visible(gesture !== null);
+    if (!gesture) this.placeBrushRing(pointer);
     this.guides.batchDraw();
   }
 
@@ -392,11 +437,11 @@ export class EditorStage {
     this.applyListening();
   }
 
-  /** Layers listen and empty space pans only when interactive with the Move tool (or an effect tool, to pick a layer). */
+  /** Layers listen only with the Move tool; empty space pans with it and the effect tools; nothing while not interactive. */
   private applyListening(): void {
-    const moving = this.interactive && (this.tool === "move" || picksLayer(this.tool));
-    this.content.listening(moving);
-    this.stage.draggable(moving);
+    // Layers listen only to the Move tool; empty space pans in the effect tools too.
+    this.content.listening(this.interactive && this.tool === "move");
+    this.stage.draggable(this.interactive && (this.tool === "move" || previews(this.tool)));
     this.content.batchDraw();
   }
 
@@ -425,6 +470,9 @@ export class EditorStage {
     this.regionHalo.stroke(token("--panel"));
     this.regionLine.stroke(token("--accent-ink"));
     this.brushRing.stroke(token("--accent-ink"));
+    this.readoutTag.fill(token("--panel"));
+    this.readoutTag.stroke(token("--border"));
+    this.readoutText.fill(token("--text"));
     this.content.batchDraw();
     this.guides.batchDraw();
   }
@@ -458,13 +506,13 @@ export class EditorStage {
     return screenPx / this.stage.scaleX();
   }
 
-  private pressRegion(): void {
-    if (this.tool === "move" || picksLayer(this.tool) || !this.interactive) return;
+  private pressRegion(shift: boolean): void {
+    if (this.tool === "move" || previews(this.tool) || !this.interactive) return;
     const at = this.pointer();
     if (!at) return;
     if (this.tool === "warp") {
       this.brushing = true;
-      this.brush?.press(at);
+      this.brush?.press(at, shift);
       return;
     }
     if (this.tool === "rect") this.rectDrag = { start: at, end: at };
@@ -478,12 +526,12 @@ export class EditorStage {
     this.drawRegion();
   }
 
-  private extendRegion(): void {
+  private extendRegion(shift: boolean): void {
     const at = this.pointer();
     if (!at) return;
     if (this.tool === "warp") {
-      this.placeBrushRing(at);
-      if (this.brushing) this.brush?.move(at);
+      if (this.brushing) this.brush?.move(at, shift);
+      else this.placeBrushRing(at);
       return;
     }
     if (this.rectDrag) this.rectDrag = { ...this.rectDrag, end: at };
@@ -515,6 +563,8 @@ export class EditorStage {
 
   /** Show the brush ring at `at` (document px), or hide it. */
   private placeBrushRing(at: Point | null): void {
+    if (this.gesture) return; // the ring stays on the press being dragged
+    this.brushRing.radius(this.brushRadius);
     this.brushRing.visible(at !== null && this.tool === "warp");
     if (at) this.brushRing.position(at);
     this.guides.batchDraw();
@@ -622,16 +672,16 @@ export class EditorStage {
       const o = this.override?.id === layer.id ? this.override : null;
       const image = o ? (o.image instanceof HTMLCanvasElement ? o.image : canvasFor(o.image)) : canvasFor(layerImage(layer));
       node.setAttrs({ ...(o ? o.transform : layer.transform), skewX: 0, skewY: 0, image });
-      // Only the Move tool moves layers; effect tools pick them.
+      // Only the Move tool moves layers.
       node.draggable(this.tool === "move");
       node.visible(layer.id !== this.editing);
       // z-order: the backdrop is index 0, layers follow bottom to top.
       node.zIndex(index + 1);
     });
-    // No handles while an effect tool picks layers: the node shows the
-    // preview's grown box, which is not the layer's to resize.
+    // No handles in the effect tools: the node shows the preview's grown
+    // box, which is not the layer's to resize.
     this.transformer.nodes(
-      picksLayer(this.tool) ? [] : this.session.selection.flatMap((id) => {
+      previews(this.tool) ? [] : this.session.selection.flatMap((id) => {
         const node = this.nodes.get(id);
         return node && id !== this.editing ? [node] : [];
       }),
