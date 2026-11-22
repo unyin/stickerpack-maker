@@ -30,7 +30,10 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
     their submit button stays primary.
   - Disabled controls look disabled (faded) and still show their reason as a tooltip.
   - Every message that stays until dismissed has an **X** close button on its left as well as
-    **Dismiss** on its right; both do the same (owner decision 2026-11-22).
+    **Dismiss** on its right; both do the same (owner decision 2026-11-22). The red message
+    line (errors and blocked-action reasons, in the Editor and the Pack Manager) is not such a
+    message: it stays until the next command replaces or clears it, and has neither (owner
+    decision 2026-11-22).
 
 ## 3. Domain model
 
@@ -209,8 +212,9 @@ stickers, Missing stickers, and the thumbnail.
   **100×100** for thumbnails (owner decision 2026-11-20); it is never set from the imported
   image. The opened image is placed at its native pixel size, centred on the canvas, and may
   overflow it.
-- Imports larger than **2000×2000** (the import cap) trigger a dialog: **OK** scales to fit
-  within 2000×2000 preserving aspect ratio (longest side 2000); **Cancel** aborts the import.
+- Imports larger than **2000×2000** (the import cap) trigger the shared two-option dialog
+  (§2): **Scale to fit** scales to fit within 2000×2000 preserving aspect ratio (longest
+  side 2000); **Cancel**, the default, aborts the import.
 - The image is draggable on the canvas (pan/zoom for editing comfort).
 - One session at a time (owner decision 2026-11-20): with no session open, **Open image**
   starts one; while a session is open, another image can only be brought in with **Add image
@@ -243,7 +247,16 @@ stickers, Missing stickers, and the thumbnail.
     inside the box"), because a session always keeps at least one layer.
   - Crop is disabled, with the reason in its tooltip, when nothing lies outside the box (owner confirmed 2026-11-21).
   - Crop never moves the view: the canvas origin does not move.
-  - Text layers on Crop are decided with the text tool (SPM-9).
+  - Text layers on Crop (owner confirmed 2026-11-21): a text layer
+    is measured by its rendered box, turned and scaled with the layer, like an image by its
+    pixels, so every rule above applies to it unchanged. Inside the box it stays
+    editable text; entirely outside it is discarded like an image; crossing the box edge it
+    is rasterised (in Rust) and clipped like an image, becoming an image layer with the same
+    name and place: text cannot both stay editable and lose its outside part. The "at least
+    one layer" rule is unchanged. After such a Crop a neutral (not red) note in the
+    message line says how many text layers were converted, e.g. "1 text layer crossed the
+    crop edge and was converted to an image."; Undo brings the text back and clears the note (owner decision
+    2026-11-22).
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
   image" = everything on the canvas treated as one layer, exactly like selecting every layer
   and resizing them together (owner decision 2026-11-20). Sides below are Sticker mode's;
@@ -279,14 +292,87 @@ stickers, Missing stickers, and the thumbnail.
 
 ### Layers and tools
 - Session layer model: base image, pasted cutouts, text objects. Undo/redo throughout.
-- **Cut / paste / resize** floating parts.
+- **Cut / paste / resize** floating parts. Details below are owner
+  confirmed 2026-11-21 (SPM-9):
+  - **Move / Rectangle / Lasso** tools: with Rectangle or Lasso, the left button draws a
+    selection instead of moving layers or panning; wheel zoom and middle-drag pan still
+    work, even mid-drag (only the left button's release ends a drag). The selection is not
+    an undo step; it stays until it is used, replaced, or cleared with Esc (Esc clears it
+    before it clears the layer selection).
+  - The **Lasso** is a hybrid (owner decision 2026-11-22, in the style of GIMP's Free
+    Select): a click adds a waypoint (a straight edge from the last point), a drag draws
+    freehand, and the two mix in one lasso, which stays open between presses with a
+    rubber band to the pointer. It closes by pressing on its start point (or releasing a
+    freehand stroke there), by a double-click on one spot (two clicks, not a stroke), or by
+    Enter. While it is open, Esc cancels it (the previous selection stays) and Backspace
+    removes its last segment: the last waypoint, or the whole last freehand stroke while
+    the point the stroke began at stays a waypoint, as in GIMP (owner re-tests
+    2026-11-22). A closed lasso with no area clears the selection.
+  - **Cut** works on exactly one selected image layer that the selection touches (its
+    tooltip says why not). The selected pixels (whole pixels whose centres lie inside the
+    selection; a lasso that crosses itself leaves the overlap out) move into a new floating
+    image layer named "Cutout", **directly above** the source, at the same spot, with the
+    source's rotation and scale; the source keeps a transparent hole. One undo step. The
+    cutout is trimmed to its visible pixels; a selection holding no visible pixels cuts
+    nothing. After a cut the cutout is selected and the Move tool is back, so it can be
+    dragged and resized at once. Text layers are not cut (merge them into an image first).
+    Delete still deletes layers, never selected pixels. Ctrl+X runs Cut (lifting the
+    selection to a new layer, not to the clipboard; when Cut is blocked it shows the
+    tooltip's reason in the message line), and there is no Ctrl+C (owner decision
+    2026-11-21).
+  - **Paste**: Ctrl+V with an image on the clipboard (or the Paste button, where the
+    webview allows reading the clipboard) adds it as a new layer named "Pasted image",
+    native size, centred on the canvas, on top, with the same 2000×2000 import cap dialog
+    as Add image as layer. PNG, JPEG and WEBP clipboard data are accepted. Ctrl+V also
+    pastes an image file copied in the file explorer; the Paste button cannot see copied
+    files (the webview's clipboard API reads only image data), so when it finds no image it
+    says "No image data on the clipboard. Copied an image file? Press Ctrl+V." (owner
+    decision 2026-11-22).
+  - Floating parts are moved and resized with the same handles as every layer (corner
+    anchors, aspect kept, rotation), at any time.
+  - Handle modifiers are Konva's built-in ones (owner decision 2026-11-22): holding **Alt**
+    while dragging a corner handle resizes the layer around its centre instead of
+    anchoring the opposite corner; holding **Shift** while dragging the rotation handle
+    snaps the rotation to 15° steps.
 - **Enlarge selected parts**: local warp/bulge (strength + radius), paints on the selected layer.
 - **Background removal**: one-click offline ONNX auto removal + manual refine brush.
 - **Outline** and **fuzzy glow**: target the selected layer, or the base image when nothing
   is selected.
-- **Text**: own layer, movable/resizable until save (system fonts, size, color).
+- **Text**: own layer, movable/resizable until save (system fonts, size, color). Details
+  (owner confirmed 2026-11-21, SPM-9):
+  - **Add text** opens a text box centred on the canvas; double-click a text layer (or
+    **Edit text**) edits it in place. Enter finishes, Shift+Enter starts a new line, Esc
+    cancels, clicking elsewhere finishes. A new text layer is centred on the canvas and
+    named after its first line. Blank text creates or changes nothing (delete a text layer
+    with Delete). While text is typed, every key (Delete, undo/redo, Esc) acts on the text,
+    never on the layers. The text box follows the view when it is panned or zoomed while
+    typing, and the wheel zooms even with the pointer over the text box.
+  - The font list is the system's installed families, shown in a font picker where each
+    name is drawn in its own typeface and typing filters the list (names starting with
+    the typed text first); arrow keys move, Enter or a click picks, Esc or leaving the
+    field keeps the current font (owner decision 2026-11-22); a session's first text uses Impact
+    when installed (else a common sans, else the first family). Size is a whole number of
+    px within the range in src/shared/limits.json (1–1000); default 64 px, black. The font,
+    size and colour controls restyle the selected text layers (one undo step), and every
+    change also sticks for the next new text, so the last font, size and colour used carry
+    over (owner re-test 2026-11-22). Only the property changed carries over; selecting a
+    text layer alone changes nothing, so while one is selected the controls show its style
+    and Add text still uses the next-text style (owner decision 2026-11-22). To set the
+    next text's style without restyling a layer, deselect first (Esc).
+    After a committed change on the font list, size field or colour picker, the control
+    gives up focus so Ctrl+Z, Delete, Esc and Ctrl+V work at once (typing in the size field
+    is not intercepted).
+  - Text is laid out and rasterised in Rust (left-aligned lines, the font's own line
+    spacing, kerning; no ligature shaping and no fallback font: characters the font
+    lacks show as whatever the font draws for them, often a box, sometimes nothing (owner
+    decision 2026-11-21: left as is)), and the canvas
+    shows exactly that rendering, so the view, merge, Crop, the sizing tools and the save
+    agree on its pixels and its box. Resizing a text layer scales it (it stays
+    text, and is drawn sharp at its size when merged or saved); its font size field keeps
+    its typed size.
 - **Merge selected layers**: flatten chosen layers together mid-session so effects can be
-  applied to the merged result before the final save flatten.
+  applied to the merged result before the final save flatten. Text layers merge too: they
+  are rasterised in Rust as part of the merge (SPM-9).
 - **Delete selected layers** (button or Delete key; undoable; owner decision 2026-11-20). A
   session always keeps at least one layer: deleting every layer is refused — use Close to
   start over.
@@ -343,6 +429,12 @@ stickers, Missing stickers, and the thumbnail.
 - Small UX defaults assumed unless preferences emerge: system fonts + size/color for text;
   color/width for outline; color/radius/softness for glow; strength/radius for warp.
 
+### Ignored edge cases
+Known rough edges the owner has looked at and chosen not to fix for now (each with its date).
+- Editor, Lasso: drawing a freehand stroke while panning with the middle button at the same
+  time can give a messy outline, because the view lags the pointer slightly during the pan
+  (owner, 2026-11-22: rare combination, not worth fixing now).
+
 ### v2 parking lot (UX)
 - Double-click shortcuts (e.g. double-click a sticker to open the Editor).
 - Right-click context menu mirroring the detail panel's commands.
@@ -357,13 +449,18 @@ stickers, Missing stickers, and the thumbnail.
 - Editor: Crop could also drop a layer that crosses the box edge when its part inside the
   box is fully transparent. In v1 such a layer is kept; only layers entirely outside the box
   are discarded (owner, 2026-11-21: may revisit).
-- Editor: hold Shift while rotating a layer to snap to fixed angles (e.g. 15° steps) or
-  to a grid.
+- Editor: a "Convert text to image" tool, so a text layer can be edited with pixel tools
+  (e.g. Cut) without merging it onto another layer first (owner, 2026-11-21).
+- Editor: real clipboard for Cut/Copy: Ctrl+C copies the selected pixels (or the selected
+  layer) to the system clipboard as PNG, Ctrl+X does the same and leaves a transparent
+  hole, so stickers can be copied between sessions and apps (owner, 2026-11-21).
 - Editor: hold Shift while moving a layer to snap to whole pixels or to a grid. Note:
   Shift+click already toggles a layer in or out of the selection, so a Shift-drag must
   not also toggle it; and the Editor has no grid yet (owner, 2026-11-21).
 - Pack Manager: a button next to the Emoji String field that opens an emoji picker for easy
   selection (owner, 2026-11-21).
+- Editor: layer locking, so a locked layer cannot be selected, moved or edited by accident
+  (owner, 2026-11-22).
 - v3 idea: in Reorder mode the sticker images wiggle (as on phone home screens), instead of
   or as well as the green tint (owner, 2026-11-21: animations are a bigger job).
 

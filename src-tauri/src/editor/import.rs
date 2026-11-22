@@ -1,8 +1,10 @@
 //! Editor import pipeline (SPEC §6 "Import and canvas"): .jpg, .jpeg,
 //! .jfif, .png, .webp; images larger than the import cap (`IMPORT_MAX_SIDE`
-//! square) need the owner's OK to scale to fit (longest side at the cap,
-//! aspect preserved) — Cancel aborts.
+//! square) need "Scale to fit" in the cap dialog (longest side at the cap,
+//! aspect preserved); Cancel aborts. Pasted clipboard images (SPM-9)
+//! arrive as encoded bytes and follow the same rules.
 
+use std::io::{BufRead, Cursor, Seek};
 use std::path::Path;
 
 use image::metadata::Orientation;
@@ -41,20 +43,32 @@ fn check_extension(path: &Path) -> Result<(), String> {
     }
 }
 
-/// Open a decoder chosen by the file's content (so `.jfif` and misnamed
-/// files decode as what they really are), with its EXIF orientation.
-fn open_decoder(path: &Path) -> Result<(impl ImageDecoder, Orientation), String> {
-    check_extension(path)?;
-    let cannot = |e: &dyn std::fmt::Display| format!("cannot open {}: {e}", path.display());
-    let mut decoder = ImageReader::open(path)
-        .map_err(|e| cannot(&e))?
-        .with_guessed_format()
-        .map_err(|e| cannot(&e))?
-        .into_decoder()
-        .map_err(|e| cannot(&e))?;
+/// A decoder chosen by the content (so `.jfif`, misnamed files and pasted
+/// bytes decode as what they really are), with its EXIF orientation.
+/// `what` names the source in errors.
+fn decoder_for<'a, R: BufRead + Seek + 'a>(
+    reader: ImageReader<R>,
+    what: &str,
+) -> Result<(impl ImageDecoder + 'a, Orientation), String> {
+    let cannot = |e: &dyn std::fmt::Display| format!("cannot open {what}: {e}");
+    let mut decoder = reader.with_guessed_format().map_err(|e| cannot(&e))?.into_decoder().map_err(|e| cannot(&e))?;
     // A missing or unreadable orientation tag means "as stored".
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
     Ok((decoder, orientation))
+}
+
+fn open_decoder(path: &Path) -> Result<(impl ImageDecoder, Orientation), String> {
+    check_extension(path)?;
+    let what = path.display().to_string();
+    let reader = ImageReader::open(path).map_err(|e| format!("cannot open {what}: {e}"))?;
+    decoder_for(reader, &what)
+}
+
+/// What pasted images are called in errors.
+const PASTED: &str = "the pasted image";
+
+fn bytes_decoder(bytes: &[u8]) -> Result<(impl ImageDecoder + '_, Orientation), String> {
+    decoder_for(ImageReader::new(Cursor::new(bytes)), PASTED)
 }
 
 /// True when an EXIF orientation turns the image on its side.
@@ -69,9 +83,19 @@ fn swaps_sides(orientation: Orientation) -> bool {
 /// without decoding its pixels, so the UI can ask about the import cap first.
 pub fn probe(path: &Path) -> Result<ImageInfo, String> {
     let (decoder, orientation) = open_decoder(path)?;
+    Ok(info_of(&decoder, orientation))
+}
+
+/// `probe` for a pasted image's encoded bytes (PNG, JPEG or WEBP).
+pub fn probe_bytes(bytes: &[u8]) -> Result<ImageInfo, String> {
+    let (decoder, orientation) = bytes_decoder(bytes)?;
+    Ok(info_of(&decoder, orientation))
+}
+
+fn info_of(decoder: &impl ImageDecoder, orientation: Orientation) -> ImageInfo {
     let (w, h) = decoder.dimensions();
     let (width, height) = if swaps_sides(orientation) { (h, w) } else { (w, h) };
-    Ok(ImageInfo { width, height, exceeds_cap: width.max(height) > IMPORT_MAX_SIDE })
+    ImageInfo { width, height, exceeds_cap: width.max(height) > IMPORT_MAX_SIDE }
 }
 
 /// Size that fits within `max_side` x `max_side` with the aspect ratio
@@ -88,12 +112,21 @@ pub fn fit_within(width: u32, height: u32, max_side: u32) -> (u32, u32) {
 
 /// Decode an image for the Editor: straight RGBA8, EXIF orientation
 /// applied. An image over the import cap is refused unless `scale_to_fit` (the
-/// owner pressed OK in the cap dialog), in which case it is resampled with
+/// owner chose "Scale to fit" in the cap dialog), in which case it is resampled with
 /// Lanczos3, alpha-aware so transparent edges keep their colour.
 pub fn import(path: &Path, scale_to_fit: bool) -> Result<Rgba, String> {
     let (decoder, orientation) = open_decoder(path)?;
-    let mut image = DynamicImage::from_decoder(decoder)
-        .map_err(|e| format!("cannot decode {}: {e}", path.display()))?;
+    decode(decoder, orientation, scale_to_fit, &path.display().to_string())
+}
+
+/// `import` for a pasted image's encoded bytes: the same import cap rule.
+pub fn import_bytes(bytes: &[u8], scale_to_fit: bool) -> Result<Rgba, String> {
+    let (decoder, orientation) = bytes_decoder(bytes)?;
+    decode(decoder, orientation, scale_to_fit, PASTED)
+}
+
+fn decode(decoder: impl ImageDecoder, orientation: Orientation, scale_to_fit: bool, what: &str) -> Result<Rgba, String> {
+    let mut image = DynamicImage::from_decoder(decoder).map_err(|e| format!("cannot decode {what}: {e}"))?;
     image.apply_orientation(orientation);
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
@@ -102,9 +135,8 @@ pub fn import(path: &Path, scale_to_fit: bool) -> Result<Rgba, String> {
     }
     if !scale_to_fit {
         return Err(format!(
-            "{} is {width}x{height}, larger than {IMPORT_MAX_SIDE}x{IMPORT_MAX_SIDE}; \
-             it can only be imported scaled to fit",
-            path.display()
+            "{what} is {width}x{height}, larger than {IMPORT_MAX_SIDE}x{IMPORT_MAX_SIDE}; \
+             it can only be imported scaled to fit"
         ));
     }
     resize(Rgba { width, height, pixels: rgba.into_raw() }, fit_within(width, height, IMPORT_MAX_SIDE))
@@ -222,6 +254,25 @@ mod tests {
         assert_eq!((info.width, info.height), (20, 30));
         let img = import(&path, false).unwrap();
         assert_eq!((img.width, img.height), (20, 30));
+    }
+
+    #[test]
+    fn pasted_bytes_follow_the_same_rules_as_files() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["p.png", "p.webp", "p.jpg"] {
+            let bytes = fs::read(write(dir.path(), name, &solid(30, 20, [200, 10, 10, 255]))).unwrap();
+            let info = probe_bytes(&bytes).unwrap();
+            assert_eq!((info.width, info.height, info.exceeds_cap), (30, 20, false), "{name}");
+            let img = import_bytes(&bytes, false).unwrap();
+            assert_eq!((img.width, img.height), (30, 20), "{name}");
+        }
+        let cap = IMPORT_MAX_SIDE;
+        let big = fs::read(write(dir.path(), "big.png", &solid(cap + 10, 4, [0, 0, 0, 255]))).unwrap();
+        assert!(probe_bytes(&big).unwrap().exceeds_cap);
+        assert!(import_bytes(&big, false).unwrap_err().contains("pasted image"));
+        assert_eq!(import_bytes(&big, true).unwrap().width, cap);
+        assert!(probe_bytes(b"not an image").is_err());
+        assert!(import_bytes(b"GIF89a....", false).is_err());
     }
 
     #[test]

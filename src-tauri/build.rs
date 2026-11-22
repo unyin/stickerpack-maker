@@ -10,7 +10,7 @@ fn main() {
     tauri_build::build()
 }
 
-/// Every sticker, thumbnail and import limit (SPEC §6-7) has ONE definition,
+/// Every sticker, thumbnail, import and text limit (SPEC §6-7) has ONE definition,
 /// shared with the webview: src/shared/limits.json. The webview imports that
 /// file; this generates the Rust constants from it for src/limits.rs.
 fn limits() {
@@ -36,6 +36,11 @@ fn limits() {
         "{}: emojiString.maxEmoji must be at least minEmoji",
         path.display()
     );
+    assert!(
+        get("/text/minFontSize") <= get("/text/maxFontSize"),
+        "{}: text.minFontSize must not exceed text.maxFontSize",
+        path.display()
+    );
     let code = format!(
         "/// Largest side an imported image may have without scaling (SPEC §6).\n\
          pub const IMPORT_MAX_SIDE: u32 = {};\n\
@@ -56,7 +61,11 @@ fn limits() {
          /// Longest pack Title, in characters (SPEC §7).\n\
          pub const TITLE_MAX_CHARS: usize = {};\n\
          /// Longest Short Name, in characters (SPEC §7).\n\
-         pub const SHORT_NAME_MAX_CHARS: usize = {};\n",
+         pub const SHORT_NAME_MAX_CHARS: usize = {};\n\
+         /// Text layers: smallest font size, in px (SPEC §6, SPM-9).\n\
+         pub const TEXT_MIN_FONT_SIZE: u32 = {};\n\
+         /// Text layers: largest font size, in px (SPEC §6, SPM-9).\n\
+         pub const TEXT_MAX_FONT_SIZE: u32 = {};\n",
         get("/importMaxSide"),
         get("/sticker/side"),
         get("/sticker/maxKilobytes"),
@@ -67,6 +76,8 @@ fn limits() {
         get("/emojiString/maxEmoji"),
         get("/pack/titleMaxChars"),
         get("/pack/shortNameMaxChars"),
+        get("/text/minFontSize"),
+        get("/text/maxFontSize"),
     );
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("limits.rs");
     fs::write(&out, code).unwrap_or_else(|e| panic!("cannot write {}: {e}", out.display()));

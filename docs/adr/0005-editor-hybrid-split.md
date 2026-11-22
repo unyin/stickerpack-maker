@@ -46,3 +46,21 @@ Every operation needs undo/redo. The owner values the editing feel above all (AD
 - **Text layers stay vector data** until a merge or the save rasterises them in Rust. After that they are pixels (no project files, SPEC §6).
 - **The history's memory budget is a tunable constant.** The owner feels it only as "very old steps can't be undone" in very long sessions.
 - **Swapping Konva later only means rewriting the view layer** (`src/editor/view/`), because the model and the Rust pixel code never depend on it.
+
+## Amendment (SPM-9, 2026-11-20; owner confirmed 2026-11-21)
+
+**Text layers are drawn on the canvas from their Rust rendering, not by `Konva.Text`.**
+
+- When a text layer is created or its text, font, size or colour changes, Rust lays it out and
+  rasterises it at scale 1 (`editor_render_text`; `ab_glyph` outlines filled by `tiny-skia`, system
+  fonts found with `fontdb`). The model keeps that rendering beside the text, and the stage shows it
+  as a `Konva.Image`, transformed like any layer.
+- Why: the sizing tools measure the whole image, text included (CMT-61), and the save and merge
+  rasterise text in Rust. Measuring with Konva's font metrics while Rust draws the pixels would let
+  "longest side exactly 512" drift; a webview font and a Rust font can differ in metrics, hinting and
+  kerning. With one rasteriser the view, the measurement, merge, Crop and the save all agree.
+- Merge, Crop and the save rasterise text again from its outlines at the layer's transform, so a
+  scaled-up text is sharp in the output; the canvas preview of a scaled-up text is the scale-1
+  rendering enlarged, so it can look softer than the result.
+- Editing still uses the `<textarea>` overlay, styled with the same family and the Rust line metrics;
+  each committed edit costs one small IPC round trip.

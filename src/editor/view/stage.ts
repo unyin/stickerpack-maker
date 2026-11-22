@@ -3,9 +3,37 @@
 // lacks, so undo/redo and save never read from Konva.
 import Konva from "konva";
 import type { RgbaImage } from "../model/image";
-import { contentBounds, setTransform, type Doc, type Layer, type Rect, type Transform } from "../model/document";
+import {
+  contentBounds,
+  layerImage,
+  setTransform,
+  type Doc,
+  type Layer,
+  type Point,
+  type Rect,
+  type Transform,
+} from "../model/document";
+import { lassoRegion, rectRegion, type Region } from "../model/region";
 import type { EditorSession } from "../model/session";
-import { fitView, panView, selectModeFor, zoomAround, type Point, type ViewTransform } from "./geometry";
+import { fitView, panView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
+import { distance, lassoDoubleClick, lassoDrag, lassoPress, lassoPreview, lassoRelease, lassoUndo, type LassoDraft } from "./lasso";
+
+/**
+ * What the left button does on the canvas: "move" moves the layer under
+ * the pointer (or pans on empty space); "rect" drags the cut selection's
+ * rectangle and "lasso" draws it from clicks and drags (SPM-9). Neither
+ * selection tool moves layers.
+ */
+export type CanvasTool = "move" | "rect" | "lasso";
+
+/** Lasso points closer than this many screen px to the previous one are skipped. */
+const LASSO_STEP = 2;
+/** A lasso press (or freehand release) this close to its start point, in screen px, closes it. */
+const LASSO_CLOSE_RADIUS = 8;
+/** A lasso press that travels more than this, in screen px, is a freehand stroke, not a click (Windows' drag threshold). */
+const LASSO_DRAG_SLOP = 4;
+/** A press this soon after a lasso closed, on the same spot, is that double-click's second press. */
+const DOUBLE_CLICK_MS = 500;
 
 /** Canvas per pixel buffer: pixels are immutable, so a buffer draws once. */
 const canvases = new WeakMap<RgbaImage, HTMLCanvasElement>();
@@ -93,7 +121,16 @@ export class EditorStage {
     flipEnabled: false,
     ignoreStroke: true,
   });
-  private readonly nodes = new Map<string, Konva.Shape>();
+  /** The cut selection (session.region, or the one being drawn): a halo under a dashed line. */
+  private readonly regionHalo = new Konva.Line({ closed: true, strokeWidth: 3, strokeScaleEnabled: false, listening: false });
+  private readonly regionLine = new Konva.Line({
+    closed: true,
+    strokeWidth: 1,
+    dash: [4, 4],
+    strokeScaleEnabled: false,
+    listening: false,
+  });
+  private readonly nodes = new Map<string, Konva.Image>();
   private readonly pending = new Set<string>();
   private readonly resizeObserver: ResizeObserver;
   /** Watches <html data-theme> (set by src/theme.ts) to recolour the canvas. */
@@ -110,6 +147,21 @@ export class EditorStage {
     if (e.button === 1) e.preventDefault();
   };
   private viewChanged?: (view: ViewTransform) => void;
+  private editText?: (id: string) => void;
+  private tool: CanvasTool = "move";
+  private interactive = true;
+  /** The text layer whose overlay editor is open: its node is hidden meanwhile. */
+  private editing: string | null = null;
+  /** The rectangle being dragged, in document px. */
+  private rectDrag: { start: Point; end: Point } | null = null;
+  /** The lasso being drawn (it stays open between presses). */
+  private lasso: LassoDraft | null = null;
+  /** Where and when the last lasso closed (to swallow the second press of a closing double-click). */
+  private lassoClosed: { at: Point; time: number } | null = null;
+  /** Only the left button (or a touch) ends a drag: a middle-button pan mid-drag leaves it be. */
+  private readonly onRelease = (e: MouseEvent | TouchEvent): void => {
+    if (!(e instanceof MouseEvent) || e.button === 0) this.releaseRegion();
+  };
   /**
    * Whether the view is settled: fitted once, or zoomed/panned by the user.
    * Until then a 0×0 host defers the first fit to resize().
@@ -136,7 +188,7 @@ export class EditorStage {
       strokeScaleEnabled: false,
       listening: false,
     });
-    this.guides.add(this.outline, this.boxHalo, this.box);
+    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine);
     this.content.add(this.backdrop);
     this.content.add(this.transformer);
     this.stage.add(this.content);
@@ -156,8 +208,21 @@ export class EditorStage {
       this.viewChanged?.(this.view());
     });
     this.stage.on("click tap", (e) => {
-      if (e.target === this.stage) this.session.clearSelection();
+      if (e.target === this.stage && this.tool === "move") this.session.clearSelection();
     });
+    this.stage.on("mousedown touchstart", (e) => {
+      if (!(e.evt instanceof MouseEvent) || e.evt.button === 0) this.pressRegion();
+    });
+    this.stage.on("mousemove touchmove", () => this.extendRegion());
+    this.stage.on("dblclick dbltap", () => {
+      if (!this.interactive || this.tool !== "lasso" || !this.lasso) return;
+      const step = lassoDoubleClick(this.lasso, this.docPx(LASSO_CLOSE_RADIUS));
+      this.lasso = step.draft;
+      if (step.close) this.closeLasso(true);
+    });
+    // Released anywhere, even outside the canvas, a drag ends.
+    window.addEventListener("mouseup", this.onRelease);
+    window.addEventListener("touchend", this.onRelease);
 
     this.applyTheme();
     this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
@@ -180,17 +245,49 @@ export class EditorStage {
     return { scale: this.stage.scaleX(), x: this.stage.x(), y: this.stage.y() };
   }
 
+  /** Called with a text layer's id when it is double-clicked (to edit its text). */
+  onEditText(listener: (id: string) => void): void {
+    this.editText = listener;
+  }
+
   /**
    * The whole image's bounds in document pixels: the union of every layer's
-   * on-screen box. Raster layers are measured by the model's placedBounds;
-   * only text is measured by Konva. All three sizing tools scale this.
+   * on-screen box, text by its Rust-rendered box (CMT-61). All three sizing
+   * tools scale this.
    */
   contentBounds(): Rect {
-    return contentBounds(this.session.doc, (layer) =>
-      this.nodes
-        .get(layer.id)!
-        .getClientRect({ relativeTo: this.content, skipShadow: true, skipStroke: true }),
-    );
+    return contentBounds(this.session.doc);
+  }
+
+  /** Choose what the left button does on the canvas (SPM-9). */
+  setTool(tool: CanvasTool): void {
+    this.tool = tool;
+    this.rectDrag = null;
+    this.lasso = null;
+    this.applyListening();
+    this.render();
+  }
+
+  /**
+   * A key for the lasso in progress (SPM-9): Enter closes it, Escape cancels
+   * it, Backspace removes its last segment (a waypoint or a whole freehand
+   * stroke). True when the key was used, so the Editor's own shortcuts (Esc
+   * dropping the selection) do not also run.
+   */
+  handleLassoKey(key: string): boolean {
+    if (!this.lasso) return false;
+    if (key === "Enter") this.closeLasso();
+    else if (key === "Escape") this.lasso = null;
+    else if (key === "Backspace") this.lasso = lassoUndo(this.lasso);
+    else return false;
+    this.drawRegion();
+    return true;
+  }
+
+  /** Hide a text layer while its text is edited in the overlay (null shows it again). */
+  setEditing(id: string | null): void {
+    this.editing = id;
+    this.render();
   }
 
   /**
@@ -232,13 +329,22 @@ export class EditorStage {
    * so nothing is edited while an async operation works from a snapshot.
    */
   setInteractive(enabled: boolean): void {
-    this.content.listening(enabled);
-    this.stage.draggable(enabled);
+    this.interactive = enabled;
     if (!enabled) this.middlePan = null; // ends a middle pan as Konva ends a left drag
+    this.applyListening();
+  }
+
+  /** Layers listen and empty space pans only when interactive with the Move tool. */
+  private applyListening(): void {
+    const moving = this.interactive && this.tool === "move";
+    this.content.listening(moving);
+    this.stage.draggable(moving);
     this.content.batchDraw();
   }
 
   destroy(): void {
+    window.removeEventListener("mouseup", this.onRelease);
+    window.removeEventListener("touchend", this.onRelease);
     this.container.removeEventListener("mousedown", this.onMiddleDown, true);
     this.container.removeEventListener("auxclick", this.onAuxClick, true);
     window.removeEventListener("mousemove", this.onMiddleMove);
@@ -258,6 +364,8 @@ export class EditorStage {
     this.transformer.borderStroke(token("--accent-ink"));
     this.transformer.anchorStroke(token("--accent-ink"));
     this.transformer.anchorFill(token("--panel"));
+    this.regionHalo.stroke(token("--panel"));
+    this.regionLine.stroke(token("--accent-ink"));
     this.content.batchDraw();
     this.guides.batchDraw();
   }
@@ -281,11 +389,106 @@ export class EditorStage {
     if (!this.fitted) this.fit(); // later resizes keep the view
   }
 
+  /** The pointer in document pixels. */
+  private pointer(): Point | null {
+    return this.content.getRelativePointerPosition();
+  }
+
+  /** Screen px as document px at the current zoom. */
+  private docPx(screenPx: number): number {
+    return screenPx / this.stage.scaleX();
+  }
+
+  private pressRegion(): void {
+    if (this.tool === "move" || !this.interactive) return;
+    const at = this.pointer();
+    if (!at) return;
+    if (this.tool === "rect") this.rectDrag = { start: at, end: at };
+    else {
+      const radius = this.docPx(LASSO_CLOSE_RADIUS);
+      if (!this.lasso && this.justClosedAt(at, radius)) return; // a closing double-click's second press
+      const step = lassoPress(this.lasso, at, radius);
+      this.lasso = step.draft;
+      if (step.close) return this.closeLasso(true);
+    }
+    this.drawRegion();
+  }
+
+  private extendRegion(): void {
+    const at = this.pointer();
+    if (!at) return;
+    if (this.rectDrag) this.rectDrag = { ...this.rectDrag, end: at };
+    else if (this.lasso) this.lasso = lassoDrag(this.lasso, at, this.docPx(LASSO_STEP), this.docPx(LASSO_DRAG_SLOP));
+    else return;
+    this.drawRegion(); // between lasso presses this moves the rubber band
+  }
+
+  /** The left button went up: a rectangle drag ends; a lasso closes only when released on its start. */
+  private releaseRegion(): void {
+    const rect = this.rectDrag;
+    if (rect) {
+      this.rectDrag = null;
+      return this.commitRegion(rectRegion(rect.start, rect.end));
+    }
+    if (!this.lasso?.pressed) return;
+    const at = this.pointer() ?? this.lasso.points[this.lasso.points.length - 1];
+    const step = lassoRelease(this.lasso, at, this.docPx(LASSO_CLOSE_RADIUS));
+    this.lasso = step.draft;
+    if (step.close) this.closeLasso();
+    else this.drawRegion();
+  }
+
+  /** True when a lasso closed at `at` (within `radius`) a moment ago. */
+  private justClosedAt(at: Point, radius: number): boolean {
+    const closed = this.lassoClosed;
+    if (!closed || performance.now() - closed.time >= DOUBLE_CLICK_MS) return false;
+    return distance(at, closed.at) <= radius;
+  }
+
+  /**
+   * Close the lasso in progress: its polygon becomes the cut selection (none,
+   * if it has no area). A close `byPointer` (a press on the start point or a
+   * double-click) is remembered, to swallow the double-click's second press.
+   */
+  private closeLasso(byPointer = false): void {
+    const points = this.lasso?.points ?? [];
+    this.lasso = null;
+    const at = byPointer ? this.pointer() : null;
+    this.lassoClosed = at ? { at, time: performance.now() } : null;
+    this.commitRegion(lassoRegion(points));
+  }
+
+  /** A finished drawing becomes the session's region (or none, for a click or no area). */
+  private commitRegion(region: Region | null): void {
+    if (region === this.session.region) this.drawRegion();
+    else this.session.setRegion(region);
+  }
+
+  /** Draw the selection being drawn, else the session's region. */
+  private drawRegion(): void {
+    let points: readonly Point[] = this.session.region?.points ?? [];
+    let closed = true;
+    if (this.rectDrag) {
+      const { start, end } = this.rectDrag;
+      points = [start, { x: end.x, y: start.y }, end, { x: start.x, y: end.y }];
+    } else if (this.lasso) {
+      points = lassoPreview(this.lasso, this.pointer());
+      closed = false;
+    }
+    const flat = points.flatMap((p) => [p.x, p.y]);
+    for (const line of [this.regionHalo, this.regionLine]) {
+      line.points(flat);
+      line.closed(closed);
+      line.visible(points.length > 1);
+    }
+    this.guides.batchDraw();
+  }
+
   private beginMiddlePan(e: MouseEvent): void {
     if (e.button !== 1) return;
     e.preventDefault(); // no browser autoscroll
     e.stopPropagation(); // Konva never sees it: no select, no layer drag
-    if (!this.stage.draggable()) return; // interaction is suspended
+    if (!this.interactive) return; // interaction is suspended; every tool pans
     this.middlePan = { view: this.view(), pointer: { x: e.clientX, y: e.clientY } };
   }
 
@@ -297,6 +500,16 @@ export class EditorStage {
       return;
     }
     this.setHandView(panView(pan.view, pan.pointer, { x: e.clientX, y: e.clientY }));
+  }
+
+  /**
+   * Zoom one wheel notch around a point given in client (window) px: for
+   * wheel events that land on something above the canvas, such as the text
+   * overlay, which Konva never sees.
+   */
+  zoomAtClient(clientX: number, clientY: number, deltaY: number): void {
+    const box = this.container.getBoundingClientRect();
+    this.setHandView(zoomAround(this.view(), { x: clientX - box.left, y: clientY - box.top }, deltaY));
   }
 
   private onWheel(e: Konva.KonvaEventObject<WheelEvent>): void {
@@ -320,40 +533,30 @@ export class EditorStage {
     }
     doc.layers.forEach((layer, index) => {
       const node = this.nodeFor(layer);
-      // skew is reset so the view can never hold skew the model lacks (ADR-0005).
-      node.setAttrs({ ...layer.transform, skewX: 0, skewY: 0 });
-      if (layer.kind === "raster") (node as Konva.Image).image(canvasFor(layer.image));
-      else {
-        (node as Konva.Text).setAttrs({
-          text: layer.text,
-          fontFamily: layer.fontFamily,
-          fontSize: layer.fontSize,
-          fill: layer.color,
-        });
-      }
+      // skew is reset so the view can never hold skew the model lacks
+      // (ADR-0005). Text shows its Rust rendering (SPM-9), so the view draws
+      // the pixels merge, Crop and the save produce, in the same box.
+      node.setAttrs({ ...layer.transform, skewX: 0, skewY: 0, image: canvasFor(layerImage(layer)) });
+      node.visible(layer.id !== this.editing);
       // z-order: the backdrop is index 0, layers follow bottom to top.
       node.zIndex(index + 1);
     });
     this.transformer.nodes(
       this.session.selection.flatMap((id) => {
         const node = this.nodes.get(id);
-        return node ? [node] : [];
+        return node && id !== this.editing ? [node] : [];
       }),
     );
     this.transformer.moveToTop();
     this.content.batchDraw();
-    this.guides.batchDraw();
+    this.drawRegion();
     // A new canvas size, or a Crop, never moves the view (SPEC §6).
   }
 
-  private nodeFor(layer: Layer): Konva.Shape {
+  private nodeFor(layer: Layer): Konva.Image {
     const existing = this.nodes.get(layer.id);
-    if (existing && (existing instanceof Konva.Image) === (layer.kind === "raster")) return existing;
-    existing?.destroy();
-    const node: Konva.Shape =
-      layer.kind === "raster"
-        ? new Konva.Image({ image: canvasFor(layer.image), draggable: true })
-        : new Konva.Text({ draggable: true });
+    if (existing) return existing;
+    const node = new Konva.Image({ image: canvasFor(layerImage(layer)), draggable: true });
     node.id(layer.id);
     // Press selects (so a drag moves what you grabbed); modifiers toggle.
     node.on("mousedown touchstart", (e) => {
@@ -364,6 +567,11 @@ export class EditorStage {
       }
     });
     node.on("dragend transformend", () => this.queueTransform(layer.id));
+    // Double-click a text layer to edit its text. Looked up when it happens:
+    // a Crop can turn a text layer into pixels under the same id.
+    node.on("dblclick dbltap", () => {
+      if (this.session.doc.layers.find((l) => l.id === layer.id)?.kind === "text") this.editText?.(layer.id);
+    });
     this.content.add(node);
     this.nodes.set(layer.id, node);
     return node;

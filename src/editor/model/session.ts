@@ -1,12 +1,13 @@
 // One editing session: the document history, the layer selection, and
 // change notifications for the view. Selection is NOT an undo step
 // (ADR-0005); undo/redo prunes it to layers that still exist.
-import { layerIndex, type Doc } from "./document";
+import { layerImage, layerIndex, textLayersOf, type Doc, type TextLayer } from "./document";
 import { DEFAULT_HISTORY_BUDGET, History } from "./history";
+import type { Region } from "./region";
 
-/** Pixel buffers of a document, for the history's memory budget. */
+/** Pixel buffers of a document (text renderings too), for the history's memory budget. */
 function buffersOf(doc: Doc): ArrayBufferLike[] {
-  return doc.layers.flatMap((l) => (l.kind === "raster" ? [l.image.pixels.buffer] : []));
+  return doc.layers.map((l) => layerImage(l).pixels.buffer);
 }
 
 export type SelectMode = "replace" | "toggle";
@@ -14,6 +15,7 @@ export type SelectMode = "replace" | "toggle";
 export class EditorSession {
   private readonly history: History<Doc>;
   private selected: string[] = [];
+  private selectedRegion: Region | null = null;
   private readonly listeners = new Set<() => void>();
 
   constructor(doc: Doc, budgetBytes = DEFAULT_HISTORY_BUDGET) {
@@ -24,9 +26,26 @@ export class EditorSession {
     return this.history.present;
   }
 
+  /** The selected text layers, bottom to top. */
+  get selectedTexts(): TextLayer[] {
+    return textLayersOf(this.doc, this.selected);
+  }
+
   /** Selected layer ids, in the order they were selected. */
   get selection(): readonly string[] {
     return this.selected;
+  }
+
+  /** The cut selection drawn on the canvas, or null (SPM-9). Not an undo step. */
+  get region(): Region | null {
+    return this.selectedRegion;
+  }
+
+  /** Set or clear the cut selection. */
+  setRegion(region: Region | null): void {
+    if (region === this.selectedRegion) return;
+    this.selectedRegion = region;
+    this.notify();
   }
 
   get canUndo(): boolean {
