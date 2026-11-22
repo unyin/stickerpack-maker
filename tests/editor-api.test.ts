@@ -17,6 +17,15 @@ function frame(width: number, height: number, fill: number): ArrayBuffer {
 
 const options: Array<unknown> = [];
 
+/** A frame as EffectResult::to_frame writes it: five f32 transform values, then an image frame. */
+function effectFrame(transform: number[], inner: ArrayBuffer): ArrayBuffer {
+  const out = new Uint8Array(20 + inner.byteLength);
+  const view = new DataView(out.buffer);
+  transform.forEach((v, i) => view.setFloat32(i * 4, v, true));
+  out.set(new Uint8Array(inner), 20);
+  return out.buffer;
+}
+
 /** A frame as TextRender::to_frame writes it: five f32 metrics, then a 3x2 image. */
 function textFrame(): ArrayBuffer {
   const image = new Uint8Array(frame(3, 2, 4));
@@ -58,6 +67,7 @@ mock.module("@tauri-apps/api/core", () => ({
       return out.buffer;
     }
     if (cmd === "editor_probe_pasted") return { width: 30, height: 20, exceedsCap: false };
+    if (cmd === "editor_apply_effect") return effectFrame([-3, 4.5, 2, 2, 30], frame(1, 1, 6));
     return frame(2, 1, 7);
   },
   Channel: class {},
@@ -252,4 +262,29 @@ test("pasted images are probed and imported from their bytes with the scale-to-f
   expect(calls[calls.length - 1].cmd).toBe("editor_import_pasted");
   expect((options[options.length - 1] as { headers: Record<string, string> }).headers).toEqual({ "x-scale-to-fit": "true" });
   expect([img.width, img.height]).toEqual([2, 1]);
+});
+
+test("an effect sends the layer and its settings, and reads the new transform and pixels", async () => {
+  const image = { width: 2, height: 1, pixels: new Uint8ClampedArray([1, 2, 3, 4, 5, 6, 7, 8]) };
+  const t = { x: 3, y: 4, scaleX: 2, scaleY: 2, rotation: 30 };
+  const effect = { kind: "outline", color: "#ffffff", width: 8 } as const;
+  const out = await api.applyEffect({ image, transform: t }, effect);
+  const call = calls[calls.length - 1];
+  expect(call.cmd).toBe("editor_apply_effect");
+  expect(Array.from(call.args as unknown as Uint8Array)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  const headers = (options[options.length - 1] as { headers: Record<string, string> }).headers;
+  expect(JSON.parse(headers["x-effect"])).toEqual({ width: 2, height: 1, transform: t, effect });
+  expect(out.transform).toEqual({ x: -3, y: 4.5, scaleX: 2, scaleY: 2, rotation: 30 });
+  expect([out.image.width, ...out.image.pixels]).toEqual([1, 6, 6, 6, 6]);
+  expect(() => api.decodeEffectFrame(new ArrayBuffer(12))).toThrow("truncated");
+});
+
+test("an effect on a text layer sends its text and no body bytes", async () => {
+  const style = { text: "Hi", fontFamily: "Impact", fontSize: 64, color: "#000000" };
+  const render = { image: { width: 4, height: 2, pixels: new Uint8ClampedArray(32) }, metrics: { originX: 0, originY: 0, ascent: 1, descent: 1, lineHeight: 2 } };
+  const t = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 };
+  await api.applyEffect({ text: style, render, transform: t }, { kind: "glow", color: "#ff0000", radius: 5, softness: 0.5, opacity: 1 });
+  expect(Array.from(calls[calls.length - 1].args as unknown as Uint8Array)).toEqual([]);
+  const headers = (options[options.length - 1] as { headers: Record<string, string> }).headers;
+  expect(JSON.parse(headers["x-effect"])).toMatchObject({ width: 4, height: 2, text: style, effect: { kind: "glow" } });
 });

@@ -3,6 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
+import type { Effect, EffectResult } from "./model/effects";
 import { textStyleOf, type CropInput, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
 
 import { IMPORT_EXTENSIONS } from "../shared/import-extensions";
@@ -229,4 +230,30 @@ export function probePasted(bytes: Uint8Array): Promise<ImageInfo> {
 export async function importPasted(bytes: Uint8Array, scaleToFit: boolean): Promise<RgbaImage> {
   const frame = await invokeRaw("editor_import_pasted", bytes, SCALE_TO_FIT_HEADER, scaleToFit);
   return decodeFrame(frame);
+}
+
+/** Header carrying an effect request's layer size, transform (or text) and settings; mirrors EFFECT_HEADER. */
+export const EFFECT_HEADER = "x-effect";
+
+/**
+ * Draw an outline or fuzzy glow on one layer in Rust (SPM-8): the live
+ * preview and the result Apply bakes in are this one call (ADR-0008). A
+ * text layer goes as text and comes back as pixels; the result is larger
+ * than the layer, with its new transform.
+ */
+export async function applyEffect(input: LayerInput, effect: Effect): Promise<EffectResult> {
+  const { body, meta } = encodeLayers([input]);
+  const frame = await invokeRaw("editor_apply_effect", body, EFFECT_HEADER, { ...meta[0], effect });
+  return decodeEffectFrame(frame);
+}
+
+/** Parse `EffectResult::to_frame`: the transform as five f32 LE (x, y, scaleX, scaleY, rotation), then an image frame. */
+export function decodeEffectFrame(frame: ArrayBuffer): EffectResult {
+  if (frame.byteLength < 20) throw new Error("effect frame is truncated");
+  const t = new DataView(frame, 0, 20);
+  const f = (i: number) => t.getFloat32(i * 4, true);
+  return {
+    transform: { x: f(0), y: f(1), scaleX: f(2), scaleY: f(3), rotation: f(4) },
+    image: decodeFrame(frame, 20),
+  };
 }
