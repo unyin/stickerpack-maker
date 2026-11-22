@@ -47,13 +47,14 @@
   cursor: pointer;
 }
 
-.combobox-list li:hover {
-  background: var(--bg);
-}
-
+/* One highlight for the mouse and the arrow keys alike (owner, 2026-11-22):
+   hovering an option makes it the active one (combobox.ts), so only the
+   active option is marked, in the quiet hover style. That fill alone is
+   ~1.1:1 against the list in both themes, so a bar in --accent-ink (5.2:1
+   light, 7.0:1 dark) marks the row too, as the old Send list did. */
 .combobox-list li[aria-selected="true"] {
-  background: var(--accent);
-  color: var(--accent-text);
+  background: var(--bg);
+  box-shadow: inset 3px 0 0 var(--accent-ink);
 }
 
 .combobox-empty {

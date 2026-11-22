@@ -89,9 +89,15 @@ export class Combobox<T> {
     this.input.addEventListener("blur", () => this.closeList());
     // Pressing an option must not blur the input first (that would revert).
     this.list.addEventListener("mousedown", (e) => e.preventDefault());
+    // The pointer moves the one highlight, as the arrow keys do (owner, 2026-11-22).
+    // mousemove, not mouseover: an option scrolled under a resting pointer by the
+    // arrow keys must not take the highlight back.
+    this.list.addEventListener("mousemove", (e) => {
+      const index = this.indexOf((e.target as HTMLElement).closest<HTMLLIElement>("li[data-key]"));
+      if (index >= 0 && index !== this.active) this.setActive(index, false);
+    });
     this.list.addEventListener("click", (e) => {
-      const option = (e.target as HTMLElement).closest<HTMLLIElement>("li[data-key]");
-      const item = option ? this.items.find((i) => this.config.key(i) === option.dataset.key) : undefined;
+      const item = this.shown[this.indexOf((e.target as HTMLElement).closest<HTMLLIElement>("li[data-key]"))];
       if (item !== undefined) this.choose(item);
     });
   }
@@ -203,7 +209,13 @@ export class Combobox<T> {
     this.setActive(this.shown.length > 0 ? 0 : -1);
   }
 
-  private setActive(index: number): void {
+  /** Where `option` sits in the shown list, or -1. */
+  private indexOf(option: HTMLLIElement | null): number {
+    return option ? this.shown.findIndex((i) => this.config.key(i) === option.dataset.key) : -1;
+  }
+
+  /** Highlight the shown item at `index` (-1: none); `reveal` scrolls it into view. */
+  private setActive(index: number, reveal = true): void {
     this.optionOf(this.shown[this.active])?.setAttribute("aria-selected", "false");
     this.active = index;
     const li = this.optionOf(this.shown[index]);
@@ -213,7 +225,7 @@ export class Combobox<T> {
     }
     li.setAttribute("aria-selected", "true");
     this.input.setAttribute("aria-activedescendant", li.id);
-    li.scrollIntoView({ block: "nearest" });
+    if (reveal) li.scrollIntoView({ block: "nearest" });
   }
 
   private onKey(e: KeyboardEvent): void {
