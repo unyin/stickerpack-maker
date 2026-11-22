@@ -31,6 +31,8 @@ import {
 } from "../api";
 import {
   fileNameOf,
+  REVEAL_BUSY,
+  REVEAL_GONE,
   importSummary,
   missingSummary,
   SHORT_NAME_LOCKED,
@@ -557,10 +559,15 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   return {
     element: root,
     reload: () => void run(reread),
-    reveal: (id, fresh) =>
+    reveal: (id, fresh) => {
+      // run() would skip it silently while another action works: say so instead.
+      if (busy) {
+        message.textContent = REVEAL_BUSY;
+        return;
+      }
       void run(async () => {
         if (!fresh) await reread();
-        if (!view.stickers.some((s) => s.id === id)) throw new Error("That sticker is no longer in this pack.");
+        if (!view.stickers.some((s) => s.id === id)) throw new Error(REVEAL_GONE);
         // Design decision 2026-11-22: the link leaves Reorder mode and replaces the selection.
         mode = "normal";
         selection = { ids: [id], thumbnail: false, anchor: id };
@@ -568,7 +575,8 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
         const tile = grid.querySelector<HTMLElement>(`.pm-tile[data-id="${id}"]`);
         tile?.scrollIntoView({ block: "nearest" });
         tile?.focus({ preventScroll: true });
-      }),
+      });
+    },
     destroy() {
       document.removeEventListener("keydown", onKey);
       unlistenDrop?.();

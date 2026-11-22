@@ -130,6 +130,12 @@ export function matchPacks<P extends { title: string; shortName: string }>(packs
   return matchNames(packs, query, (p) => p.title, (p) => p.shortName);
 }
 
+/** The Editor's saved-note link found its sticker gone between its check and the pack view (a rare race). */
+export const REVEAL_GONE = "That sticker is no longer in this pack.";
+
+/** The Editor's saved-note link arrived while a pack action was still working. */
+export const REVEAL_BUSY = "Another action was still working, so the saved sticker was not selected: use the link again.";
+
 /** The last path segment, for listing dropped files. */
 export function fileNameOf(path: string): string {
   return path.slice(Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/")) + 1);
