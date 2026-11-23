@@ -15,6 +15,8 @@ const PATHS = {
   check: ["M5 12l5 5L20 7"],
   /** Close: an X. */
   close: ["M6 6l12 12", "M18 6L6 18"],
+  /** Eyedropper: a pipette diagonally, its bulb at the top right. */
+  eyedropper: ["M3 21l1-4L16 5l3 3L7 20l-4 1z", "M17 4l2-2a1.6 1.6 0 0 1 2.3 0l.7.7a1.6 1.6 0 0 1 0 2.3L20 7"],
 } as const;
 
 /** "Open in explorer" with the opens-another-program icon at the end (owner, 2026-11-21); used by every Open in explorer button. */

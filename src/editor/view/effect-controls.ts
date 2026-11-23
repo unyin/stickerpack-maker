@@ -22,6 +22,7 @@ import {
 } from "../model/effects";
 import { WARP_DEFAULTS, WARP_RADIUS, WARP_STRENGTH, type WarpSettings } from "../model/warp";
 import { isHexColor } from "../model/text";
+import { eyedropperButton } from "./eyedropper";
 import { el } from "../../ui";
 import type { CanvasTool } from "./stage";
 
@@ -54,7 +55,8 @@ export class EffectControls {
   private readonly target = el("span", { class: "editor-effect-target muted" });
   private readonly applyButton: HTMLButtonElement;
   private readonly cancelButton: HTMLButtonElement;
-  private readonly inputs: HTMLInputElement[] = [];
+  /** The bar's inputs, disabled together while a render runs (busy). */
+  private readonly inputs: (HTMLInputElement | HTMLButtonElement)[] = [];
   /** Put each slider and its readout back in line with its setting. */
   private readonly syncs: (() => void)[] = [];
 
@@ -139,7 +141,10 @@ export class EffectControls {
     return el("span", { class: "editor-effect-group" }, el("strong", {}, label), ...controls);
   }
 
-  /** A colour picker; the preview follows while the picker is open. */
+  /**
+   * A colour picker with its eyedropper beside it (owner decision
+   * 2026-11-23); the preview follows while the picker is open.
+   */
   private color(label: string, get: () => string, set: (c: string) => void): HTMLElement {
     const input = el("input", { class: "editor-color-input", type: "color", "aria-label": label, title: label }) as HTMLInputElement;
     input.value = get();
@@ -150,8 +155,17 @@ export class EffectControls {
     });
     // Give up focus once chosen, so the Editor's shortcuts work at once (as the text controls do).
     input.addEventListener("change", () => input.blur());
-    this.inputs.push(input);
-    return input;
+    // The eyedropper sets the colour exactly as typing it into the picker would.
+    const dropper = eyedropperButton((hex) => {
+      set(hex);
+      input.value = hex;
+      this.handlers.change();
+    });
+    this.inputs.push(input); // busy disables the picker with the rest of the bar
+    // A dropper without the API is disabled for good: the busy loop must not
+    // re-enable it.
+    if (!dropper.disabled) this.inputs.push(dropper);
+    return el("span", { class: "editor-effect-color" }, input, dropper);
   }
 
   /**
@@ -183,14 +197,20 @@ export class EffectControls {
       // Never clobber what is being typed (as the font size field does).
       if (document.activeElement !== field) field.value = String(value);
     };
+    // Back to the setting's value, even while the field holds focus: the
+    // blur that follows must find nothing left to commit.
+    const revert = (): void => {
+      field.value = String(get());
+    };
     const commit = (): void => {
       const value = typedSliderValue(field.value, range);
       if (value === null || value === get()) {
-        sync(); // invalid, empty or unchanged: back to the setting's value
+        revert(); // invalid, empty or unchanged: back to the setting's value
         return;
       }
       set(value);
-      sync();
+      input.value = String(value); // the slider follows its field
+      field.value = String(value);
       this.handlers.change();
     };
     sync();
@@ -209,7 +229,7 @@ export class EffectControls {
         field.blur(); // the field gives up focus, so shortcuts work at once
       } else if (e.key === "Escape") {
         e.preventDefault();
-        sync(); // revert without committing
+        revert(); // no commit: the blur below finds the setting's own value
         field.blur();
       }
     });

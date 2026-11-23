@@ -400,6 +400,11 @@ stickers, Missing stickers, and the thumbnail.
     editable field — a typed whole number commits on Enter or blur, clamped into the
     range; invalid or empty reverts, and Esc reverts and blurs. The Warp bar's sliders
     work the same way.
+  - Every colour picker in the Editor (outline, glow and text) has an eyedropper beside
+    it (owner decision 2026-11-23): it samples any colour from the screen with the
+    browser EyeDropper API and applies it exactly as typing it into the picker; a
+    cancelled sample changes nothing, and where the webview lacks the API the button is
+    disabled with its reason as its tooltip (§2).
   - The unapplied preview (owner decision 2026-11-22) exists only until Apply: switching
     tool (or **Cancel**), picking another layer as the target (in the Layers list;
     re-picking the layer that is already the target, such as the base image while

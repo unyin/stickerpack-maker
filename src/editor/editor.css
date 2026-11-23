@@ -296,6 +296,18 @@
   font-size: 14px;
 }
 
+/* A colour picker and the eyedropper beside it (owner decision 2026-11-23). */
+.editor-effect-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The icon-only eyedropper button: compact, matching the side inputs. */
+.editor-eyedropper {
+  padding: 4px 6px;
+}
+
 .editor-effect-target.is-blocked {
   color: var(--danger-text);
 }

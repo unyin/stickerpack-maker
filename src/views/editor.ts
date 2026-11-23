@@ -121,6 +121,7 @@ import { EditorStage, type CanvasTool } from "../editor/view/stage";
 import { TextEditOverlay } from "../editor/view/text-edit";
 import { FontPicker } from "../editor/view/font-picker";
 import { EffectControls } from "../editor/view/effect-controls";
+import { eyedropperButton } from "../editor/view/eyedropper";
 import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
 import { WarpPress } from "../editor/view/warp-brush";
 import { moveWarpGesture, startWarpGesture, warpReadout, type WarpGesture } from "../editor/model/warp";
@@ -263,6 +264,15 @@ function buildEditor(): HTMLElement {
     "aria-label": "Font size in pixels",
   }) as HTMLInputElement;
   const colorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": "Text colour" }) as HTMLInputElement;
+  // The eyedropper beside the text colour picker (owner decision 2026-11-23):
+  // the pick lands exactly as typing the hex into the picker would. Without
+  // the API it is disabled for good, so the busy/text-reason loop skips it.
+  const textEyedropper = eyedropperButton((hex) => {
+    colorInput.value = hex;
+    restyle({ color: hex });
+  });
+  const textControls: { disabled: boolean }[] = [fontPicker, fontSizeInput, colorInput];
+  if (!textEyedropper.disabled) textControls.push(textEyedropper);
   // After a committed change the control gives up focus, so the editor's
   // shortcuts (Ctrl+Z, Delete, Esc, Ctrl+V) work at once. Typing in the size
   // input is not hijacked: it commits only on Enter or when focus leaves.
@@ -408,6 +418,7 @@ function buildEditor(): HTMLElement {
       fontPicker.element,
       el("label", { class: "editor-side" }, fontSizeInput, " px"),
       colorInput,
+      textEyedropper,
     ),
     readout,
     resetViewButton,
@@ -1284,7 +1295,7 @@ function buildEditor(): HTMLElement {
     fontPicker.value = shown.fontFamily;
     if (document.activeElement !== fontSizeInput) fontSizeInput.value = String(shown.fontSize);
     colorInput.value = shown.color;
-    for (const control of [fontPicker, fontSizeInput, colorInput]) control.disabled = busy || textReason !== null;
+    for (const control of textControls) control.disabled = busy || textReason !== null;
     const target = texts.length > 0 ? "the selected text" : "the next text";
     fontPicker.title = textReason ?? `Font of ${target}`;
     fontSizeInput.title = textReason ?? `Font size of ${target} in px (${TEXT_FONT_SIZE.min}–${TEXT_FONT_SIZE.max})`;
