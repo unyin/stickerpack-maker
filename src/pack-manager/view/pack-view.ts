@@ -315,7 +315,8 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     try {
       await checkStickerFile(path);
     } catch (err) {
-      if (await invalidFileDialog(path, errorMessage(err))) host.openInEditor(path);
+      // Opened with the slot's origin, so saving offers to replace this sticker (SPEC §5).
+      if (await invalidFileDialog(path, errorMessage(err))) host.openInEditor(path, stickerOrigin(sticker, view.pack.title));
       return;
     }
     const next = await replaceSticker(sticker.id, path);
