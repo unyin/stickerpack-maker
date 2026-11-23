@@ -314,3 +314,12 @@ export function layerHint(
 export function cssFontFamily(family: string): string {
   return `"${family.replace(/["\\]/g, "\\$&")}"`;
 }
+
+/**
+ * A pixel's colour as the pick loupe shows it (SPM-8, CMT-296): lowercase
+ * #rrggbb. It only formats - the fully transparent refusal happens before
+ * a sample ever reaches it.
+ */
+export function hexOf(r: number, g: number, b: number): string {
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}

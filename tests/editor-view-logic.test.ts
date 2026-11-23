@@ -7,6 +7,7 @@ import { addRasterLayer, addTextLayer, fitToBox, newDocument, scaleLongestSide }
 import {
   deleteBlocker,
   fitView,
+  hexOf,
   MAX_ZOOM,
   mergeBlocker,
   MIN_ZOOM,
@@ -141,4 +142,14 @@ test("panView moves the view by the pointer travel and keeps the scale", () => {
   const start = { scale: 2, x: 10, y: -5 };
   expect(panView(start, { x: 100, y: 100 }, { x: 130, y: 80 })).toEqual({ scale: 2, x: 40, y: -25 });
   expect(panView(start, { x: 7, y: 7 }, { x: 7, y: 7 })).toEqual(start);
+});
+
+test("a sampled pixel formats as lowercase #rrggbb for the pick loupe", () => {
+  // The smoke harness image is [200, 30, 30, 255]: its centre samples this.
+  expect(hexOf(200, 30, 30)).toBe("#c81e1e");
+  expect(hexOf(171, 52, 205)).toBe("#ab34cd");
+  expect(hexOf(255, 255, 255)).toBe("#ffffff");
+  // hexOf only formats; the fully transparent refusal happens before it,
+  // whatever the colour channels of a transparent pixel hold.
+  expect(hexOf(0, 0, 0)).toBe("#000000");
 });
