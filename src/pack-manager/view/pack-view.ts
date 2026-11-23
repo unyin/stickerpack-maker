@@ -315,7 +315,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     try {
       await checkStickerFile(path);
     } catch (err) {
-      if (await invalidFileDialog(path, errorMessage(err))) host.openInEditor(path);
+      if (await invalidFileDialog(path, errorMessage(err))) host.openInEditor(path, stickerOrigin(sticker, view.pack.title));
       return;
     }
     const next = await replaceSticker(sticker.id, path);
