@@ -19,3 +19,7 @@ Land every PR into `main` with a regular merge commit (`gh pr merge <N> --merge`
 ### Review before manual testing
 
 Always run the `review-cycle` skill on a change, until both axes converge, before asking the owner to test it by hand (a Windows check or re-test). A delta review of the changes since the last state the owner tested is enough. The owner's test time is the expensive step, so review catches what it can first.
+
+### Review-cycle sub-agent models (OpenCode harness)
+
+Pin model AND effort variant explicitly on every `review-cycle` spawn — a bare model ID leaves effort at its default. Reviewer sub-agents (both axes, every round): `opencode-go/glm-5.3#max`. Implementer sub-agent (applies the fixes): `opencode-go/deepseek-v4.1-flash#high` (owner decision 2026-11-23: high, not the max the skill's table lists).
