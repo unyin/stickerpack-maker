@@ -37,7 +37,7 @@ function eyeDropperApi(): EyeDropperConstructor | null {
  */
 export function eyedropperButton(
   pick: (hex: string) => void,
-  enroll: { disabled: boolean }[] = [],
+  enroll: { disabled: boolean }[],
 ): HTMLButtonElement {
   const button = el(
     "button",
