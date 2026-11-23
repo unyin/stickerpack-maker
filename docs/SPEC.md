@@ -1,7 +1,7 @@
 # Stickerpack Maker — v1 Specification
 
 Status: agreed in a grilling session on 2026-11-18. This document is the source of truth for v1 scope.
-Vocabulary: see `GLOSSARY.md`. Durable decisions: see `docs/adr/` (0001 stack, 0002 independent copies, 0003 order-encoded filenames, 0004 crash-safe rename mechanics, 0005 editor hybrid split).
+Vocabulary: see `GLOSSARY.md`. Durable decisions: see `docs/adr/` (0001 stack, 0002 independent copies, 0003 order-encoded filenames, 0004 crash-safe rename mechanics, 0005 editor hybrid split, 0006 background removal, 0007 library upgrades).
 
 ## 1. Overview
 
@@ -19,8 +19,8 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 
 - Windows v1; macOS later, Linux maybe. (ADR-0001)
 - **Tauri**: Rust core (files, library, SQLite) + web-frontend canvas editor.
-- Background removal runs offline via ONNX with a one-time model download. Whether ONNX runs
-  in Rust (`ort`) or the webview (onnxruntime-web) is a deferred engineering decision (own ADR).
+- Background removal runs offline via ONNX with a one-time model download. ONNX runs in Rust
+  (`ort`, ONNX Runtime linked statically) with the ISNet general-use model (ADR-0006).
 - Difficult implementation choices get ADRs and detailed task breakdowns.
 - **UI conventions** (owner decisions 2026-11-21, 2026-11-22):
   - Every two-option confirmation in the app (deletes, Draft/Live, invalid import, creating
@@ -341,7 +341,34 @@ stickers, Missing stickers, and the thumbnail.
     anchoring the opposite corner; holding **Shift** while dragging the rotation handle
     snaps the rotation to 15° steps.
 - **Enlarge selected parts**: local warp/bulge (strength + radius), paints on the selected layer.
-- **Background removal**: one-click offline ONNX auto removal + manual refine brush.
+- **Background removal**: one-click offline ONNX auto removal + manual refine brush. Details
+  (SPM-7, ADR-0006; owner decisions 2026-11-22):
+  - **Remove background** works on the selected image layer, or the base image when nothing
+    is selected (like Outline and glow); with text or several layers selected it is
+    disabled, with the reason in its tooltip. It makes the background transparent (the
+    alpha only; colours stay) as one undo step. When the model finds no subject, the red
+    message line says so and nothing changes.
+  - One model: **ISNet general use** (no model choice in the UI; the anime model offered on
+    2026-11-22 was dropped by the owner on 2026-11-23 — colour anime is out of scope, and
+    manga will be handled by a separate magic-wand tool).
+  - The model runs offline in Rust. Its first use asks in the shared dialog (§2),
+    "Download the background removal model?", naming its size, with
+    **Download** and **Cancel** (the default); its one-time download (179 MB)
+    shows its progress as a neutral note in the message
+    line, with a **Cancel download** button beside Remove background while it runs. It is
+    checked against a pinned checksum and kept in the app data folder; after that removal
+    never uses the network. A failed download says why in the red line and changes nothing.
+  - **Erase** and **Restore** are canvas tools beside Move, Rectangle and Lasso. They paint on
+    the same layer Remove background would use: Erase makes pixels transparent, Restore
+    paints back the layer's pixels from before its first background removal or Erase
+    stroke. The brush is round with a one-pixel soft edge, sized in canvas px (**Brush**
+    field, 1–500, default 40), with its outline at the pointer; going over a spot again in
+    the same stroke does not erase it further. Each finished stroke is one undo step.
+    Wheel zoom and middle-drag pan work while painting. A press that cannot paint (text or
+    several layers selected, or nothing to restore yet) says why in the red line.
+  - A layer keeps what Restore paints back while it is moved, resized or rotated, and
+    loses it when Cut, a Crop across it, a merge or an effect replaces its pixels. Restore
+    then says so on a press, and to undo that step first (owner decision 2026-11-22).
 - **Outline** and **fuzzy glow**: target the selected layer, or the base image when nothing
   is selected.
 - **Text**: own layer, movable/resizable until save (system fonts, size, color). Details
@@ -392,7 +419,11 @@ stickers, Missing stickers, and the thumbnail.
   - **Save…** sits at the right of the Editor toolbar, before Close; **Ctrl+S** does the
     same. While the canvas misses the constraint set it is disabled, with the reason (the
     live readout's text and the sizing tool that fixes it) as its tooltip; Ctrl+S then shows
-    that reason in the message line.
+    that reason in the message line. A save attempted while an Erase/Restore stroke (above)
+    is mid-press is refused with its reason in the message line instead — the stroke's
+    pixels reach the document only when it ends — and while the model download runs, the
+    disabled Save… shows the download's progress as its tooltip, with Ctrl+S putting that
+    reason in the message line (owner decision 2026-11-23).
   - The pack is chosen in the same pack picker as Send to pack (owner decision 2026-11-22): a
     field like the font picker. Clicking or typing opens the list of packs (Title, Short
     Name, sticker count, Draft/Live badge); typing filters it (Titles starting with the text
@@ -496,10 +527,10 @@ stickers, Missing stickers, and the thumbnail.
 
 - **UX**: decided — see the §5 command map (SPM-4, 2026-11-19).
 - **Engineering (each gets an ADR at implementation time)**: ONNX runtime placement
-  (Rust vs webview) — ADR-0006 (SPM-7), leaning Rust `ort` per ADR-0005; canvas library
-  choice — decided, see ADR-0005 (SPM-5: Konva in the webview for interaction, Rust
-  crates for one-shot pixel work and encoding); crash-safe rename mechanics — decided,
-  see ADR-0004 (SPM-2).
+  (Rust vs webview) — ADR-0006 (SPM-7, accepted; owner decisions built in): Rust `ort`
+  with ISNet; canvas library choice — decided, see ADR-0005 (SPM-5: Konva in the webview
+  for interaction, Rust crates for one-shot pixel work and encoding); crash-safe rename
+  mechanics — decided, see ADR-0004 (SPM-2).
 - Small UX defaults assumed unless preferences emerge: system fonts + size/color for text;
   color/width for outline; color/radius/softness for glow; strength/radius for warp.
 

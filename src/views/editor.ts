@@ -2,12 +2,17 @@
 // session, "Open image" starts one; while open, "Add image as layer" and
 // pasting (Ctrl+V) bring in other images; "Close" ends it (warning on unsaved
 // changes). The session survives switching tabs: the view is built once.
-// SPM-9 adds the text tool, the cut selection tools and paste.
+// SPM-9 adds the text tool, the cut selection tools and paste; SPM-7 the
+// background removal and its Erase/Restore refine brushes; SPM-10 the save
+// pipeline (Save…, Ctrl+S).
 import "../editor/editor.css";
 import { baseName } from "../api";
 import {
+  backgroundModelStatus,
+  cancelBackgroundDownload,
   cropImages,
   cutImage,
+  downloadBackgroundModel,
   IMPORT_MAX_SIDE,
   importImage,
   importPasted,
@@ -16,10 +21,15 @@ import {
   pickImageFile,
   probeImage,
   probePasted,
+  removeImageBackground,
   renderText,
   saveImage,
+  type DownloadProgress,
   type ImageInfo,
 } from "../editor/api";
+import { backgroundTarget, refineLayerPixels } from "../editor/model/background";
+import { downloadProgressText, megabytes } from "../editor/view/download-text";
+import { BRUSH_SIZE, brushSizeProblem } from "../editor/model/brush";
 import {
   declinedText,
   EXHAUSTED_TITLE,
@@ -27,6 +37,7 @@ import {
   pngTooLargeText,
   runSave,
   saveBlocker,
+  saveRefusal,
   savedText,
   type SaveFormat,
   originAfterSave,
@@ -237,6 +248,45 @@ function buildEditor(): HTMLElement {
     if (isHexColor(colorInput.value)) restyle({ color: colorInput.value.toLowerCase() });
     colorInput.blur();
   });
+  // Background removal and the refine brush (SPM-7): on the selected image layer, or the base image.
+  const removeBackgroundButton = button("Remove background", () => run(removeBackground));
+  const removeBackgroundTitle =
+    "Make the background of the selected image layer (or the base image) transparent; works offline after a one-time model download";
+  const eraseToolButton = button("Erase", () => setTool("erase"));
+  const restoreToolButton = button("Restore", () => setTool("restore"));
+  eraseToolButton.title = "Paint on the selected image layer (or the base image) to make it transparent";
+  restoreToolButton.title = "Paint on the selected image layer (or the base image) to bring back what was removed or erased";
+  const brushSizeInput = el("input", {
+    class: "editor-side-input",
+    type: "number",
+    min: String(BRUSH_SIZE.min),
+    max: String(BRUSH_SIZE.max),
+    step: "1",
+    value: String(BRUSH_SIZE.initial),
+    "aria-label": "Brush size in pixels",
+  }) as HTMLInputElement;
+  brushSizeInput.title = `Brush size in canvas px (${BRUSH_SIZE.min}–${BRUSH_SIZE.max})`;
+  let brushSize: number = BRUSH_SIZE.initial;
+  brushSizeInput.addEventListener("change", () => {
+    const size = Number(brushSizeInput.value);
+    const problem = brushSizeProblem(size);
+    if (problem) {
+      say(problem);
+      brushSizeInput.value = String(brushSize);
+      return;
+    }
+    say(""); // a valid size replaces an earlier complaint, as any command does
+    brushSize = size;
+    stage?.setBrushSize(size);
+    brushSizeInput.blur();
+  });
+  // The message-line text of a model download in progress, null when none
+  // runs: Save's disabled tooltip and a mid-download Ctrl+S say it (SPEC §6,
+  // §2: a disabled control shows its reason).
+  let downloadNote: string | null = null;
+  // Shown only while the model downloads; stays usable while everything else waits.
+  const cancelDownloadButton = button("Cancel download", () => void cancelBackgroundDownload());
+  cancelDownloadButton.hidden = true;
   const textTitle = "Type a new text layer in the chosen font, size and colour (Enter to finish, Shift+Enter for a new line)";
   const editTextTitle = "Edit the selected text layer's text (or double-click it)";
 
@@ -299,6 +349,15 @@ function buildEditor(): HTMLElement {
       lassoToolButton,
       cutButton,
       pasteButton,
+    ),
+    el(
+      "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Background" },
+      removeBackgroundButton,
+      cancelDownloadButton,
+      eraseToolButton,
+      restoreToolButton,
+      el("label", { class: "editor-side" }, "Brush ", brushSizeInput, " px"),
     ),
     el(
       "span",
@@ -454,6 +513,8 @@ function buildEditor(): HTMLElement {
     stage.setCropGuidesVisible(showBox);
     stage.setTool(tool);
     stage.onEditText((id) => editText(id));
+    stage.setBrushSize(brushSize);
+    stage.onBrushBlocked((reason) => say(reason));
     refresh(); // place the crop box overlay
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
@@ -577,7 +638,13 @@ function buildEditor(): HTMLElement {
    */
   async function saveSession(): Promise<void> {
     const current = session;
-    if (!current || saveBlocker(current.doc, constraints)) return;
+    if (!current) return;
+    // A mid-press stroke (SPM-7) owns pixels the model does not have yet: the
+    // dialog would save the document without them, and the stroke's release
+    // would commit them under it. Both save entry points refuse here
+    // (owner decision 2026-11-23); the canvas rule follows once no stroke runs.
+    const refusal = saveRefusal(stage?.strokeInProgress() ?? false, current.doc, constraints);
+    if (refusal) return say(refusal);
     const doc = current.doc;
     let exhausted: TooLarge | null = null;
     await saveDialog({
@@ -611,7 +678,9 @@ function buildEditor(): HTMLElement {
         if (target.kind === "replace") markStickerFileChanged(saved.sticker.id);
         // The session now edits the saved sticker: the next save replaces it (design decision 2026-11-22).
         origin = originAfterSave(saved, packTitle);
-        // The session cannot change while the dialog is open; check anyway.
+        // Since the SPM-7 merge a brush stroke could commit under this dialog;
+        // the mid-stroke refusal above makes that known path impossible. The
+        // check stays as defence in depth for anything unforeseen.
         if (current.doc === doc) current.markSaved();
         say(savedText(saved, packTitle, target), "note", " ", stickerLink(saved.sticker, packTitle));
         return null;
@@ -698,6 +767,84 @@ function buildEditor(): HTMLElement {
       return;
     }
     await pasteImage(new Uint8Array(await blob.arrayBuffer()));
+  }
+
+  // ---- Background removal (SPM-7, ADR-0006) ----
+
+  /**
+   * Remove background: Rust runs the model on the target layer (the selected
+   * image layer, or the base image) and the result is ONE undo step that
+   * keeps the original pixels for the Restore brush. The first use downloads
+   * the model, after asking. Notes show progress in the neutral tone; any
+   * failure replaces them in the error tone.
+   */
+  async function removeBackground(): Promise<void> {
+    const current = session;
+    if (!current || "reason" in backgroundTarget(current.doc, current.selection)) return;
+    try {
+      if (!(await ensureBackgroundModel())) return;
+      say("Removing the background…", "note");
+      await editAsync(
+        current,
+        { doing: "removing the background", done: "changed" },
+        async (doc) => {
+          const target = backgroundTarget(doc, current.selection);
+          if ("reason" in target) throw new Error(target.reason);
+          return { id: target.layer.id, image: await removeImageBackground(target.layer.image) };
+        },
+        ({ id, image }) => {
+          current.apply((d) => refineLayerPixels(d, id, image));
+          say("");
+        },
+      );
+    } catch (err) {
+      // withMessage would keep the neutral note tone set by "Removing the background…", so say errors again in the error tone.
+      say(errorMessage(err));
+    }
+  }
+
+  /**
+   * True when the model is ready: already cached, or downloaded now after
+   * the user agreed. Cancel in the dialog, or Cancel download, leaves it be.
+   */
+  async function ensureBackgroundModel(): Promise<boolean> {
+    const status = await backgroundModelStatus();
+    if (status.downloaded) return true;
+    if (!(await confirmModelDownload(status.sizeBytes))) return false;
+    // One report drives both the message line and the disabled Save's tooltip
+    // (SPEC §6, §2: a disabled control shows its reason). Direct assignments
+    // rather than refresh(): a progress tick is too frequent for a full pass.
+    function reportProgress(p: DownloadProgress): void {
+      downloadNote = downloadProgressText(p);
+      say(downloadNote, "note");
+      saveButton.title = downloadNote;
+    }
+    reportProgress({ received: 0, total: status.sizeBytes });
+    // Progress reports travel apart from the command's reply: one arriving
+    // after it must not bring the button or the progress note back.
+    let active = true;
+    try {
+      // Cancel download appears with Rust's first report, sent once the
+      // download has begun (and its cancel flag is cleared), so a press is never lost.
+      const outcome = await downloadBackgroundModel((p) => {
+        if (!active) return;
+        cancelDownloadButton.hidden = false;
+        reportProgress(p);
+      });
+      if (outcome === "cancelled") {
+        say("The model download was cancelled.", "note");
+        return false;
+      }
+      return true;
+    } finally {
+      active = false;
+      downloadNote = null;
+      cancelDownloadButton.hidden = true;
+      // The model's inference wait is a generic busy action: Save shows its
+      // canvas reason again (or its normal title) until run()'s closing refresh().
+      const saveReason = session ? saveBlocker(session.doc, constraints) : null;
+      saveButton.title = saveReason ?? saveTitle;
+    }
   }
 
   // ---- Text (SPM-9) ----
@@ -916,7 +1063,9 @@ function buildEditor(): HTMLElement {
     closeButton.disabled = busy;
     const saveReason = saveBlocker(doc, constraints);
     saveButton.disabled = busy || saveReason !== null;
-    saveButton.title = saveReason ?? saveTitle;
+    // While the model downloads (the one long busy wait), the disabled Save
+    // says the download's progress instead of its idle title (SPEC §2).
+    saveButton.title = saveReason ?? downloadNote ?? saveTitle;
     undoButton.disabled = busy || !current.canUndo;
     redoButton.disabled = busy || !current.canRedo;
     upButton.disabled = busy || !single || index === doc.layers.length - 1;
@@ -930,6 +1079,8 @@ function buildEditor(): HTMLElement {
       [moveToolButton, "move"],
       [rectToolButton, "rect"],
       [lassoToolButton, "lasso"],
+      [eraseToolButton, "erase"],
+      [restoreToolButton, "restore"],
     ] as const) {
       b.setAttribute("aria-pressed", String(tool === t));
       b.disabled = busy;
@@ -939,6 +1090,12 @@ function buildEditor(): HTMLElement {
     cutButton.title = cutReason ?? cutTitle;
     pasteButton.disabled = busy;
     pasteButton.title = pasteTitle;
+    // Background removal (SPM-7); the brushes say why on a press instead.
+    const bgTarget = backgroundTarget(doc, current.selection);
+    const removeReason = "reason" in bgTarget ? bgTarget.reason : null;
+    removeBackgroundButton.disabled = busy || removeReason !== null;
+    removeBackgroundButton.title = removeReason ?? removeBackgroundTitle;
+    brushSizeInput.disabled = busy;
     // Text tool (SPM-9): the controls show the first selected text layer's
     // style, else the next new text's.
     const texts = current.selectedTexts;
@@ -986,7 +1143,13 @@ function buildEditor(): HTMLElement {
     const current = session;
     // Ctrl+S never reaches the webview's own "save page", even while busy.
     if (view.isConnected && isSaveShortcut(e)) e.preventDefault();
-    if (!current || !view.isConnected || busy || textOverlay.isOpen) return;
+    if (!current || !view.isConnected || textOverlay.isOpen) return;
+    // While the toolbar is busy, Ctrl+S still says why (SPEC §6): the model
+    // download is the one wait long enough to need it; other keys wait too.
+    if (busy) {
+      if (isSaveShortcut(e) && downloadNote) say(downloadNote, "note");
+      return;
+    }
     if (isTextTarget(e.target)) return;
     // A lasso in progress takes Enter, Esc and Backspace first (SPM-9).
     if (stage?.handleLassoKey(e.key)) {
@@ -1002,9 +1165,10 @@ function buildEditor(): HTMLElement {
       clearNote();
       current.redo();
     }
-    // Ctrl+S saves; a blocked save says why (SPEC §6: hard-blocked).
+    // Ctrl+S saves; a blocked save says why (SPEC §6: hard-blocked), and a
+    // mid-press brush stroke is refused before the dialog can open.
     else if (isSaveShortcut(e)) {
-      const reason = saveBlocker(current.doc, constraints);
+      const reason = saveRefusal(stage?.strokeInProgress() ?? false, current.doc, constraints);
       if (reason) say(reason);
       else void run(saveSession);
     }
@@ -1099,6 +1263,18 @@ function confirmDiscard(): Promise<boolean> {
     "Unsaved changes",
     [el("p", {}, "The editor has unsaved changes. Do you want to discard these or continue editing?")],
     { actionLabel: "Discard", keepLabel: "Keep editing", danger: true },
+  );
+}
+
+/** The model's first Remove background asks before its one-time download (ADR-0006); Cancel is the safe choice. */
+function confirmModelDownload(sizeBytes: number): Promise<boolean> {
+  return confirmChoice(
+    "Download the background removal model?",
+    [
+      el("p", {}, `Background removal needs a one-time download of its model (${megabytes(sizeBytes)}).`),
+      el("p", {}, "After that it works offline. You can cancel the download while it runs."),
+    ],
+    { actionLabel: "Download", keepLabel: "Cancel" },
   );
 }
 

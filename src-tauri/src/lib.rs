@@ -14,6 +14,9 @@ pub mod library;
 /// Sticker, thumbnail and import limits: one definition shared with the
 /// webview (src/shared/limits.json, read by build.rs).
 pub mod limits;
+/// Background removal (SPM-7, ADR-0006): ONNX segmentation model, its
+/// one-time verified download and cache; Tauri-free like the editor code.
+pub mod ml;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -37,6 +40,16 @@ pub fn config_file_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(dir.join("config.json"))
 }
 
+/// The background removal model cache (ADR-0006): machine-local, in the OS
+/// app-data directory like the config, never in the portable Library.
+pub fn model_cache_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("cannot resolve app data directory: {e}"))?;
+    Ok(dir.join("models"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -48,6 +61,7 @@ pub fn run() {
             app.manage(SharedConfig {
                 config: Mutex::new(cfg),
             });
+            app.manage(ml::BackgroundRemover::new(model_cache_dir(app.handle())?, ml::model::MODEL));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -64,6 +78,10 @@ pub fn run() {
             commands::editor_list_fonts,
             commands::editor_render_text,
             commands::editor_cut_layer,
+            commands::editor_background_model_status,
+            commands::editor_download_background_model,
+            commands::editor_cancel_background_download,
+            commands::editor_remove_background,
             save_commands::editor_save_image,
             pack_commands::list_packs,
             pack_commands::suggest_short_name,
