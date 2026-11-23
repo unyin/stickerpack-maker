@@ -71,12 +71,13 @@ import {
   cropLayers,
   cutLayer,
   deleteLayers,
+  fillToBox,
   fitToBox,
   IDENTITY,
   layerInput,
   layerIndex,
-  resizeLongestSide,
   resizeSideProblem,
+  resizeToSide,
   mergeLayers,
   moveLayer,
   newDocument,
@@ -91,6 +92,7 @@ import {
   type Doc,
   type Point,
   type Rect,
+  type ResizeSide,
   type TextStyle,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
@@ -118,6 +120,7 @@ import {
   fontChoices,
   layerHint as layerHintText,
   mergeBlocker,
+  selectedLayerSize,
   selectModeFor,
   sizeToolBlocker,
   textBlocker,
@@ -168,6 +171,9 @@ function buildEditor(): HTMLElement {
   let nextStyle: NextStyle = { fontFamily: "", fontSize: DEFAULT_FONT_SIZE, color: DEFAULT_TEXT_COLOR };
   // The save dialog starts on the last save's format (SPM-10); its pack comes from packMemory.
   let lastFormat: SaveFormat = "png";
+  // Which side of the whole image the free-resize field sets (CMT-152):
+  // interface state like lastFormat, kept across sessions.
+  let freeSide: ResizeSide = "longest";
   // The sticker this session edits when the Pack Manager's Edit opened it, else null (SPM-10).
   let origin: StickerOrigin | null = null;
   // The pack whose thumbnail a Thumbnail mode session saves into (SPM-12), else null.
@@ -200,9 +206,24 @@ function buildEditor(): HTMLElement {
   const fitButton = button("Fit", () =>
     resizeWholeImage((doc, c) => fitToBox(doc, c, constraints.side)),
   );
+  // Sizing tool 4 (SPEC §6): Fill is to Fit what CSS cover is to contain.
+  const fillButton = button("Fill", () =>
+    resizeWholeImage((doc, c) => fillToBox(doc, c, constraints.side)),
+  );
   const longestButton = button("Longest side", () =>
     resizeWholeImage((doc, c) => scaleLongestSide(doc, c, constraints.side)),
   );
+  // The free-resize side-kind choice (CMT-152), instead of the old fixed
+  // "Longest side" label for the field.
+  const sideKind = el("select", { class: "editor-side-kind", "aria-label": "Which side the entered size is" }) as HTMLSelectElement;
+  sideKind.append(
+    el("option", { value: "longest" }, "Longest side"),
+    el("option", { value: "shortest" }, "Shortest side"),
+  );
+  sideKind.addEventListener("change", () => {
+    freeSide = sideKind.value as ResizeSide;
+    refresh();
+  });
   const sideInput = el("input", {
     class: "editor-side-input",
     type: "number",
@@ -210,7 +231,7 @@ function buildEditor(): HTMLElement {
     max: String(IMPORT_MAX_SIDE),
     step: "1",
     placeholder: "px",
-    "aria-label": "Longest side in pixels",
+    // The label is set in refresh(), from the side-kind choice.
   }) as HTMLInputElement;
   const resizeButton = button("Resize", () => freeResize());
   const boxButton = button("Crop box", () => toggleBox());
@@ -357,10 +378,10 @@ function buildEditor(): HTMLElement {
 
   undoButton.title = "Undo (Ctrl+Z)";
   redoButton.title = "Redo (Ctrl+Y)";
-  const resizeTitle =
-    `Scale everything on the canvas together so its longest side is the entered size (1–${IMPORT_MAX_SIDE} px); ` +
+  const resizeTitle = (kind: ResizeSide) =>
+    `Scale everything on the canvas together so its ${kind} side is the entered size (1–${IMPORT_MAX_SIDE} px); ` +
     "the canvas size stays";
-  resizeButton.title = resizeTitle;
+  resizeButton.title = resizeTitle(freeSide);
   resetViewButton.title = "Zoom and centre the canvas in view (changes the view only)";
   boxButton.title = "Show or hide the crop box";
   const cropTitle = (size: string) =>
@@ -389,8 +410,9 @@ function buildEditor(): HTMLElement {
       { class: "editor-tool-group", role: "group", "aria-label": "Size" },
       el("span", { class: "muted" }, "Size:"),
       fitButton,
+      fillButton,
       longestButton,
-      el("label", { class: "editor-side" }, "Longest side ", sideInput, " px"),
+      el("label", { class: "editor-side" }, sideKind, sideInput, " px"),
       resizeButton,
     ),
     el(
@@ -1280,15 +1302,15 @@ function buildEditor(): HTMLElement {
     return sideInput.value.trim() === "" ? NaN : Number(sideInput.value);
   }
 
-  /** Sizing tool 3 (SPEC §6): free resize, the entered value is the longest side; the canvas stays. */
+  /** Sizing tool 3 (SPEC §6): free resize, the entered value is the chosen `freeSide`; the canvas stays. */
   function freeResize(): void {
     const side = enteredSide();
-    const problem = resizeSideProblem(side);
+    const problem = resizeSideProblem(side, freeSide);
     if (problem) {
       say(problem);
       return;
     }
-    resizeWholeImage((doc, content) => resizeLongestSide(doc, content, side));
+    resizeWholeImage((doc, content) => resizeToSide(doc, content, side, freeSide));
   }
 
   /** Delete the selected layers as one undoable step (SPEC §6); one layer always stays. */
@@ -1312,6 +1334,9 @@ function buildEditor(): HTMLElement {
 
   function renderLayers(current: EditorSession): void {
     const doc = current.doc;
+    // The single selected layer's current size, live (CMT-152); null with
+    // no or several layers selected, so nothing is appended.
+    const size = selectedLayerSize(doc, current.selection);
     layersList.replaceChildren(
       // Top of the stack first, as layer panels read.
       ...[...doc.layers].reverse().map((layer) => {
@@ -1321,6 +1346,13 @@ function buildEditor(): HTMLElement {
           el("span", { class: "editor-layer-kind" }, layer.kind === "raster" ? "Image" : "Text"),
           el("span", { class: "editor-layer-name" }, layer.name),
         );
+        // No muted colour here: the span lives only on the selected row, whose
+        // accent background drops --muted below any readable contrast (owner,
+        // from the test, 2026-11-23); it inherits the row's full-contrast text
+        // like the kind label at full opacity.
+        if (size && layer.id === current.selection[0]) {
+          item.append(el("span", { class: "editor-layer-size" }, size));
+        }
         item.addEventListener("click", (e) => current.select(layer.id, selectModeFor(e)));
         return item;
       }),
@@ -1371,10 +1403,15 @@ function buildEditor(): HTMLElement {
     // this is stable across refreshes.
     const side = constraints.side;
     fitButton.textContent = `Fit to ${side}×${side}`;
+    fillButton.textContent = `Fill ${side}×${side}`;
     longestButton.textContent = `Longest side ${side}`;
+    sideInput.setAttribute("aria-label", `${freeSide === "longest" ? "Longest" : "Shortest"} side in pixels`);
     const fitTitle =
       `Scale everything on the canvas together, as one image, so its longest side is ${side} px; ` +
       `the canvas becomes ${side}×${side} with transparent padding`;
+    const fillTitle =
+      `Scale everything on the canvas together, as one image, so its shortest side is ${side} px; ` +
+      `the canvas becomes ${side}×${side} and anything beyond it is kept (drag the image to choose what shows)`;
     const longestTitle =
       `Scale everything on the canvas together so its longest side is ${side} px; the canvas becomes the image (no padding)`;
     const single = current.selection.length === 1 ? current.selection[0] : null;
@@ -1388,15 +1425,17 @@ function buildEditor(): HTMLElement {
     const entered = enteredSide();
     const sizing: [HTMLButtonElement, SizeTool, string][] = [
       [fitButton, "fit", fitTitle],
+      [fillButton, "fill", fillTitle],
       [longestButton, "longest", longestTitle],
-      [resizeButton, "free", resizeTitle],
+      [resizeButton, "free", resizeTitle(freeSide)],
     ];
     for (const [button, tool, action] of sizing) {
-      const reason = sizeToolBlocker(tool, doc, content, entered, constraints);
+      const reason = sizeToolBlocker(tool, doc, content, entered, constraints, freeSide);
       button.disabled = busy || reason !== null;
       button.title = reason ?? action;
     }
     sideInput.disabled = busy;
+    sideKind.disabled = busy;
     // One cropState result drives the overlay, the label and the blocker;
     // cropToBox() reads the same function.
     const { box, blocker: cropReason } = cropState(doc);

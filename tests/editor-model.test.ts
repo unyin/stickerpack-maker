@@ -2,7 +2,7 @@
 // no Konva, no DOM.
 import { expect, test } from "bun:test";
 import { IMPORT_MAX_SIDE, type RgbaImage } from "../src/editor/model/image";
-import { startCanvas, STICKER, THUMBNAIL } from "../src/editor/model/constraints";
+import { readoutStatus, startCanvas, STICKER, THUMBNAIL } from "../src/editor/model/constraints";
 import limits from "../src/shared/limits.json";
 import {
   addRasterLayer,
@@ -10,6 +10,7 @@ import {
   centeredPlacement,
   contentBounds as modelContentBounds,
   deleteLayers,
+  fillToBox,
   fitToBox,
   IDENTITY,
   layerIndex,
@@ -18,8 +19,9 @@ import {
   newDocument,
   nextLayerId,
   placedBounds,
-  resizeLongestSide,
+  planCrop,
   resizeSideProblem,
+  resizeToSide,
   scaleLongestSide,
   setLayerImage,
   setTransform,
@@ -117,7 +119,7 @@ test("only Fit and Longest side change the canvas size", () => {
   doc = deleteLayers(doc, [text]);
   // Add, move, restack, merge, delete and free resize all keep the canvas.
   const S = STICKER.side;
-  doc = resizeLongestSide(doc, contentBounds(doc), 100);
+  doc = resizeToSide(doc, contentBounds(doc), 100);
   expect([doc.width, doc.height]).toEqual([S, S]);
   // Fit sets the square; Longest side sets the scaled image's size (800x300).
   const fitted = fitToBox(doc, contentBounds(doc), S);
@@ -488,8 +490,10 @@ test("fit places the content's top-left on whole pixels", () => {
 test("applying any sizing tool twice is a no-op (no undo step)", () => {
   const tools = [
     (d: Doc) => fitToBox(d, contentBounds(d), 512),
+    (d: Doc) => fillToBox(d, contentBounds(d), 512),
     (d: Doc) => scaleLongestSide(d, contentBounds(d), 512),
-    (d: Doc) => resizeLongestSide(d, contentBounds(d), 333),
+    (d: Doc) => resizeToSide(d, contentBounds(d), 333),
+    (d: Doc) => resizeToSide(d, contentBounds(d), 333, "shortest"),
   ];
   for (const tool of tools) {
     const once = tool(snug(300, 200, "base"));
@@ -504,6 +508,11 @@ test("resizeSideProblem accepts whole numbers from 1 to the import cap only", ()
   for (const bad of [0, IMPORT_MAX_SIDE + 1, 1.5, NaN, -3]) expect(resizeSideProblem(bad)).toBe(text);
   const doc = snug(10, 10, "b");
   expect(() => scaleLongestSide(doc, contentBounds(doc), 0)).toThrow(text);
+  // The shortest-side choice (CMT-152) names its side in the same rule.
+  const shortest = `The shortest side must be a whole number of pixels from 1 to ${IMPORT_MAX_SIDE}.`;
+  expect(resizeSideProblem(600, "shortest")).toBeNull();
+  for (const bad of [0, IMPORT_MAX_SIDE + 1, 1.5, NaN, -3]) expect(resizeSideProblem(bad, "shortest")).toBe(shortest);
+  expect(() => resizeToSide(doc, contentBounds(doc), 0, "shortest")).toThrow(shortest);
 });
 
 test("contentBounds measures text layers by their rendered box under their transform", () => {
@@ -516,24 +525,123 @@ test("contentBounds measures text layers by their rendered box under their trans
 test("free resize scales the whole image to the entered longest side and keeps the canvas", () => {
   // A 200x400 image centred on the 512x512 canvas (156, 56).
   const tall = newDocument(image(200, 400), "tall", { width: 512, height: 512 });
-  const grown = resizeLongestSide(tall, contentBounds(tall), 1000);
+  const grown = resizeToSide(tall, contentBounds(tall), 1000);
   expect([grown.width, grown.height]).toEqual([512, 512]);
   expect(grown.layers[0].transform.scaleX).toBeCloseTo(2.5);
   // The group keeps its centre (256, 256), top-left on whole pixels.
   expect(contentBounds(grown)).toEqual({ x: 6, y: -244, width: 500, height: 1000 });
-  const shrunk = resizeLongestSide(tall, contentBounds(tall), 100);
+  const shrunk = resizeToSide(tall, contentBounds(tall), 100);
   expect([shrunk.width, shrunk.height]).toEqual([512, 512]);
   expect(contentBounds(shrunk)).toEqual({ x: 231, y: 206, width: 50, height: 100 });
   // Several layers scale together as one group.
   let two = addRasterLayer(tall, image(100, 100), "dot", { ...IDENTITY, x: 0, y: 0 });
-  two = resizeLongestSide(two, contentBounds(two), 228);
+  two = resizeToSide(two, contentBounds(two), 228);
   expect(two.layers.map((l) => l.transform.scaleX)).toEqual([0.5, 0.5]);
   expect(Math.max(contentBounds(two).width, contentBounds(two).height)).toBeCloseTo(228);
   // Already that size: no change, so no undo step.
-  expect(resizeLongestSide(tall, contentBounds(tall), 400)).toBe(tall);
+  expect(resizeToSide(tall, contentBounds(tall), 400)).toBe(tall);
   for (const bad of [0, 1.5, IMPORT_MAX_SIDE + 1]) {
-    expect(() => resizeLongestSide(tall, contentBounds(tall), bad)).toThrow();
+    expect(() => resizeToSide(tall, contentBounds(tall), bad)).toThrow();
   }
+});
+
+test("free resize with the shortest-side choice scales to that side, keeping canvas and centre", () => {
+  // A 200x400 image centred on the 512x512 canvas: its shortest side is the width.
+  const tall = newDocument(image(200, 400), "tall", { width: 512, height: 512 });
+  const grown = resizeToSide(tall, contentBounds(tall), 1000, "shortest");
+  expect([grown.width, grown.height]).toEqual([512, 512]);
+  const g = contentBounds(grown);
+  expect(Math.min(g.width, g.height)).toBeCloseTo(1000);
+  expect(g.x + g.width / 2).toBeCloseTo(256);
+  expect(g.y + g.height / 2).toBeCloseTo(256);
+  const shrunk = resizeToSide(tall, contentBounds(tall), 100, "shortest");
+  expect([shrunk.width, shrunk.height]).toEqual([512, 512]);
+  expect(contentBounds(shrunk)).toEqual({ x: 206, y: 156, width: 100, height: 200 });
+  // Already that size: no change, so no undo step.
+  expect(resizeToSide(tall, contentBounds(tall), 200, "shortest")).toBe(tall);
+  for (const bad of [0, 1.5, IMPORT_MAX_SIDE + 1]) {
+    expect(() => resizeToSide(tall, contentBounds(tall), bad, "shortest")).toThrow();
+  }
+});
+
+// ---- Sizing tool 4: Fill NxN (SPEC §6) ----
+// Fill is to Fit what CSS cover is to contain (owner request 2026-11-21):
+// the shortest side becomes the constraint set's side, the canvas becomes
+// the side square, the image is centred, and the spill outside the canvas
+// is kept (transform-only).
+
+test("fill scales the whole image so its shortest side is the side, canvas side x side, centred", () => {
+  // Landscape, portrait and square content, against either constraint set.
+  for (const set of [STICKER, THUMBNAIL]) {
+    const S = set.side;
+    for (const [w, h] of [
+      [300, 200],
+      [200, 400],
+      [300, 300],
+    ]) {
+      const doc = newDocument(image(w, h), "base", startCanvas(set));
+      const filled = fillToBox(doc, contentBounds(doc), S);
+      expect([filled.width, filled.height]).toEqual([S, S]);
+      const after = contentBounds(filled);
+      expect(Math.min(after.width, after.height)).toBeCloseTo(S);
+      expect(after.x + after.width / 2).toBeCloseTo(S / 2);
+      expect(after.y + after.height / 2).toBeCloseTo(S / 2);
+      // The square canvas meets the set, so the readout says OK.
+      expect(readoutStatus(filled, set).ok).toBe(true);
+    }
+  }
+});
+
+test("fill spills outside the canvas and keeps the spill: only transforms change", () => {
+  // 300x200 content fills 512: it grows to 768x512, centred, so 128 px hang
+  // over each side (crop the spill away if wanted, or Save clips it).
+  const doc = snug(300, 200, "base");
+  const filled = fillToBox(doc, contentBounds(doc), 512);
+  const after = contentBounds(filled);
+  expect(after.x).toBeCloseTo(-128);
+  expect(after.y).toBeCloseTo(0);
+  expect(after.width).toBeCloseTo(768);
+  expect(after.height).toBeCloseTo(512);
+  // Pixels, ids and names are untouched (resampling happens at merge/save).
+  expect(filled.layers.map((l) => l.id)).toEqual(doc.layers.map((l) => l.id));
+  expect(filled.layers[0].kind === "raster" && filled.layers[0].image).toBe(
+    doc.layers[0].kind === "raster" && doc.layers[0].image,
+  );
+  // The layers' own scale is the group factor; a layer crossing the canvas
+  // edge still crosses it, so Crop stays available on the spill.
+  const factor = 512 / 200;
+  expect(filled.layers[0].transform.scaleX).toBeCloseTo(factor);
+  // A layer entirely beyond the new canvas edge is removed by Crop (the
+  // spill is visible on the stage, but Crop measures the box only).
+  const withDot = addRasterLayer(doc, image(10, 10), "dot", { ...IDENTITY, x: 295, y: 0 });
+  const crossing = fillToBox(withDot, contentBounds(withDot), 512);
+  const plan = planCrop(crossing, { x: 0, y: 0, width: 512, height: 512 });
+  expect(plan[0].kind).toBe("clip"); // the 300-wide base crosses the right edge
+  expect(plan[1].kind).toBe("remove"); // the dot at 295..305 hangs outside after scaling
+});
+
+test("fill is one undo step that restores canvas and layers", () => {
+  const s = new EditorSession(snug(300, 200, "base"));
+  s.apply((d) => fillToBox(d, contentBounds(d), 512));
+  expect([s.doc.width, s.doc.height]).toEqual([512, 512]);
+  expect(Math.min(contentBounds(s.doc).width, contentBounds(s.doc).height)).toBeCloseTo(512);
+  s.undo();
+  expect([s.doc.width, s.doc.height]).toEqual([300, 200]);
+  expect(s.doc.layers[0].transform).toEqual(IDENTITY);
+  s.redo();
+  expect([s.doc.width, s.doc.height]).toEqual([512, 512]);
+});
+
+test("filling content that already covers the side square changes nothing (no undo step)", () => {
+  // 600x512 centred on the 512x512 canvas: its shortest side is the side.
+  const doc = newDocument(image(600, 512), "cover", { width: 512, height: 512 });
+  expect(fillToBox(doc, contentBounds(doc), 512)).toBe(doc);
+  const s = new EditorSession(doc);
+  s.apply((d) => fillToBox(d, contentBounds(d), 512));
+  expect(s.canUndo).toBe(false);
+  // Off-centre on the same-size canvas: Fill recentres, so it does work.
+  const moved = setTransform(doc, doc.layers[0].id, { ...IDENTITY, x: 0, y: 0 });
+  expect(fillToBox(moved, contentBounds(moved), 512)).not.toBe(moved);
 });
 
 test("scaling to the size the content already has changes nothing (no undo step)", () => {

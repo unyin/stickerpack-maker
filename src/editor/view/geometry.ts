@@ -2,19 +2,23 @@
 import { matchNames } from "../../shared/match-names";
 import {
   cropOutcome,
+  fillToBox,
   fitToBox,
   KEEP_ONE_LAYER,
   layerBounds,
   localToDoc,
   NOTHING_IN_BOX,
-  resizeLongestSide,
+  pixelBounds,
   resizeSideProblem,
+  resizeToSide,
   scaleLongestSide,
   textLayersOf,
   type CropAction,
   type Doc,
+  type Layer,
   type Point,
   type Rect,
+  type ResizeSide,
   type TextLayer,
 } from "../model/document";
 import { regionBounds, type Region } from "../model/region";
@@ -88,14 +92,19 @@ export function mergeBlocker(selection: readonly string[]): string | null {
   return null;
 }
 
+/** The one selected layer, or null while no or several layers are selected. */
+function selectedLayer(doc: Doc, selection: readonly string[]): Layer | null {
+  if (selection.length !== 1) return null;
+  return doc.layers.find((l) => l.id === selection[0]) ?? null;
+}
+
 /**
  * Why Cut is disabled, or null when it can run (SPM-9): it needs a
  * selection drawn on the canvas and exactly one selected image layer that
  * the selection touches. Text is cut only after merging it into an image.
  */
 export function cutBlocker(doc: Doc, selection: readonly string[], region: Region | null): string | null {
-  if (selection.length !== 1) return "Select the one image layer to cut from.";
-  const layer = doc.layers.find((l) => l.id === selection[0]);
+  const layer = selectedLayer(doc, selection);
   if (!layer) return "Select the one image layer to cut from.";
   if (layer.kind === "text") return "Text layers can't be cut: merge the text into an image layer first.";
   if (!region) return "Draw a selection on the canvas with Rectangle or Lasso first.";
@@ -156,14 +165,16 @@ export function deleteBlocker(doc: Doc, selection: readonly string[]): string | 
   return null;
 }
 
-export type SizeTool = "fit" | "longest" | "free";
+export type SizeTool = "fit" | "fill" | "longest" | "free";
 
 /**
  * Why a sizing tool is disabled, or null when it can run: the entered value
  * is invalid (free resize only) or the tool would change nothing. `entered`
  * is the free-resize field as a number (NaN when empty); `content` is null
- * while nothing can be measured. Tools 1 and 2 target `constraints.side`;
- * tool 2 is greyed out when the set needs a square canvas (SPEC §6).
+ * while nothing can be measured. Tools 1, 2 and 4 target `constraints.side`;
+ * tool 2 is greyed out when the set needs a square canvas (SPEC §6), tool 4
+ * runs in both modes (its square canvas always meets either set). `freeKind`
+ * is which side of the whole image the free-resize field sets (CMT-152).
  */
 export function sizeToolBlocker(
   tool: SizeTool,
@@ -171,22 +182,28 @@ export function sizeToolBlocker(
   content: Rect | null,
   entered: number,
   constraints: ConstraintSet,
+  freeKind: ResizeSide = "longest",
 ): string | null {
   const target = constraints.side;
   if (tool === "longest" && constraints.square) {
     return `A ${constraints.mode} must be exactly ${target}×${target}, so use Fit to ${target}×${target}.`;
   }
   if (tool === "free") {
-    const problem = resizeSideProblem(entered);
+    const problem = resizeSideProblem(entered, freeKind);
     if (problem) return problem;
   }
   if (!content) return "There is nothing to resize.";
   if (tool === "fit") {
     return fitToBox(doc, content, target) === doc ? `The image already fills ${target}×${target}.` : null;
   }
-  const side = tool === "longest" ? target : entered;
-  const next = tool === "longest" ? scaleLongestSide(doc, content, side) : resizeLongestSide(doc, content, side);
-  return next === doc ? `The image's longest side is already ${side} px.` : null;
+  if (tool === "fill") {
+    return fillToBox(doc, content, target) === doc ? `The image already covers ${target}×${target}.` : null;
+  }
+  if (tool === "free") {
+    const next = resizeToSide(doc, content, entered, freeKind);
+    return next === doc ? `The image's ${freeKind} side is already ${entered} px.` : null;
+  }
+  return scaleLongestSide(doc, content, target) === doc ? `The image's longest side is already ${target} px.` : null;
 }
 
 /** Ctrl (Cmd on macOS) or Shift + click toggles a layer in or out of the selection. */
@@ -308,6 +325,23 @@ export function layerHint(
     textLayersOf(doc, selection).length > 0 ? reasons.editText : null,
   ];
   return relevant.filter((r) => r !== null).join(" ");
+}
+
+/**
+ * The layer list's size readout (CMT-152): the one selected layer's current
+ * size, shown live. Per the owner's decision (2026-11-23, against the
+ * scaled-size recommendation), a rotated or scaled layer shows its ON-CANVAS
+ * BOUNDING BOX: the axis-aligned box it occupies on the canvas, rotation
+ * included, in whole pixels — the same box Crop measures a layer by. Nothing
+ * is shown (null) with no layer or several layers selected. Bare `WxH`, the
+ * sticker picker's format: no " px" suffix (owner, from the test, 2026-11-23,
+ * so the row keeps its one line).
+ */
+export function selectedLayerSize(doc: Doc, selection: readonly string[]): string | null {
+  const layer = selectedLayer(doc, selection);
+  if (!layer) return null;
+  const b = pixelBounds(layerBounds(layer));
+  return `${b.width}×${b.height}`;
 }
 
 /** A CSS font-family value naming exactly `family`: quoted, with `"` and `\` escaped, so any name works. */

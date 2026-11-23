@@ -268,16 +268,24 @@ stickers, Missing stickers, and the thumbnail.
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
   image" = everything on the canvas treated as one layer, exactly like selecting every layer
   and resizing them together (owner decision 2026-11-20). Sides below are Sticker mode's;
-  Thumbnail mode uses 100 for tools 1 and 2 (see Save):
+  Thumbnail mode uses 100 for tools 1, 2 and 4 (see Save):
   1. **Fit to 512×512**: scale the whole image so its longest side is 512, set the canvas to
      512×512 and centre the image; the user can then reposition it, and the rest is
      transparent padding.
   2. **Longest side 512**: scale the whole image so its longest side is 512, then set
      the canvas to the scaled image's size in whole pixels (no padding).
-  3. **Free resize**: scale the whole image so its longest side is the entered value, a whole
-     number of pixels from 1 to 2000. The canvas size does not change; the image keeps its
+  3. **Free resize**: scale the whole image so its longest or shortest side (a choice beside
+     the field, owner request 2026-11-21) is the entered value, a whole number of pixels from
+     1 to 2000. The canvas size does not change; the image keeps its
      centre where it was.
-- Only sizing tools 1 and 2 change the canvas size (owner decision 2026-11-20). Nothing else
+  4. **Fill 512×512**: Fill is to Fit what CSS cover is to contain (owner request
+     2026-11-21): scale the whole image so its shortest side is 512, set the canvas to
+     512×512 and centre the image. Spillover outside the canvas is KEPT (non-destructive):
+     the user drags the image to choose which part shows; Save clips the rest (§Save), and
+     Crop is available if wanted. Enabled in both modes (**Fill 100×100** in Thumbnail mode):
+     the result always meets either constraint set.
+- Only sizing tools 1, 2 and 4 change the canvas size (owner decision 2026-11-20; tool 4,
+  2026-11-21). Nothing else
   does: not opening an image (the canvas starts at the constraint set's side), adding a
   layer, merging, deleting, Crop, free resize, or undo/redo of any of these.
 - The sizing tools change the canvas or the image, **never the view**: zoom and pan stay where
@@ -297,6 +305,12 @@ stickers, Missing stickers, and the thumbnail.
   It shows the canvas size and either that it meets the set or how many pixels each side is
   over or under (e.g. "600×400 px · needs longest side 512: 88 px over"), and updates on
   every change, undo and redo included (owner confirmed 2026-11-21).
+- **Selected layer's size** (owner requests 2026-11-21, decided 2026-11-23): the layer list
+  shows the one selected layer's current pixel size, live — it updates on any resize,
+  rotation, move, undo and redo. A rotated or scaled layer shows its ON-CANVAS BOUNDING BOX
+  (owner decision 2026-11-23, against the scaled-size recommendation): the axis-aligned box
+  it occupies on the canvas, rotation included, in whole pixels — the same box Crop measures
+  a layer by. Nothing is shown with no layer or several layers selected.
 
 ### Layers and tools
 - Session layer model: base image, pasted cutouts, text objects. Undo/redo throughout.
@@ -554,8 +568,8 @@ stickers, Missing stickers, and the thumbnail.
     the encoded bytes (KB = 1024 bytes). Saving a thumbnail (Thumbnail mode's target, the
     pack's thumbnail slot) comes with Thumbnail mode (SPM-12); the Rust checks already
     cover the thumbnail constraint set.
-- The live readout shows how far the canvas is off the constraint set. **Fit** fixes it in one
-  click in both modes; **Longest side** also does in Sticker mode.
+- The live readout shows how far the canvas is off the constraint set. **Fit** and **Fill**
+  fix it in one click in both modes; **Longest side** also does in Sticker mode.
 - In Thumbnail mode **Longest side** is greyed out (visible but disabled, with the reason in
   its tooltip: a thumbnail must be exactly 100×100, so use Fit), so the toolbar looks the same
   in both modes (owner decision 2026-11-20).
@@ -568,10 +582,10 @@ stickers, Missing stickers, and the thumbnail.
   with the same existence check, opening another image from the Pack Manager asks the
   same, and a session without an origin (a plain file) never warns.
 - Thumbnail mode is the same editor with a canvas that starts at 100×100 (instead of
-  512×512) and the thumbnail constraint set. Sizing tools 1 and 2 take their side from the
-  active constraint set: in Thumbnail mode they are **Fit to 100×100** and **Longest side
-  100** (greyed out, see above) (owner decision 2026-11-20); free resize is the same in both
-  modes.
+  512×512) and the thumbnail constraint set. Sizing tools 1, 2 and 4 take their side from
+  the active constraint set: in Thumbnail mode they are **Fit to 100×100**, **Fill 100×100** and
+  **Longest side 100** (greyed out, see above) (owner decision 2026-11-20); free resize is the
+  same in both modes.
 
 ## 7. Constraints quick reference
 
@@ -618,7 +632,7 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 - Trash/recovery area for deleted stickers.
 - Bulk emoji-set: rejected as unnecessary — not planned.
 - Editor: every edge of the selection box is grabbable for resizing, not just the corners.
-- Editor: custom canvas resizing (in v1 only Fit and Longest side change the canvas).
+- Editor: custom canvas resizing (in v1 only Fit, Fill and Longest side change the canvas).
 - Drag and drop an image file to open it in the Editor.
 - Editor: Crop could also drop a layer that crosses the box edge when its part inside the
   box is fully transparent. In v1 such a layer is kept; only layers entirely outside the box
@@ -674,7 +688,7 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 4. **Per-sticker command UX design pass** — completed 2026-11-19; command map in §5.
 5. **Editor foundation**: import pipeline + 2000 cap dialog, view fit, layers, undo/redo,
    drag/pan/zoom, merge selected layers, flatten-on-save plumbing.
-6. **Crop & sizing**: box overlay, destructive crop, three sizing tools, live readout.
+6. **Crop & sizing**: box overlay, destructive crop, four sizing tools, live readout.
 7. **Background removal**: ONNX placement ADR, offline auto removal, refine brush.
 8. **Effects**: outline, fuzzy glow, warp/bulge (layer-targeted).
 9. **Cut/paste/resize + text tool**.
