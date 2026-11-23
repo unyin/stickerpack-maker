@@ -5,8 +5,9 @@
 // destructive brush (owner decision 2026-11-21): each press places ONE
 // bulge, painted live in the webview (ADR-0005), and its release is ONE
 // undo step. A click uses the slider values; a press-drag sets the radius
-// (or, holding Shift, the strength) from the pointer's distance to the
-// press point (owner decision 2026-11-22, CMT-243). No Konva, no DOM.
+// from the pointer's distance to the press point, or (holding Shift) the
+// strength from the pointer's vertical movement — up increases, down
+// decreases (owner decisions 2026-11-22 and 2026-11-23). No Konva, no DOM.
 import type { Point, Rect } from "./document";
 import type { RgbaImage } from "./image";
 import type { Range } from "./effects";
@@ -29,7 +30,7 @@ const MAX_AMOUNT = 0.9;
 /** A press that travels more than this many screen px is a drag, not a click (as the lasso's). */
 export const WARP_DRAG_SLOP = 4;
 
-/** Strength percent per screen px of pointer travel while Shift is held ("about 1% per 2 px"). */
+/** Strength percent per screen px of vertical pointer travel while Shift is held ("about 1% per 2 px"). */
 const STRENGTH_PER_PX = 0.5;
 
 /** A strength percentage as a dab's amount, from 0 (nothing) to MAX_AMOUNT. */
@@ -130,9 +131,10 @@ export type WarpControl = "radius" | "strength";
 
 /**
  * One press of the warp brush: ONE bulge at the press point. A drag changes
- * the setting `mode` names from the pointer's distance to the centre,
- * relative to `anchor` (the distance and value when that mode began), so a
- * swap between radius and strength never makes either jump.
+ * the setting `mode` names — the radius from the pointer's distance to the
+ * centre, the strength from its vertical movement — each relative to
+ * `anchor` (the pointer and the setting's value when that mode began), so
+ * a swap between the two never makes either jump.
  */
 export interface WarpGesture {
   /** Where the button went down, in document px: the bulge's centre. */
@@ -142,7 +144,8 @@ export interface WarpGesture {
   /** In percent. */
   readonly strength: number;
   readonly mode: WarpControl;
-  readonly anchor: { readonly distance: number; readonly value: number };
+  /** Where the current mode began: the pointer's distance and y in document px, and the setting's value then. */
+  readonly anchor: { readonly distance: number; readonly y: number; readonly value: number };
   /** Moved past the drag slop: no longer a click. */
   readonly dragged: boolean;
 }
@@ -163,7 +166,7 @@ export function startWarpGesture(center: Point, settings: WarpSettings, shift: b
     radius: settings.radius,
     strength: settings.strength,
     mode: shift ? "strength" : "radius",
-    anchor: { distance: 0, value: shift ? settings.strength : 0 },
+    anchor: { distance: 0, y: center.y, value: shift ? settings.strength : 0 },
     dragged: false,
   };
 }
@@ -173,9 +176,11 @@ export function startWarpGesture(center: Point, settings: WarpSettings, shift: b
  * `zoom` (screen px per document px). Shift is read from every pointer
  * event and acts only when it changes: holding it switches to the
  * strength, letting go back to the radius, each continuing from its
- * current value. The radius follows document px (it is drawn there); the
- * strength follows screen px, so it feels the same at any zoom. Both stay
- * within their slider's range.
+ * current value. The radius follows the pointer's distance in document px
+ * (it is drawn there); the strength follows the pointer's VERTICAL
+ * movement — up increases, down decreases (owner decision 2026-11-23) —
+ * measured in screen px (the zoom converts the document y), so it feels
+ * the same at any zoom. Both stay within their slider's range.
  */
 export function moveWarpGesture(g: WarpGesture, at: Point, shift: boolean, zoom: number): WarpGesture {
   const distance = Math.hypot(at.x - g.center.x, at.y - g.center.y);
@@ -183,14 +188,21 @@ export function moveWarpGesture(g: WarpGesture, at: Point, shift: boolean, zoom:
   const wanted: WarpControl = shift ? "strength" : "radius";
   if (wanted !== mode) {
     mode = wanted;
-    anchor = { distance, value: wanted === "strength" ? g.strength : g.radius };
+    // Nothing jumps: each mode re-anchors at the swap point, taking its
+    // own setting's current value (the radius its distance, the strength its y).
+    anchor = { distance, y: at.y, value: wanted === "strength" ? g.strength : g.radius };
   }
   const dragged = g.dragged || distance * zoom > WARP_DRAG_SLOP;
   if (!dragged) return { ...g, mode, anchor };
-  const travel = distance - anchor.distance;
   return mode === "radius"
-    ? { ...g, mode, anchor, dragged, radius: clampWhole(anchor.value + travel, WARP_RADIUS) }
-    : { ...g, mode, anchor, dragged, strength: clampWhole(anchor.value + travel * zoom * STRENGTH_PER_PX, WARP_STRENGTH) };
+    ? { ...g, mode, anchor, dragged, radius: clampWhole(anchor.value + (distance - anchor.distance), WARP_RADIUS) }
+    : {
+        ...g,
+        mode,
+        anchor,
+        dragged,
+        strength: clampWhole(anchor.value - (at.y - anchor.y) * zoom * STRENGTH_PER_PX, WARP_STRENGTH),
+      };
 }
 
 /** The readout beside the pointer while dragging. */

@@ -340,29 +340,35 @@ test("a press-drag sets the radius to the pointer's distance from the press poin
   expect(warpReadout(g)).toBe("Radius 40 px");
 });
 
-test("holding Shift switches the drag to strength, relative from the swap, radius frozen; releasing continues the radius", () => {
+test("holding Shift switches the drag to strength from the pointer's vertical movement, radius frozen; releasing continues the radius", () => {
   let g = startWarpGesture({ x: 0, y: 0 }, { strength: 30, radius: 60 }, false);
   g = moveWarpGesture(g, { x: 50, y: 0 }, false, 1); // radius 50
   g = moveWarpGesture(g, { x: 50, y: 0 }, true, 1); // Shift down: nothing jumps
   expect([g.mode, g.radius, g.strength]).toEqual(["strength", 50, 30]);
-  g = moveWarpGesture(g, { x: 70, y: 0 }, true, 1); // +20 px = +10%
+  g = moveWarpGesture(g, { x: 70, y: 0 }, true, 1); // horizontal only: strength follows y, not distance
+  expect([g.radius, g.strength]).toEqual([50, 30]);
+  g = moveWarpGesture(g, { x: 70, y: -20 }, true, 1); // 20 px up = +10%
   expect([g.radius, g.strength]).toEqual([50, 40]);
   expect(warpReadout(g)).toBe("Strength 40%");
-  g = moveWarpGesture(g, { x: 10, y: 0 }, true, 1); // -60 px = -30%: 10%
-  expect(g.strength).toBe(10);
-  expect(moveWarpGesture(g, { x: 0, y: 0 }, true, 1).strength).toBe(10 - 5);
-  expect(moveWarpGesture(g, { x: 500, y: 0 }, true, 1).strength).toBe(100); // clamped
-  g = moveWarpGesture(g, { x: 10, y: 0 }, false, 1); // Shift up: back to radius, from 50
-  expect([g.mode, g.radius, g.strength]).toEqual(["radius", 50, 10]);
-  g = moveWarpGesture(g, { x: 30, y: 0 }, false, 1);
-  expect([g.radius, g.strength]).toEqual([70, 10]);
+  g = moveWarpGesture(g, { x: 70, y: 10 }, true, 1); // 10 px below the swap's y: 30 - 5
+  expect(g.strength).toBe(25);
+  expect(moveWarpGesture(g, { x: 70, y: 500 }, true, 1).strength).toBe(1); // clamped below
+  expect(moveWarpGesture(g, { x: 70, y: -500 }, true, 1).strength).toBe(100); // clamped above
+  g = moveWarpGesture(g, { x: 70, y: 10 }, false, 1); // Shift up: back to radius, from 50
+  expect([g.mode, g.radius, g.strength]).toEqual(["radius", 50, 25]);
+  g = moveWarpGesture(g, { x: 30, y: 0 }, false, 1); // the radius continues from its frozen value
+  expect([g.radius, g.strength]).toEqual([9, 25]);
 });
 
-test("Shift already down at the press starts in strength mode; strength follows screen px at any zoom", () => {
+test("strength follows vertical movement at any zoom, up increasing", () => {
+  // The pointer's y is document px; the zoom converts it to the screen px
+  // the rate is set in, so the strength changes the same per screen px.
   let g = startWarpGesture({ x: 0, y: 0 }, { strength: 30, radius: 60 }, true);
   expect(g.mode).toBe("strength");
-  g = moveWarpGesture(g, { x: 10, y: 0 }, true, 2); // 10 doc px = 20 screen px at 200%: +10%
-  expect([g.radius, g.strength, g.dragged]).toEqual([60, 40, true]);
+  g = moveWarpGesture(g, { x: 10, y: -5 }, true, 2); // 5 doc px = 10 screen px up: +5%
+  expect([g.radius, g.strength, g.dragged]).toEqual([60, 35, true]);
+  g = moveWarpGesture(g, { x: 10, y: 5 }, true, 0.5); // 5 doc px down at 50%: 30 - 1.25 -> 29
+  expect(g.strength).toBe(29);
 });
 
 test("docToLocal inverts localToDoc for a turned and scaled layer", () => {

@@ -78,7 +78,7 @@ export class EffectControls {
         "Warp",
         this.slider("Strength", WARP_STRENGTH, "%", () => this.brush.strength, (v) => (this.brush.strength = v)),
         this.slider("Radius", WARP_RADIUS, "px", () => this.brush.radius, (v) => (this.brush.radius = v)),
-        el("span", { class: "muted" }, "Click to bulge; drag to size it (Shift: strength). Choose the layer in Layers."),
+        el("span", { class: "muted" }, "Click to bulge; drag to size it (Shift: strength, up = more). Choose the layer in Layers."),
       ),
     };
     this.element = el(

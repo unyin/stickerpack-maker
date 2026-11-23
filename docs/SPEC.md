@@ -349,8 +349,10 @@ stickers, Missing stickers, and the thumbnail.
   2026-11-22): a click uses the bar's strength and radius (radius in on-screen document
   px); a press-drag keeps the bulge at the press point and sets its **radius** to the
   pointer's distance from it, live, with the ring following; holding **Shift** during the
-  drag sets the **strength** instead, relative to its value when Shift went down (about
-  1% per 2 screen px, 1–100%), with the radius frozen; letting go of Shift goes back to
+  drag sets the **strength** instead, which follows the pointer's vertical movement — up
+  increases, down decreases (owner decision 2026-11-23) — relative to its value when
+  Shift went down (about 1% per 2 screen px, 1–100%), with the radius frozen; letting go
+  of Shift goes back to
   the radius, continuing from its frozen value, so nothing jumps. Shift is read from each
   pointer event (held, not tapped), and may already be down at the press. A readout
   beside the pointer shows "Radius N px" or "Strength N%". A drag's final radius and
