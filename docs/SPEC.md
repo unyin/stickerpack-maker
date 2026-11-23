@@ -547,7 +547,13 @@ stickers, Missing stickers, and the thumbnail.
   its tooltip: a thumbnail must be exactly 100×100, so use Fit), so the toolbar looks the same
   in both modes (owner decision 2026-11-20).
 - Closing the editor with unsaved changes warns first. Unfinished, non-conforming work
-  cannot be parked — there is deliberately no scratch/draft save location.
+  cannot be parked — there is deliberately no scratch/draft save location. Closing a CLEAN
+  session whose origin sticker no longer exists (deleted, sent away with Move, or the
+  Library changed) also asks first — "Sticker no longer exists", **Close anyway** /
+  **Keep editing** (Keep editing the default), because closing would discard the only
+  remaining copy (owner decision 2026-11-23); the save dialog's Replace option decides
+  with the same existence check, opening another image from the Pack Manager asks the
+  same, and a session without an origin (a plain file) never warns.
 - Thumbnail mode is the same editor with a canvas that starts at 100×100 (instead of
   512×512) and the thumbnail constraint set. Sizing tools 1 and 2 take their side from the
   active constraint set: in Thumbnail mode they are **Fit to 100×100** and **Longest side

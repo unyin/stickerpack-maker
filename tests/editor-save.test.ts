@@ -8,6 +8,7 @@ import {
   declinedText,
   exhaustedText,
   originAfterSave,
+  originGoneCloseWarning,
   pngTooLargeText,
   replaceLabel,
   resolveOrigin,
@@ -183,6 +184,21 @@ test("after a save the session edits the saved sticker, and a replace says so", 
 test("after a Library change the origin sticker is reported, not looked up", () => {
   const gone = resolveOrigin({ ...origin, otherLibrary: true }, viewWith([{ id: 9, position: 4, format: "png" }]));
   expect("gone" in gone && gone.gone).toContain("belongs to the Library used before");
+});
+
+test("only a clean session with a gone origin warns on close (owner decision 2026-11-23)", () => {
+  // The same existence notion as the save dialog's Replace option: gone
+  // (deleted or moved), another Library, or present.
+  const deleted = resolveOrigin(origin, viewWith([]));
+  expect(originGoneCloseWarning(origin, deleted)).toBe(true);
+  const otherLibrary = resolveOrigin({ ...origin, otherLibrary: true }, viewWith([{ id: 9, position: 4, format: "png" }]));
+  expect(originGoneCloseWarning(origin, otherLibrary)).toBe(true);
+  const present = resolveOrigin(origin, viewWith([{ id: 9, position: 2, format: "png" }]));
+  expect(originGoneCloseWarning(origin, present)).toBe(false);
+  // No origin (a plain file, never saved into a slot): never warns.
+  expect(originGoneCloseWarning(null, deleted)).toBe(false);
+  // A dirty session never reaches the check: its own warning decides.
+  expect(originGoneCloseWarning(null, present)).toBe(false);
 });
 
 test("the saved note's link names the sticker; a gone sticker is reported", () => {

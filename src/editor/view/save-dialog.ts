@@ -36,8 +36,13 @@ export interface SaveDialogOptions {
   submit(choice: SaveChoice, setFormat: (format: SaveFormat) => void): Promise<string | null>;
 }
 
-/** Where the origin sticker is now, or why it cannot be replaced. */
-async function originNow(origin: StickerOrigin): Promise<OriginNow | { readonly gone: string }> {
+/**
+ * Where the origin sticker is now, or why it cannot be replaced: the ONE
+ * lookup both the save dialog (Replace gone, SPEC §6) and the Editor's
+ * clean-close warning (owner decision 2026-11-23) ask, so the two can
+ * never disagree.
+ */
+export async function originNow(origin: StickerOrigin): Promise<OriginNow | { readonly gone: string }> {
   // Never look an old Library's pack id up in the new one.
   if (origin.otherLibrary) return resolveOrigin(origin, null);
   try {

@@ -48,6 +48,18 @@ export function resolveOrigin(origin: StickerOrigin, view: PackView | null): Ori
   return { position: sticker.position, packTitle: view.pack.title, format: sticker.format };
 }
 
+/**
+ * Whether closing the session asks about its gone origin sticker (owner
+ * decision 2026-11-23): a CLEAN session whose origin no longer exists in
+ * the Library warns before closing throws the last copy of the image away.
+ * `now` is the same lookup the save dialog's Replace option uses
+ * (originNow), so the two can never disagree. A dirty session never gets
+ * here: its own unsaved-changes warning has already decided.
+ */
+export function originGoneCloseWarning(origin: StickerOrigin | null, now: OriginNow | { readonly gone: string }): boolean {
+  return origin !== null && "gone" in now;
+}
+
 /** The replace option's label: "Replace #4 in “Cats”". */
 export function replaceLabel(now: OriginNow): string {
   return `Replace #${now.position} in “${now.packTitle}”`;

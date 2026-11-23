@@ -36,6 +36,7 @@ import {
   declinedText,
   EXHAUSTED_TITLE,
   exhaustedText,
+  originGoneCloseWarning,
   pngTooLargeText,
   runSave,
   saveBlocker,
@@ -49,7 +50,7 @@ import {
   type TooLarge,
 } from "../editor/save";
 import type { StickerOrigin } from "../shared/sticker-origin";
-import { saveDialog } from "../editor/view/save-dialog";
+import { originNow, saveDialog } from "../editor/view/save-dialog";
 import { packMemory } from "../pack-manager/model/pack-memory";
 import { markStickerFileChanged } from "../pack-manager/model/changed-files";
 import { loadPackView, type Sticker } from "../pack-manager/api";
@@ -654,6 +655,15 @@ function buildEditor(): HTMLElement {
     if (!session) return true;
     // An unapplied effect preview alone is not a change (CMT-186): it is dropped.
     if (session.isDirty && !(await confirmDiscard())) return false;
+    // A CLEAN session whose origin sticker is gone (deleted, sent away with
+    // Move, or the Library changed) asks before closing throws its last
+    // copy away (owner decision 2026-11-23). The save dialog's own lookup
+    // decides, so Replace-gone and this warning can never disagree; a dirty
+    // session never reaches here (its warning has decided), and one without
+    // an origin (a plain file, never saved into a slot) never warns.
+    if (!session.isDirty && origin && originGoneCloseWarning(origin, await originNow(origin))) {
+      if (!(await confirmCloseOriginGone())) return false;
+    }
     endSession();
     return true;
   }
@@ -1458,6 +1468,19 @@ function confirmDiscard(): Promise<boolean> {
     "Unsaved changes",
     [el("p", {}, "The editor has unsaved changes. Do you want to discard these or continue editing?")],
     { actionLabel: "Discard", keepLabel: "Keep editing", danger: true },
+  );
+}
+
+/**
+ * The clean-session close question when the origin sticker is gone (owner
+ * decision 2026-11-23, CMT-291; the copy is owner-vetoable at the re-test
+ * and lives here, in one place): closing discards this copy of the image.
+ */
+function confirmCloseOriginGone(): Promise<boolean> {
+  return confirmChoice(
+    "Sticker no longer exists",
+    [el("p", {}, "The sticker this session was editing is no longer in the Library. Closing the editor discards this copy of the image.")],
+    { actionLabel: "Close anyway", keepLabel: "Keep editing", danger: true },
   );
 }
 
