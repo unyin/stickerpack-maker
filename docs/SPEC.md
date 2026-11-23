@@ -173,7 +173,7 @@ stickers, Missing stickers, and the thumbnail.
 ### Replacement rules
 - *Drop-in*: file must already be a valid sticker (PNG/WEBP, one side exactly 512 px,
   ≤512 KB). Non-conforming files are **hard-blocked** with "open in editor / cancel".
-- *Editor*: edit the existing flattened image, or edit a new image, then save into the slot.
+- *Editor*: edit the existing flattened image, or edit a new image, then save into the slot. The hard-blocked drop-in's "open in editor" opens the picked file with the slot as the session's origin, so saving offers **Replace #N in <pack>** (the default), per §6.
 
 ### Missing stickers
 - Warning badge on the tile; panel banner with **Replace file** (the validated drop-in path)
@@ -501,7 +501,7 @@ stickers, Missing stickers, and the thumbnail.
     Manager's Edit remembers that sticker. Its save dialog starts with two options at the
     top: **Replace #N in <pack>** (the default; N and the pack as they are now, even after
     a reorder or rename) and **Save as a new sticker**, which shows the pack picker. A
-    session opened from an image file shows only the pack picker. Ctrl+S then Enter
+    session opened from an image file with no slot as its origin shows only the pack picker. Ctrl+S then Enter
     replaces. A replace keeps the sticker's position and Emoji String; the format starts on
     the sticker's own, and a PNG↔WEBP change changes the file's extension (`002.png` →
     `002.webp`, ADR-0003, through the crash-safe renames of ADR-0004). The over-cap flow
