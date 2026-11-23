@@ -261,14 +261,11 @@ pub fn editor_cut_layer(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::
 
 // ---- Background removal (SPM-7, ADR-0006) ----
 
-/// Whether the model `model` (an id from ml::model::MODELS) is cached yet,
-/// and its download size (its first Remove background asks before downloading).
+/// Whether the model is cached yet, and its download size (the first
+/// Remove background asks before downloading).
 #[tauri::command]
-pub fn editor_background_model_status(
-    model: String,
-    remover: State<'_, ml::BackgroundRemover>,
-) -> Result<ml::ModelStatus, String> {
-    Ok(remover.status(ml::model::model_by_id(&model)?))
+pub fn editor_background_model_status(remover: State<'_, ml::BackgroundRemover>) -> ml::ModelStatus {
+    remover.status()
 }
 
 /// Download progress for the Editor's message line.
@@ -279,18 +276,16 @@ pub struct DownloadProgress {
     pub total: u64,
 }
 
-/// Download the model `model` once (a no-op when it is cached), reporting
-/// progress on `on_progress`. Resolves "done" or "cancelled"; network and checksum
+/// Download the model once (a no-op when it is cached), reporting progress
+/// on `on_progress`. Resolves "done" or "cancelled"; network and checksum
 /// failures are errors with a plain message.
 #[tauri::command(async)]
 pub fn editor_download_background_model(
-    model: String,
     remover: State<'_, ml::BackgroundRemover>,
     on_progress: tauri::ipc::Channel<DownloadProgress>,
 ) -> Result<ml::DownloadOutcome, String> {
-    let spec = ml::model::model_by_id(&model)?;
-    let total = spec.size_bytes;
-    remover.download(spec, &mut |received| {
+    let total = remover.size_bytes();
+    remover.download(&mut |received| {
         // A closed channel (the view went away) must not stop the download.
         let _ = on_progress.send(DownloadProgress { received, total });
     })
@@ -302,7 +297,7 @@ pub fn editor_cancel_background_download(remover: State<'_, ml::BackgroundRemove
     remover.cancel_download();
 }
 
-/// Header carrying the removal request's layer size and model (JSON `{width, height, model}`).
+/// Header carrying the removal request's layer size (JSON `{width, height}`).
 pub const REMOVE_BACKGROUND_HEADER: &str = "x-remove-background";
 
 /// Remove the background of a raster layer (SPM-7). Request: raw body = the
@@ -313,10 +308,10 @@ pub fn editor_remove_background(
     request: tauri::ipc::Request<'_>,
     remover: State<'_, ml::BackgroundRemover>,
 ) -> Result<tauri::ipc::Response, String> {
-    let meta: ml::RemovalMeta = serde_json::from_str(header(&request, REMOVE_BACKGROUND_HEADER)?)
+    let size: ml::LayerSize = serde_json::from_str(header(&request, REMOVE_BACKGROUND_HEADER)?)
         .map_err(|e| format!("the background removal header is invalid: {e}"))?;
-    let layer = meta.decode(raw_body(&request, "background removal")?)?;
-    Ok(tauri::ipc::Response::new(remover.remove(meta.spec()?, &layer)?.to_frame()))
+    let layer = size.decode(raw_body(&request, "background removal")?)?;
+    Ok(tauri::ipc::Response::new(remover.remove(&layer)?.to_frame()))
 }
 
 #[cfg(test)]

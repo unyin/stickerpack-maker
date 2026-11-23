@@ -20,7 +20,7 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 - Windows v1; macOS later, Linux maybe. (ADR-0001)
 - **Tauri**: Rust core (files, library, SQLite) + web-frontend canvas editor.
 - Background removal runs offline via ONNX with a one-time model download. ONNX runs in Rust
-  (`ort`, ONNX Runtime linked statically) with ISNet models (ADR-0006).
+  (`ort`, ONNX Runtime linked statically) with the ISNet general-use model (ADR-0006).
 - Difficult implementation choices get ADRs and detailed task breakdowns.
 - **UI conventions** (owner decisions 2026-11-21, 2026-11-22):
   - Every two-option confirmation in the app (deletes, Draft/Live, invalid import, creating
@@ -348,14 +348,13 @@ stickers, Missing stickers, and the thumbnail.
     disabled, with the reason in its tooltip. It makes the background transparent (the
     alpha only; colours stay) as one undo step. When the model finds no subject, the red
     message line says so and nothing changes.
-  - Two models: **General** (ISNet general use, the default) and **Anime** (ISNet anime,
-    for anime and manga characters), chosen in a **Model** list beside Remove background.
-    The choice is remembered only while the app runs (Editor settings never persist across
-    restarts).
-  - The model runs offline in Rust. Each model's first use asks in the shared dialog (§2),
-    "Download the background removal model?", naming the model and its size, with
-    **Download** and **Cancel** (the default); its one-time download (General 179 MB, Anime
-    176 MB) shows its progress as a neutral note in the message
+  - One model: **ISNet general use** (no model choice in the UI; the anime model offered on
+    2026-11-22 was dropped by the owner on 2026-11-23 — colour anime is out of scope, and
+    manga will be handled by a separate magic-wand tool).
+  - The model runs offline in Rust. Its first use asks in the shared dialog (§2),
+    "Download the background removal model?", naming its size, with
+    **Download** and **Cancel** (the default); its one-time download (179 MB)
+    shows its progress as a neutral note in the message
     line, with a **Cancel download** button beside Remove background while it runs. It is
     checked against a pinned checksum and kept in the app data folder; after that removal
     never uses the network. A failed download says why in the red line and changes nothing.

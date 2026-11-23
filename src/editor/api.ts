@@ -244,23 +244,14 @@ export async function importPasted(bytes: Uint8Array, scaleToFit: boolean): Prom
 
 // ---- Background removal (SPM-7, ADR-0006) ----
 
-/** A background removal model's id; mirrors the ids in src-tauri/src/ml/model.rs `MODELS`. */
-export type BackgroundModelId = "isnet-general-use" | "isnet-anime";
-
-/** The models the Editor offers, in Rust's order (the first is the default), with their names in the UI. */
-export const BACKGROUND_MODELS: readonly { readonly id: BackgroundModelId; readonly label: string }[] = [
-  { id: "isnet-general-use", label: "General" },
-  { id: "isnet-anime", label: "Anime" },
-];
-
-/** Whether a background removal model is cached yet, and its download size (serde camelCase). */
+/** Whether the background removal model is cached yet, and its download size (serde camelCase). */
 export interface BackgroundModelStatus {
   downloaded: boolean;
   sizeBytes: number;
 }
 
-export function backgroundModelStatus(model: BackgroundModelId): Promise<BackgroundModelStatus> {
-  return invoke<BackgroundModelStatus>("editor_background_model_status", { model });
+export function backgroundModelStatus(): Promise<BackgroundModelStatus> {
+  return invoke<BackgroundModelStatus>("editor_background_model_status");
 }
 
 /** A download's progress as Rust reports it (bytes). */
@@ -273,28 +264,25 @@ export interface DownloadProgress {
 export type DownloadOutcome = "done" | "cancelled";
 
 /**
- * Download a model once (Rust checks its size and SHA-256 before keeping
+ * Download the model once (Rust checks its size and SHA-256 before keeping
  * it), reporting progress. Resolves "cancelled" after `cancelBackgroundDownload`.
  */
-export function downloadBackgroundModel(
-  model: BackgroundModelId,
-  onProgress: (p: DownloadProgress) => void,
-): Promise<DownloadOutcome> {
+export function downloadBackgroundModel(onProgress: (p: DownloadProgress) => void): Promise<DownloadOutcome> {
   const channel = new Channel<DownloadProgress>();
   channel.onmessage = onProgress;
-  return invoke<DownloadOutcome>("editor_download_background_model", { model, onProgress: channel });
+  return invoke<DownloadOutcome>("editor_download_background_model", { onProgress: channel });
 }
 
 export function cancelBackgroundDownload(): Promise<void> {
   return invoke<void>("editor_cancel_background_download");
 }
 
-/** Header carrying the layer size and model of a removal; mirrors REMOVE_BACKGROUND_HEADER. */
+/** Header carrying the layer size of a removal; mirrors REMOVE_BACKGROUND_HEADER. */
 export const REMOVE_BACKGROUND_HEADER = "x-remove-background";
 
-/** The layer with its background made transparent by `model`, in Rust (alpha only; colours unchanged). */
-export async function removeImageBackground(image: RgbaImage, model: BackgroundModelId): Promise<RgbaImage> {
-  const meta = { width: image.width, height: image.height, model };
+/** The layer with its background made transparent, in Rust (alpha only; colours unchanged). */
+export async function removeImageBackground(image: RgbaImage): Promise<RgbaImage> {
+  const meta = { width: image.width, height: image.height };
   const frame = await invokeRaw("editor_remove_background", bytesOf(image), REMOVE_BACKGROUND_HEADER, meta);
   const out = decodeFrame(frame);
   if (out.width !== image.width || out.height !== image.height) {

@@ -8,7 +8,6 @@
 import "../editor/editor.css";
 import { baseName } from "../api";
 import {
-  BACKGROUND_MODELS,
   backgroundModelStatus,
   cancelBackgroundDownload,
   cropImages,
@@ -25,7 +24,6 @@ import {
   removeImageBackground,
   renderText,
   saveImage,
-  type BackgroundModelId,
   type DownloadProgress,
   type ImageInfo,
 } from "../editor/api";
@@ -282,24 +280,10 @@ function buildEditor(): HTMLElement {
     stage?.setBrushSize(size);
     brushSizeInput.blur();
   });
-  // The model Remove background uses. Remembered only while the app runs:
-  // Editor settings never persist across restarts (owner, 2026-11-22).
-  let backgroundModel: BackgroundModelId = BACKGROUND_MODELS[0].id;
   // The message-line text of a model download in progress, null when none
   // runs: Save's disabled tooltip and a mid-download Ctrl+S say it (SPEC §6,
   // §2: a disabled control shows its reason).
   let downloadNote: string | null = null;
-  const modelSelect = el(
-    "select",
-    { class: "editor-model-select", "aria-label": "Background removal model" },
-    ...BACKGROUND_MODELS.map((m) => el("option", { value: m.id }, m.label)),
-  ) as HTMLSelectElement;
-  modelSelect.title =
-    "Model for Remove background: General suits photos and most pictures, Anime suits anime and manga characters. Each downloads once";
-  modelSelect.addEventListener("change", () => {
-    backgroundModel = modelSelect.value as BackgroundModelId;
-    modelSelect.blur();
-  });
   // Shown only while the model downloads; stays usable while everything else waits.
   const cancelDownloadButton = button("Cancel download", () => void cancelBackgroundDownload());
   cancelDownloadButton.hidden = true;
@@ -370,7 +354,6 @@ function buildEditor(): HTMLElement {
       "span",
       { class: "editor-tool-group", role: "group", "aria-label": "Background" },
       removeBackgroundButton,
-      el("label", { class: "editor-side" }, "Model ", modelSelect),
       cancelDownloadButton,
       eraseToolButton,
       restoreToolButton,
@@ -799,8 +782,7 @@ function buildEditor(): HTMLElement {
     const current = session;
     if (!current || "reason" in backgroundTarget(current.doc, current.selection)) return;
     try {
-      const model = backgroundModel;
-      if (!(await ensureBackgroundModel(model))) return;
+      if (!(await ensureBackgroundModel())) return;
       say("Removing the background…", "note");
       await editAsync(
         current,
@@ -808,7 +790,7 @@ function buildEditor(): HTMLElement {
         async (doc) => {
           const target = backgroundTarget(doc, current.selection);
           if ("reason" in target) throw new Error(target.reason);
-          return { id: target.layer.id, image: await removeImageBackground(target.layer.image, model) };
+          return { id: target.layer.id, image: await removeImageBackground(target.layer.image) };
         },
         ({ id, image }) => {
           current.apply((d) => refineLayerPixels(d, id, image));
@@ -825,10 +807,10 @@ function buildEditor(): HTMLElement {
    * True when the model is ready: already cached, or downloaded now after
    * the user agreed. Cancel in the dialog, or Cancel download, leaves it be.
    */
-  async function ensureBackgroundModel(model: BackgroundModelId): Promise<boolean> {
-    const status = await backgroundModelStatus(model);
+  async function ensureBackgroundModel(): Promise<boolean> {
+    const status = await backgroundModelStatus();
     if (status.downloaded) return true;
-    if (!(await confirmModelDownload(modelLabel(model), status.sizeBytes))) return false;
+    if (!(await confirmModelDownload(status.sizeBytes))) return false;
     // One report drives both the message line and the disabled Save's tooltip
     // (SPEC §6, §2: a disabled control shows its reason). Direct assignments
     // rather than refresh(): a progress tick is too frequent for a full pass.
@@ -844,7 +826,7 @@ function buildEditor(): HTMLElement {
     try {
       // Cancel download appears with Rust's first report, sent once the
       // download has begun (and its cancel flag is cleared), so a press is never lost.
-      const outcome = await downloadBackgroundModel(model, (p) => {
+      const outcome = await downloadBackgroundModel((p) => {
         if (!active) return;
         cancelDownloadButton.hidden = false;
         reportProgress(p);
@@ -1114,7 +1096,6 @@ function buildEditor(): HTMLElement {
     removeBackgroundButton.disabled = busy || removeReason !== null;
     removeBackgroundButton.title = removeReason ?? removeBackgroundTitle;
     brushSizeInput.disabled = busy;
-    modelSelect.disabled = busy;
     // Text tool (SPM-9): the controls show the first selected text layer's
     // style, else the next new text's.
     const texts = current.selectedTexts;
@@ -1285,18 +1266,12 @@ function confirmDiscard(): Promise<boolean> {
   );
 }
 
-/** A model's name in the UI. */
-function modelLabel(id: BackgroundModelId): string {
-  // Every BackgroundModelId is in the list (tests/editor-api.test.ts mirrors it against Rust).
-  return BACKGROUND_MODELS.find((m) => m.id === id)!.label;
-}
-
-/** Each model's first Remove background asks before its one-time download (ADR-0006); Cancel is the safe choice. */
-function confirmModelDownload(label: string, sizeBytes: number): Promise<boolean> {
+/** The model's first Remove background asks before its one-time download (ADR-0006); Cancel is the safe choice. */
+function confirmModelDownload(sizeBytes: number): Promise<boolean> {
   return confirmChoice(
     "Download the background removal model?",
     [
-      el("p", {}, `Background removal with the ${label} model needs a one-time download of that model (${megabytes(sizeBytes)}).`),
+      el("p", {}, `Background removal needs a one-time download of its model (${megabytes(sizeBytes)}).`),
       el("p", {}, "After that it works offline. You can cancel the download while it runs."),
     ],
     { actionLabel: "Download", keepLabel: "Cancel" },

@@ -42,16 +42,6 @@
   font: inherit;
 }
 
-/* Background removal model choice (SPM-7), styled like the size inputs. */
-.editor-model-select {
-  padding: 6px 8px;
-  background: var(--panel);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font: inherit;
-}
-
 .editor-spacer {
   flex: 1;
 }

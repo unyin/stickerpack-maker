@@ -61,7 +61,7 @@ pub fn run() {
             app.manage(SharedConfig {
                 config: Mutex::new(cfg),
             });
-            app.manage(ml::BackgroundRemover::new(model_cache_dir(app.handle())?));
+            app.manage(ml::BackgroundRemover::new(model_cache_dir(app.handle())?, ml::model::MODEL));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

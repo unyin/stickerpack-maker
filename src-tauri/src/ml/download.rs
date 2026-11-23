@@ -186,7 +186,7 @@ mod tests {
     /// A spec pinned to `bytes`, as the real one is pinned to the model.
     fn spec_for(bytes: &[u8]) -> ModelSpec {
         let sha: &'static str = Box::leak(hex(&Sha256::digest(bytes)).into_boxed_str());
-        ModelSpec { file_name: "model.onnx", sha256: sha, size_bytes: bytes.len() as u64, ..super::super::model::DEFAULT_MODEL }
+        ModelSpec { file_name: "model.onnx", sha256: sha, size_bytes: bytes.len() as u64, ..super::super::model::MODEL }
     }
 
     fn content(len: usize) -> Vec<u8> {
