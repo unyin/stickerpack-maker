@@ -401,10 +401,16 @@ stickers, Missing stickers, and the thumbnail.
     range; invalid or empty reverts, and Esc reverts and blurs. The Warp bar's sliders
     work the same way.
   - Every colour picker in the Editor (outline, glow and text) has an eyedropper beside
-    it (owner decision 2026-11-23): it samples any colour from the screen with the
-    browser EyeDropper API and applies it exactly as typing it into the picker; a
-    cancelled sample changes nothing, and where the webview lacks the API the button is
-    disabled with its reason as its tooltip (§2).
+    it (owner decision 2026-11-23; canvas-only per CMT-296: the browser EyeDropper API
+    ships in WebView2 but its sampler does not work in the embedded runtime): clicking it
+    starts a pick on the canvas — a crosshair cursor with a magnifier loupe following the
+    pointer, showing the zoomed pixels and the #rrggbb under it — and a click samples the
+    composited pixel as shown (every layer and a visible effect preview included; the
+    guides, rings and the loupe excluded) and applies it exactly as typing it into the
+    picker would, so the tool and its preview stay, recoloured. Wheel zoom and middle-drag
+    pan keep working during the pick; a fully transparent spot refuses, saying so in the
+    message line, and the pick stays for another try; Esc, switching tools or ending the
+    session cancels the pick.
   - The unapplied preview (owner decision 2026-11-22) exists only until Apply: switching
     tool (or **Cancel**), picking another layer as the target (in the Layers list;
     re-picking the layer that is already the target, such as the base image while
@@ -638,6 +644,8 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 - Pack Manager: in Reorder mode the sticker images wiggle (as on phone home screens),
   instead of or as well as the green tint (owner, 2026-11-21: animations are a bigger job).
 - Editor, warp: hold Alt to pinch (shrink) instead of bulge (owner, 2026-11-22).
+- Editor: a screen-wide colour sampler for the eyedropper, beyond the canvas. Needs Rust
+  screen capture: capture, DPI, multi-monitor, an overlay window (owner, 2026-11-23).
 - Editor: speech bubbles, e.g. with Konva's Label and Tag (owner, 2026-11-22).
 - Editor: arrows and shapes (owner, 2026-11-22).
 - Editor: text along a curve, e.g. with Konva's TextPath (owner, 2026-11-22).

@@ -232,6 +232,7 @@ function buildEditor(): HTMLElement {
   warpToolButton.title = "Enlarge parts of the selected layer (or the base image) with a bulge brush";
   const effectControls = new EffectControls({
     change: () => refresh(),
+    pick: (apply) => stage?.beginColorPick(apply),
     apply: () => void run(applyEffectTool),
     cancel: () => setTool("move"),
   });
@@ -266,13 +267,15 @@ function buildEditor(): HTMLElement {
   }) as HTMLInputElement;
   const colorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": "Text colour" }) as HTMLInputElement;
   // The text controls' busy/text-reason disable loop; the eyedropper beside
-  // the text colour picker enrolls itself (owner decision 2026-11-23).
+  // the text colour picker enrolls itself (owner decision 2026-11-23) and
+  // starts a canvas pick whose sample follows the picker's own path.
   const textControls: { disabled: boolean }[] = [fontPicker, fontSizeInput, colorInput];
   const textEyedropper = eyedropperButton(
-    (hex) => {
-      colorInput.value = hex;
-      restyle({ color: hex });
-    },
+    () =>
+      stage?.beginColorPick((hex) => {
+        colorInput.value = hex;
+        restyle({ color: hex });
+      }),
     textControls,
   );
   // After a committed change the control gives up focus, so the editor's
@@ -570,6 +573,7 @@ function buildEditor(): HTMLElement {
     stage.onBrush({ press: beginWarp, move: continueWarp, release: endWarp });
     stage.setBrushSize(brushSize);
     stage.onBrushBlocked((reason) => say(reason));
+    stage.onPickBlocked((reason) => say(reason));
     refresh(); // place the crop box overlay
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
@@ -1353,8 +1357,10 @@ function buildEditor(): HTMLElement {
       return;
     }
     if (isTextTarget(e.target)) return;
-    // A lasso in progress takes Enter, Esc and Backspace first (SPM-9).
-    if (stage?.handleLassoKey(e.key)) {
+    // A colour pick in progress takes Esc first (SPM-8, CMT-296), then a
+    // lasso in progress takes Enter, Esc and Backspace (SPM-9) - the most
+    // recent mode cancels first - and only then the Editor's own Esc runs.
+    if (stage?.handlePickKey(e.key) || stage?.handleLassoKey(e.key)) {
       e.preventDefault();
       return;
     }

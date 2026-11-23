@@ -62,6 +62,18 @@ function hasPreview(tool: CanvasTool): boolean {
 /** Screen px between the pointer and the warp readout's top-left. */
 const READOUT_OFFSET = 14;
 
+/** The pick loupe (SPM-8, CMT-296): its side in screen px, and the canvas px it magnifies. */
+const LOUPE_SIDE = 120;
+const LOUPE_CROP = 24;
+
+/** Why a pick on a fully transparent spot does nothing; the pick stays for another try (owner-vetoable copy). */
+const NOTHING_TO_PICK = "Nothing to pick there: that spot is fully transparent.";
+
+/** A pixel as lowercase #rrggbb. */
+function hexOf(r: number, g: number, b: number): string {
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
 /** Lasso points closer than this many screen px to the previous one are skipped. */
 const LASSO_STEP = 2;
 /** A lasso press (or freehand release) this close to its start point, in screen px, closes it. */
@@ -192,6 +204,25 @@ export class EditorStage {
   private readonly readout = new Konva.Label({ listening: false, visible: false });
   private readonly readoutTag = new Konva.Tag({ cornerRadius: 4, strokeWidth: 1, strokeScaleEnabled: false });
   private readonly readoutText = new Konva.Text({ padding: 4, fontSize: 13 });
+  /** The loupe's pixels, redrawn per frame while picking. */
+  private readonly loupeCanvas = document.createElement("canvas");
+  /**
+   * The colour pick's magnifier (SPM-8, CMT-296): the zoomed pixels around
+   * the pointer with the hex under it. In the guides layer, so a read of
+   * the composite never sees the loupe itself.
+   */
+  private readonly loupe = new Konva.Group({ listening: false, visible: false });
+  private readonly loupeShot = new Konva.Image({ image: this.loupeCanvas, width: LOUPE_SIDE, height: LOUPE_SIDE, strokeWidth: 1, strokeScaleEnabled: false, listening: false });
+  private readonly loupeLabel = new Konva.Label({ y: LOUPE_SIDE, listening: false });
+  private readonly loupeTag = new Konva.Tag({ cornerRadius: 4, strokeWidth: 1, strokeScaleEnabled: false });
+  private readonly loupeText = new Konva.Text({ padding: 4, fontSize: 13, align: "center" });
+  /** A loupe redraw scheduled for the next animation frame (pointer moves coalesce). */
+  private loupeFrame = 0;
+  /** The colour pick in progress, if any: where its sample lands (CMT-296). */
+  private pick: { readonly apply: (hex: string) => void } | null = null;
+  private pickBlocked?: (reason: string) => void;
+  /** The press the pick consumed, so its click selects nothing (the flag is cleared by the click). */
+  private pickConsumedClick = false;
   private brush?: BrushHandler;
   private brushing = false;
   /** The warp press being dragged, which the ring follows instead of the pointer. */
@@ -266,8 +297,12 @@ export class EditorStage {
       strokeScaleEnabled: false,
       listening: false,
     });
-    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.brushHalo, this.brushRing, this.warpRing, this.readout);
+    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.brushHalo, this.brushRing, this.warpRing, this.readout, this.loupe);
     this.readout.add(this.readoutTag, this.readoutText);
+    this.loupeCanvas.width = LOUPE_SIDE;
+    this.loupeCanvas.height = LOUPE_SIDE;
+    this.loupe.add(this.loupeShot, this.loupeLabel);
+    this.loupeLabel.add(this.loupeTag, this.loupeText);
     this.content.add(this.backdrop);
     this.content.add(this.transformer);
     this.stage.add(this.content);
@@ -287,21 +322,33 @@ export class EditorStage {
       this.viewChanged?.(this.view());
     });
     this.stage.on("click tap", (e) => {
+      if (this.pickConsumedClick) {
+        this.pickConsumedClick = false; // the pick owned the press this click came from
+        return;
+      }
       if (e.target === this.stage && this.tool === "move") this.session.clearSelection();
     });
     this.stage.on("mousedown touchstart", (e) => {
       if (e.evt instanceof MouseEvent && e.evt.button !== 0) return;
+      // A colour pick owns the left button in every tool (SPM-8, CMT-296).
+      if (this.pick) return this.pressPick();
+      this.pickConsumedClick = false; // a fresh press: its own click is not the pick's
       // Shift is read from the event itself (SPM-8: it sets a warp drag's strength).
       this.pressRegion(e.evt instanceof MouseEvent ? e.evt.shiftKey : false);
       this.pressBrush();
     });
     this.stage.on("mousemove touchmove", (e) => {
+      if (this.pick) return this.scheduleLoupe();
       this.extendRegion(e.evt instanceof MouseEvent ? e.evt.shiftKey : false);
       this.moveBrush();
     });
     this.stage.on("mouseleave", () => {
       this.placeWarpRing(null);
       this.showBrushAt(null);
+      if (this.pick) {
+        this.loupe.visible(false);
+        this.guides.batchDraw();
+      }
     });
     this.stage.on("dblclick dbltap", () => {
       if (!this.interactive || this.tool !== "lasso" || !this.lasso) return;
@@ -350,6 +397,7 @@ export class EditorStage {
 
   /** Choose what the left button does on the canvas (SPM-9, SPM-7, SPM-8). */
   setTool(tool: CanvasTool): void {
+    this.endPick(); // a pick never outlives the state it started in
     if (this.brushing) this.releaseWarp();
     this.tool = tool;
     this.rectDrag = null;
@@ -375,6 +423,11 @@ export class EditorStage {
     this.brushBlocked = listener;
   }
 
+  /** Called with the reason when a pick clicks a fully transparent spot (the pick stays for another try). */
+  onPickBlocked(listener: (reason: string) => void): void {
+    this.pickBlocked = listener;
+  }
+
   /**
    * True while a pixel-changing press is in progress: a refine stroke
    * (Erase/Restore, SPM-7) or a warp gesture (Warp, SPM-8). Its pixels are
@@ -398,6 +451,18 @@ export class EditorStage {
     else if (key === "Backspace") this.lasso = lassoUndo(this.lasso);
     else return false;
     this.drawRegion();
+    return true;
+  }
+
+  /**
+   * A key for the colour pick in progress (SPM-8, CMT-296): Escape cancels
+   * it, restoring the tool's own state. True when the key was used, so the
+   * Editor's own Esc (dropping the selection, ending an effect tool) does
+   * not also run.
+   */
+  handlePickKey(key: string): boolean {
+    if (!this.pick || key !== "Escape") return false;
+    this.endPick();
     return true;
   }
 
@@ -497,14 +562,19 @@ export class EditorStage {
     this.applyListening();
   }
 
-  /** Layers listen only with the Move tool; empty space pans with it and the effect tools; nothing while not interactive. */
+  /** Layers listen only with the Move tool and while nothing is picked; empty space pans with it and the effect tools; nothing while not interactive. */
   private applyListening(): void {
-    this.content.listening(this.interactive && this.tool === "move");
-    this.stage.draggable(this.interactive && (this.tool === "move" || hasPreview(this.tool)));
+    // While a colour pick runs it owns the left button: no layer is
+    // selected or moved, and a left-drag does not pan (the pick samples on
+    // the press, so nothing smears). Wheel zoom and middle-drag pan stay.
+    const picking = this.pick !== null;
+    this.content.listening(this.interactive && !picking && this.tool === "move");
+    this.stage.draggable(this.interactive && !picking && (this.tool === "move" || hasPreview(this.tool)));
     this.content.batchDraw();
   }
 
   destroy(): void {
+    this.endPick(); // a pick never outlives the state it started in
     window.removeEventListener("mouseup", this.onRelease);
     window.removeEventListener("touchend", this.onRelease);
     this.container.removeEventListener("mousedown", this.onMiddleDown, true);
@@ -532,6 +602,10 @@ export class EditorStage {
     this.readoutTag.fill(token("--panel"));
     this.readoutTag.stroke(token("--border"));
     this.readoutText.fill(token("--text"));
+    this.loupeShot.stroke(token("--accent-ink"));
+    this.loupeTag.fill(token("--panel"));
+    this.loupeTag.stroke(token("--border"));
+    this.loupeText.fill(token("--text"));
     this.brushHalo.stroke(token("--panel"));
     this.brushRing.stroke(token("--accent-ink"));
     this.content.batchDraw();
@@ -736,6 +810,128 @@ export class EditorStage {
       ring.visible(visible);
       if (at) ring.position(at);
     }
+    this.guides.batchDraw();
+  }
+
+  // ---- Colour pick (SPM-8, CMT-296): canvas-only, crosshair plus loupe ----
+
+  /**
+   * Start a colour pick from the canvas: the pointer becomes a crosshair
+   * with a magnifier loupe, the pick owns the left button in every tool,
+   * and a click samples the composited pixel under it into `apply`. Esc,
+   * switching tools or ending the session cancels; a fully transparent
+   * spot refuses, saying why, and the pick stays for another try.
+   */
+  beginColorPick(apply: (hex: string) => void): void {
+    this.endPick();
+    this.pick = { apply };
+    this.container.style.cursor = "crosshair";
+    // The tool's own pointer furniture yields to the pick's.
+    this.showBrushAt(null);
+    this.placeWarpRing(null);
+    this.applyListening();
+    this.scheduleLoupe();
+  }
+
+  /** End the colour pick, restoring the tool's own pointer state. */
+  private endPick(): void {
+    if (this.loupeFrame) {
+      cancelAnimationFrame(this.loupeFrame);
+      this.loupeFrame = 0;
+    }
+    if (!this.pick) return;
+    this.pick = null;
+    this.loupe.visible(false);
+    this.container.style.cursor = isBrushTool(this.tool) ? "crosshair" : "";
+    this.applyListening();
+    this.guides.batchDraw();
+  }
+
+  /**
+   * A left press while picking: sample the composited pixel under the
+   * pointer ONCE (a drag has nothing to smear; the pick is over). A fully
+   * transparent spot refuses and the pick stays.
+   */
+  private pressPick(): void {
+    if (!this.interactive) return; // as every press: nothing happens while an action works
+    this.pickConsumedClick = true; // the click this press becomes selects nothing
+    const shot = this.compositeAround();
+    if (!shot) return;
+    const pixel = context2d(shot.canvas).getImageData(shot.x, shot.y, 1, 1).data;
+    if (pixel[3] === 0) {
+      this.pickBlocked?.(NOTHING_TO_PICK);
+      return;
+    }
+    const apply = this.pick?.apply;
+    this.endPick();
+    apply?.(hexOf(pixel[0], pixel[1], pixel[2]));
+  }
+
+  /**
+   * The composited pixels as shown, in a LOUPE_CROP square around the
+   * pointer: every document layer and any visible effect preview, with
+   * every piece of furniture hidden around the read - the guides layer
+   * (crop box, region, rings, the readout, the loupe itself), the
+   * transformer's handles and the checkerboard backdrop - so a guide never
+   * samples and a fully transparent spot stays transparent. `x`/`y` are
+   * the pointer's pixel within the returned canvas; null while the pointer
+   * is off the canvas.
+   */
+  private compositeAround(): { canvas: HTMLCanvasElement; x: number; y: number } | null {
+    const pointer = this.stage.getPointerPosition();
+    if (!pointer) return null;
+    const left = Math.round(pointer.x - LOUPE_CROP / 2);
+    const top = Math.round(pointer.y - LOUPE_CROP / 2);
+    // The hide-and-read is synchronous: the screen never paints the furniture hidden.
+    const hidden: Konva.Node[] = [this.backdrop, this.transformer, this.guides];
+    for (const node of hidden) node.visible(false);
+    try {
+      const canvas = this.stage.toCanvas({ x: left, y: top, width: LOUPE_CROP, height: LOUPE_CROP, pixelRatio: 1 });
+      return { canvas, x: Math.floor(pointer.x) - left, y: Math.floor(pointer.y) - top };
+    } finally {
+      for (const node of hidden) node.visible(true);
+    }
+  }
+
+  /** A pointer move while picking: redraw the loupe on the next frame (moves coalesce). */
+  private scheduleLoupe(): void {
+    if (!this.pick || this.loupeFrame) return;
+    this.loupeFrame = requestAnimationFrame(() => {
+      this.loupeFrame = 0;
+      this.updateLoupe();
+    });
+  }
+
+  /** Place the loupe at the pointer: the zoomed composite and the hex of the pixel under it. */
+  private updateLoupe(): void {
+    if (!this.pick) return;
+    const at = this.pointer();
+    const shot = this.compositeAround();
+    if (!at || !shot) {
+      this.loupe.visible(false);
+      this.guides.batchDraw();
+      return;
+    }
+    const ctx = context2d(this.loupeCanvas);
+    const pixel = context2d(shot.canvas).getImageData(shot.x, shot.y, 1, 1).data;
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, LOUPE_SIDE, LOUPE_SIDE);
+    ctx.drawImage(shot.canvas, 0, 0, LOUPE_CROP, LOUPE_CROP, 0, 0, LOUPE_SIDE, LOUPE_SIDE);
+    // A black-then-white box on the pixel under the pointer, readable on any colour.
+    const k = LOUPE_SIDE / LOUPE_CROP;
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(shot.x * k - 1, shot.y * k - 1, k + 2, k + 2);
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(shot.x * k - 0.5, shot.y * k - 0.5, k + 1, k + 1);
+    this.loupeText.text(pixel[3] === 0 ? "transparent" : hexOf(pixel[0], pixel[1], pixel[2]));
+    this.loupeLabel.position({ x: (LOUPE_SIDE - this.loupeLabel.width()) / 2, y: LOUPE_SIDE });
+    // Constant size on screen at any zoom, just below-right of the pointer (as the readout).
+    const view = this.view();
+    this.loupe.scale({ x: 1 / view.scale, y: 1 / view.scale });
+    this.loupe.position({ x: at.x + READOUT_OFFSET / view.scale, y: at.y + READOUT_OFFSET / view.scale });
+    this.loupe.visible(true);
     this.guides.batchDraw();
   }
 

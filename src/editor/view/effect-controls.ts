@@ -29,6 +29,11 @@ import { el } from "../../ui";
 export interface EffectControlHandlers {
   /** A setting changed (live, while a slider moves). */
   change(): void;
+  /**
+   * Start a canvas colour pick (CMT-296); the completed sample lands in
+   * `apply`, which fires `change` as typing the colour would.
+   */
+  pick(apply: (hex: string) => void): void;
   apply(): void;
   cancel(): void;
 }
@@ -155,14 +160,16 @@ export class EffectControls {
     });
     // Give up focus once chosen, so the Editor's shortcuts work at once (as the text controls do).
     input.addEventListener("change", () => input.blur());
-    // The eyedropper sets the colour exactly as typing it into the picker
-    // would; it enrolls itself with the bar's busy-disable inputs.
+    // The eyedropper starts a canvas pick; the sample lands exactly as
+    // typing the hex into the picker would (a settings change is not a
+    // discard, CMT-256, so the tool and its preview stay, recoloured).
     const dropper = eyedropperButton(
-      (hex) => {
-        set(hex);
-        input.value = hex;
-        this.handlers.change();
-      },
+      () =>
+        this.handlers.pick((hex) => {
+          set(hex);
+          input.value = hex;
+          this.handlers.change();
+        }),
       this.inputs,
     );
     this.inputs.push(input); // busy disables the picker with the rest of the bar
