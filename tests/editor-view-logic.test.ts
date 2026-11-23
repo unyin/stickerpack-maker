@@ -175,14 +175,14 @@ test("the selected layer's size is its on-canvas bounding box, whole px (owner d
   // Nothing with no layer or several layers selected.
   expect(selectedLayerSize(doc, [])).toBeNull();
   expect(selectedLayerSize(doc, [base, "layer-9"])).toBeNull();
-  expect(selectedLayerSize(doc, [base])).toBe("300×200 px");
+  expect(selectedLayerSize(doc, [base])).toBe("300×200");
   // Scaled: the box grows with the layer.
   const scaled = setTransform(doc, base, { ...IDENTITY, x: 0, y: 0, scaleX: 2, scaleY: 2 });
-  expect(selectedLayerSize(scaled, [base])).toBe("600×400 px");
+  expect(selectedLayerSize(scaled, [base])).toBe("600×400");
   // Rotated 30 degrees: the axis-aligned box on the canvas, NOT the layer's
   // own 300x200 (that was the owner-rejected scaled-size reading).
   const rotated = setTransform(doc, base, { ...IDENTITY, x: 100, y: 100, rotation: 30 });
-  expect(selectedLayerSize(rotated, [base])).toBe("360×324 px");
+  expect(selectedLayerSize(rotated, [base])).toBe("360×324");
   // A text layer is measured by its rendered box (CMT-61), like everywhere.
   const text = addTextLayer(
     doc,
@@ -190,7 +190,7 @@ test("the selected layer's size is its on-canvas bounding box, whole px (owner d
     { image: image(100, 15), metrics: { originX: 0, originY: 0, ascent: 8, descent: 2, lineHeight: 11 } },
     { ...IDENTITY, scaleX: 2, scaleY: 2 },
   );
-  expect(selectedLayerSize(text, [text.layers[1].id])).toBe("200×30 px");
+  expect(selectedLayerSize(text, [text.layers[1].id])).toBe("200×30");
 });
 
 test("fitView offsets are whole device pixels, so adjacent layers show no seams", () => {

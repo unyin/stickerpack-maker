@@ -1346,8 +1346,12 @@ function buildEditor(): HTMLElement {
           el("span", { class: "editor-layer-kind" }, layer.kind === "raster" ? "Image" : "Text"),
           el("span", { class: "editor-layer-name" }, layer.name),
         );
+        // No muted colour here: the span lives only on the selected row, whose
+        // accent background drops --muted below any readable contrast (owner,
+        // from the test, 2026-11-23); it inherits the row's full-contrast text
+        // like the kind label at full opacity.
         if (size && layer.id === current.selection[0]) {
-          item.append(el("span", { class: "editor-layer-size muted" }, size));
+          item.append(el("span", { class: "editor-layer-size" }, size));
         }
         item.addEventListener("click", (e) => current.select(layer.id, selectModeFor(e)));
         return item;

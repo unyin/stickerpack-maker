@@ -329,17 +329,19 @@ export function layerHint(
 
 /**
  * The layer list's size readout (CMT-152): the one selected layer's current
- * pixel size, shown live. Per the owner's decision (2026-11-23, against the
+ * size, shown live. Per the owner's decision (2026-11-23, against the
  * scaled-size recommendation), a rotated or scaled layer shows its ON-CANVAS
  * BOUNDING BOX: the axis-aligned box it occupies on the canvas, rotation
  * included, in whole pixels — the same box Crop measures a layer by. Nothing
- * is shown (null) with no layer or several layers selected.
+ * is shown (null) with no layer or several layers selected. Bare `WxH`, the
+ * sticker picker's format: no " px" suffix (owner, from the test, 2026-11-23,
+ * so the row keeps its one line).
  */
 export function selectedLayerSize(doc: Doc, selection: readonly string[]): string | null {
   const layer = selectedLayer(doc, selection);
   if (!layer) return null;
   const b = pixelBounds(layerBounds(layer));
-  return `${b.width}×${b.height} px`;
+  return `${b.width}×${b.height}`;
 }
 
 /** A CSS font-family value naming exactly `family`: quoted, with `"` and `\` escaped, so any name works. */
