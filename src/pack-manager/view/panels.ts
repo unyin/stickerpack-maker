@@ -41,6 +41,8 @@ export interface PanelActions {
   remove(stickers: StickerView[]): void;
   saveEmoji(sticker: StickerView, emojiString: string): Promise<void>;
   revealThumbnail(): void;
+  editThumbnail(): void;
+  removeThumbnail(): void;
 }
 
 function action(label: string | Array<Node | string>, onClick: () => void, reason: string | null, title: string, variant = "secondary"): HTMLButtonElement {
@@ -200,11 +202,6 @@ export function aggregatePanel(stickers: StickerView[], actions: PanelActions): 
   );
 }
 
-// TODO(SPM-12): Create (new image or a copy of a pack sticker, via the
-// Editor's Thumbnail mode), Replace and Delete land with thumbnail CRUD; the
-// Library core has no thumbnail operations yet.
-const THUMBNAIL_SEAM = "Thumbnails are made in the Editor's Thumbnail mode, which is not available yet";
-
 /** Thumbnail panel: the same paradigm minus emoji and position (SPEC §5). */
 export function thumbnailPanel(view: PackView, previews: Previews, actions: PanelActions): HTMLElement {
   const name = view.pack.thumbnail;
@@ -216,7 +213,7 @@ export function thumbnailPanel(view: PackView, previews: Previews, actions: Pane
       el(
         "div",
         { class: "pm-banner pm-banner-warn", role: "alert" },
-        el("p", {}, `Missing: ${name} is not in the pack folder. Replace or delete it once thumbnails can be edited.`),
+        el("p", {}, `Missing: ${name} is not in the pack folder.`),
       ),
     );
   }
@@ -237,8 +234,15 @@ export function thumbnailPanel(view: PackView, previews: Previews, actions: Pane
     el(
       "div",
       { class: "actions pm-panel-actions" },
-      action(name ? "Replace…" : "Create…", () => {}, THUMBNAIL_SEAM, ""),
-      ...(name ? [action("Delete", () => {}, THUMBNAIL_SEAM, "", "danger")] : []),
+      action(
+        name ? "Replace…" : "Create…",
+        () => actions.editThumbnail(),
+        null,
+        "Make this pack's thumbnail in the Editor, from a new image or a copy of a sticker",
+      ),
+      ...(name
+        ? [action("Delete", () => actions.removeThumbnail(), null, "Delete the thumbnail and its file; the pack's stickers are kept", "danger")]
+        : []),
       action(explorerLabel(), () => actions.revealThumbnail(), file ? null : "There is no thumbnail file to show", "Open the pack folder in Explorer with the thumbnail selected"),
     ),
   );

@@ -32,6 +32,12 @@ export class Previews {
     this.stickers.delete(id);
   }
 
+  /** Forget the cached thumbnail bytes (they were replaced or deleted). */
+  forgetThumbnail(): void {
+    revoke(this.thumbnail);
+    this.thumbnail = null;
+  }
+
   clear(): void {
     for (const url of this.stickers.values()) revoke(url);
     this.stickers.clear();

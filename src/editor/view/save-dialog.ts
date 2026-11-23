@@ -1,10 +1,12 @@
-// The Editor's save dialog (SPEC §6 Save, SPM-10): where the image goes and
-// the format, PNG or WEBP, per save. A session opened with the Pack
+// The Editor's save dialogs (SPEC §6 Save, SPM-10/12): where the image goes
+// and the format, PNG or WEBP, per save. A session opened with the Pack
 // Manager's Edit offers, at the top, to replace that sticker (the default)
 // or to save as a new sticker; a session from an image file only saves new
 // stickers, into the pack chosen in the pack picker (owner decisions
-// 2026-11-22). Saving itself runs in `submit`, so a refusal can stay in the
-// dialog. The pack picker is the Pack Manager's: its styles come with it.
+// 2026-11-22); a Thumbnail mode session (SPM-12) saves the pack's
+// thumbnail, the pack itself already chosen. Saving itself runs in
+// `submit`, so a refusal can stay in the dialog. The pack picker is the
+// Pack Manager's: its styles come with it.
 import "../../pack-manager/pack-manager.css";
 import "../editor.css";
 import { openDialog, type DialogHandle } from "../../dialog";
@@ -15,6 +17,30 @@ import { initialFocus } from "../../pack-manager/model/pack-memory";
 import type { ConstraintSet } from "../model/constraints";
 import { FORMAT_LABEL, replaceLabel, resolveOrigin, type OriginLookup, type OriginNow, type SaveFormat } from "../save";
 import type { StickerOrigin } from "../../shared/sticker-origin";
+import type { ThumbnailOrigin } from "../../shared/thumbnail-origin";
+
+/**
+ * The PNG/WEBP toggle row, shared by the sticker and thumbnail save dialogs:
+ * one radio group plus its readers, set to `initial`.
+ */
+function formatRow(initial: SaveFormat): {
+  row: HTMLElement;
+  format(): SaveFormat;
+  setFormat(format: SaveFormat): void;
+} {
+  const radios = new Map<SaveFormat, HTMLInputElement>();
+  const row = el("div", { class: "editor-save-format", role: "radiogroup", "aria-label": "Format" });
+  for (const format of ["png", "webp"] as const) {
+    const radio = el("input", { type: "radio", name: "save-format", value: format }) as HTMLInputElement;
+    radios.set(format, radio);
+    row.append(el("label", { class: "pm-check" }, radio, ` ${FORMAT_LABEL[format]}`));
+  }
+  const setFormat = (format: SaveFormat) => {
+    for (const [value, radio] of radios) radio.checked = value === format;
+  };
+  setFormat(initial);
+  return { row, format: () => (radios.get("webp")!.checked ? "webp" : "png"), setFormat };
+}
 
 /** Where the save goes: over the origin sticker, or a new sticker in a pack. */
 export type SaveChoice = { readonly format: SaveFormat } & (
@@ -82,18 +108,7 @@ export async function saveDialog(options: SaveDialogOptions): Promise<void> {
     el("p", { class: "muted pm-hint" }, "The sticker goes to the end of the pack, without emoji."),
   );
 
-  const radios = new Map<SaveFormat, HTMLInputElement>();
-  const formatRow = el("div", { class: "editor-save-format", role: "radiogroup", "aria-label": "Format" });
-  for (const format of ["png", "webp"] as const) {
-    const radio = el("input", { type: "radio", name: "save-format", value: format }) as HTMLInputElement;
-    radios.set(format, radio);
-    formatRow.append(el("label", { class: "pm-check" }, radio, ` ${FORMAT_LABEL[format]}`));
-  }
-  const format = (): SaveFormat => (radios.get("webp")!.checked ? "webp" : "png");
-  const setFormat = (f: SaveFormat) => {
-    for (const [value, radio] of radios) radio.checked = value === f;
-  };
-  setFormat(options.format);
+  const { row: formatToggle, format, setFormat } = formatRow(options.format);
   const limit = `${options.constraints.maxKilobytes} KB`;
 
   function sync(): void {
@@ -140,7 +155,7 @@ export async function saveDialog(options: SaveDialogOptions): Promise<void> {
       ...(origin ? [targetRow] : []),
       packSection,
       el("p", { class: "field-label" }, "Format"),
-      formatRow,
+      formatToggle,
       el(
         "p",
         { class: "muted pm-hint" },
@@ -172,5 +187,98 @@ export async function saveDialog(options: SaveDialogOptions): Promise<void> {
   sync();
   if (replacing() || initialFocus("save", picker.selected() !== null) === "submit") handle.buttons.get("save")?.focus();
   else picker.focus();
+  await handle.result;
+}
+
+export interface ThumbnailSaveOptions {
+  readonly constraints: ConstraintSet; // THUMBNAIL
+  readonly format: SaveFormat;
+  /** The pack whose thumbnail this session saves into. */
+  readonly origin: ThumbnailOrigin;
+  submit(choice: { readonly format: SaveFormat }, setFormat: (format: SaveFormat) => void): Promise<string | null>;
+}
+
+/**
+ * Open the thumbnail save dialog (SPM-12): the pack is already chosen (the
+ * session's origin), so it shows the pack's current title and only the
+ * format is picked. Saving runs in `submit` like the sticker dialog's, so a
+ * refusal stays in the dialog.
+ */
+export async function thumbnailSaveDialog(options: ThumbnailSaveOptions): Promise<void> {
+  const { origin } = options;
+  const message = el("div", { class: "message", role: "alert" });
+  // The pack's title as the session took it, replaced by the current one
+  // once the open lookup answers (like the sticker dialog's Replace label).
+  const title = el("span", {}, `“${origin.packTitle}”`);
+  const packSection = el(
+    "div",
+    { class: "editor-save-pack" },
+    el("p", { class: "field-label" }, "Pack"),
+    el("p", {}, title),
+  );
+  const { row, format, setFormat } = formatRow(options.format);
+  const limit = `${options.constraints.maxKilobytes} KB`;
+  let handle: DialogHandle<"save" | "cancel"> | null = null;
+  /** Why Save is disabled (SPEC §2: the reason shows in its tooltip), or null. */
+  let blocked: string | null = origin.otherLibrary
+    ? "The pack belongs to the Library used before, so the thumbnail cannot be saved."
+    : null;
+  if (blocked) message.textContent = blocked;
+  const sync = (): void => {
+    const save = handle?.buttons.get("save");
+    if (!save) return;
+    save.disabled = blocked !== null;
+    save.title = blocked ?? "";
+  };
+
+  const save = async (): Promise<boolean> => {
+    message.textContent = "";
+    try {
+      const stay = await options.submit({ format: format() }, setFormat);
+      if (stay !== null) {
+        message.textContent = stay;
+        return false;
+      }
+      return true;
+    } catch (err) {
+      message.textContent = errorMessage(err);
+      return false;
+    }
+  };
+
+  handle = openDialog<"save" | "cancel">(
+    "Save thumbnail",
+    [
+      packSection,
+      el("p", { class: "field-label" }, "Format"),
+      row,
+      el(
+        "p",
+        { class: "muted pm-hint" },
+        `PNG keeps every pixel. WEBP is smaller: it keeps every pixel when that fits in ${limit}, and otherwise lowers the quality only as far as the limit needs.`,
+      ),
+      message,
+    ],
+    [
+      { label: "Save", value: "save", variant: "primary", action: save },
+      { label: "Cancel", value: "cancel" },
+    ],
+    "cancel",
+  );
+  sync();
+  // Look the pack up (never an old Library's id), showing its current title.
+  if (!origin.otherLibrary) {
+    try {
+      const view = await loadPackView(origin.packId);
+      title.textContent = `“${view.pack.title}”`;
+      // The pack is inherently chosen: Save starts focused, like the sticker
+      // dialog with a pack pre-chosen, so Enter saves at once.
+      handle.buttons.get("save")?.focus();
+    } catch {
+      blocked = `The pack “${origin.packTitle}” no longer exists, so the thumbnail cannot be saved.`;
+      message.textContent = blocked;
+      sync();
+    }
+  }
   await handle.result;
 }

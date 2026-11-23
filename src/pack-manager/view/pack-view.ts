@@ -3,14 +3,17 @@
 // thumbnail slot at its end, and the selection panel. Rules live in
 // ../model; this file wires them to the DOM and the commands.
 import { stickerOrigin, type StickerOrigin } from "../../shared/sticker-origin";
-import { takeChangedStickers } from "../model/changed-files";
+import type { ThumbnailOrigin } from "../../shared/thumbnail-origin";
+import { takeChangedStickers, takeChangedThumbnails } from "../model/changed-files";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { editorCanImport } from "../../shared/import-extensions";
+import { open } from "@tauri-apps/plugin-dialog";
+import { editorCanImport, IMPORT_EXTENSIONS } from "../../shared/import-extensions";
 import { explorerLabel, icon } from "../../icons";
 import { el, errorMessage, onActivate, withMessage } from "../../ui";
 import {
   checkStickerFile,
   deleteStickers,
+  deleteThumbnail,
   importStickers,
   loadPackView,
   openPack,
@@ -54,7 +57,18 @@ import { emojiCountWarning, emojiWarning } from "../model/emoji";
 import { importOrder } from "../model/import-order";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { dialogOpen } from "../../dialog";
-import { confirmGoLive, confirmRevertToDraft, confirmStickerDelete, editChoiceDialog, invalidFileDialog, sendDialog, statusBadge } from "./dialogs";
+import {
+  confirmGoLive,
+  confirmRevertToDraft,
+  confirmStickerDelete,
+  confirmThumbnailDelete,
+  editChoiceDialog,
+  invalidFileDialog,
+  sendDialog,
+  statusBadge,
+  stickerChoiceDialog,
+  thumbnailSourceDialog,
+} from "./dialogs";
 import { aggregatePanel, detailPanel, emptyPanel, thumbnailPanel, type PanelActions } from "./panels";
 import { previewImage, Previews } from "./previews";
 import { cancelReorderDrag, startReorderDrag, type ReorderDragHost } from "./reorder-drag";
@@ -64,6 +78,8 @@ export interface PackViewHost {
   back(): void;
   /** Show the Editor with this image open; `origin` when it is this pack's sticker (Edit). */
   openInEditor(path: string, origin?: StickerOrigin): void;
+  /** Show the Editor's Thumbnail mode with this image open (the pack's thumbnail session). */
+  openThumbnailInEditor(path: string, origin: ThumbnailOrigin): void;
 }
 
 export interface PackViewHandle {
@@ -71,12 +87,13 @@ export interface PackViewHandle {
   /** Re-read the pack without a Missing scan (e.g. the Editor saved into it). */
   reload(): void;
   /**
-   * Show sticker `id` (the Editor's saved-note link): re-read the pack unless
-   * `fresh` (just opened), then Normal mode, that sticker alone selected
-   * (detail panel), scrolled into view. Runs like every pack action: one at
-   * a time, errors (and a sticker gone meanwhile) in the message line.
+   * Show sticker `id` (the Editor's saved-note link), or the thumbnail slot
+   * when `id` is null: re-read the pack unless `fresh` (just opened), then
+   * Normal mode, that one alone selected (its panel), scrolled into view.
+   * Runs like every pack action: one at a time, errors (and a sticker gone
+   * meanwhile) in the message line.
    */
-  reveal(id: number, fresh: boolean): void;
+  reveal(id: number | null, fresh: boolean): void;
   destroy(): void;
 }
 
@@ -263,6 +280,35 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
 
   // ---- Panel actions ----
 
+  /**
+   * Native picker for one image to make the thumbnail from. Local twin of
+   * the Editor's pickImageFile (editor/api.ts): it cannot be imported here
+   * without crossing the view/tool boundary, but the import formats match.
+   * Returns null when cancelled.
+   */
+  async function pickImageFile(title: string): Promise<string | null> {
+    const selected = await open({
+      directory: false,
+      multiple: false,
+      title,
+      filters: [{ name: "Images", extensions: IMPORT_EXTENSIONS }],
+    });
+    return typeof selected === "string" ? selected : null;
+  }
+
+  /** Make or replace the thumbnail (SPM-12): a new image, or a copy of a pack sticker, in the Editor's Thumbnail mode. */
+  async function editThumbnail(): Promise<void> {
+    const choice = await thumbnailSourceDialog(!!view.pack.thumbnail, view.stickers.length > 0);
+    const origin: ThumbnailOrigin = { packId, packTitle: view.pack.title };
+    if (choice === "new") {
+      const path = await pickImageFile("Choose an image for the thumbnail");
+      if (path) host.openThumbnailInEditor(path, origin);
+    } else if (choice === "sticker") {
+      const sticker = await stickerChoiceDialog(view.stickers, previews);
+      if (sticker) host.openThumbnailInEditor(await stickerFilePath(sticker.id), origin);
+    }
+  }
+
   async function replace(sticker: StickerView): Promise<void> {
     const [path] = await pickStickerFiles(false, `Replace sticker #${sticker.position}`);
     if (!path) return;
@@ -282,6 +328,14 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     if (!(await confirmStickerDelete(stickers, previews))) return;
     setView(await deleteStickers(packId, stickers.map((s) => s.id)));
     notice = `Deleted ${stickerCountText(stickers.length)}.`;
+  }
+
+  /** Delete the thumbnail and its file, after the confirmation (SPM-12). */
+  async function removeThumbnail(): Promise<void> {
+    if (!(await confirmThumbnailDelete(view, previews))) return;
+    previews.forgetThumbnail();
+    setView(await deleteThumbnail(packId));
+    notice = "Thumbnail deleted.";
   }
 
   const actions: PanelActions = {
@@ -327,6 +381,8 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       render();
     },
     revealThumbnail: () => void run(() => revealThumbnail(packId)),
+    editThumbnail: () => void run(() => editThumbnail()),
+    removeThumbnail: () => void run(() => removeThumbnail()),
   };
 
   // ---- Grid ----
@@ -429,8 +485,11 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
         selection = NO_SELECTION;
         render();
       }
-    } else if (e.key === "Delete" && selectionActive(mode) && selection.ids.length > 0) {
-      actions.remove(selected());
+    } else if (e.key === "Delete" && selectionActive(mode) && (selection.ids.length > 0 || (selection.thumbnail && view.pack.thumbnail))) {
+      // The thumbnail slot deletes through its own confirmation (SPM-12); an
+      // empty slot has nothing to delete, so its Delete key does nothing.
+      if (selection.thumbnail) actions.removeThumbnail();
+      else actions.remove(selected());
     } else return;
     e.preventDefault();
   };
@@ -552,6 +611,8 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   /** Re-read the pack (no Missing scan); the Editor may have replaced a file, whose cached preview is stale. */
   async function reread(): Promise<void> {
     for (const id of takeChangedStickers()) previews.forget(id);
+    // A thumbnail the Editor replaced (SPM-12) is stale the same way.
+    if (takeChangedThumbnails().includes(packId)) previews.forgetThumbnail();
     setView(await loadPackView(packId));
   }
 
@@ -567,12 +628,20 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       }
       void run(async () => {
         if (!fresh) await reread();
-        if (!view.stickers.some((s) => s.id === id)) throw new Error(REVEAL_GONE);
         // Design decision 2026-11-22: the link leaves Reorder mode and replaces the selection.
         mode = "normal";
-        selection = { ids: [id], thumbnail: false, anchor: id };
+        if (id === null) {
+          // The thumbnail slot (SPM-12): selected on its own, its panel shown.
+          selection = clickThumbnail();
+        } else {
+          if (!view.stickers.some((s) => s.id === id)) throw new Error(REVEAL_GONE);
+          selection = { ids: [id], thumbnail: false, anchor: id };
+        }
         render();
-        const tile = grid.querySelector<HTMLElement>(`.pm-tile[data-id="${id}"]`);
+        const tile =
+          id === null
+            ? grid.querySelector<HTMLElement>(".pm-thumb-slot")
+            : grid.querySelector<HTMLElement>(`.pm-tile[data-id="${id}"]`);
         tile?.scrollIntoView({ block: "nearest" });
         tile?.focus({ preventScroll: true });
       });

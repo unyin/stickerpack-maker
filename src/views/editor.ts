@@ -5,7 +5,8 @@
 // SPM-9 adds the text tool, the cut selection tools and paste; SPM-8 the
 // effect tools (outline, fuzzy glow, warp/bulge); SPM-7 the background
 // removal and its Erase/Restore refine brushes; SPM-10 the save pipeline
-// (Save…, Ctrl+S).
+// (Save…, Ctrl+S); SPM-12 the Thumbnail mode sessions the Pack Manager's
+// thumbnail slot opens.
 import "../editor/editor.css";
 import { baseName } from "../api";
 import {
@@ -42,17 +43,24 @@ import {
   saveBlocker,
   saveRefusal,
   savedText,
+  showStickerLink,
+  showThumbnailLink,
+  stickerGoneText,
+  thumbnailGoneText,
+  thumbnailSavedText,
   type SaveFormat,
   originAfterSave,
-  showStickerLink,
-  stickerGoneText,
+  type Saved,
+  type SavedThumbnail,
+  type SaveOutcome,
   type SaveTarget,
   type TooLarge,
 } from "../editor/save";
 import type { StickerOrigin } from "../shared/sticker-origin";
-import { originNow, saveDialog } from "../editor/view/save-dialog";
+import type { ThumbnailOrigin } from "../shared/thumbnail-origin";
+import { originNow, saveDialog, thumbnailSaveDialog } from "../editor/view/save-dialog";
 import { packMemory } from "../pack-manager/model/pack-memory";
-import { markStickerFileChanged } from "../pack-manager/model/changed-files";
+import { markStickerFileChanged, markThumbnailChanged } from "../pack-manager/model/changed-files";
 import { loadPackView, type Sticker } from "../pack-manager/api";
 import {
   addRasterLayer,
@@ -86,7 +94,7 @@ import {
   type TextStyle,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
-import { readoutStatus, STICKER, startCanvas, TEXT_FONT_SIZE } from "../editor/model/constraints";
+import { readoutStatus, startCanvas, STICKER, THUMBNAIL, TEXT_FONT_SIZE, type ConstraintSet } from "../editor/model/constraints";
 import {
   DEFAULT_FONT_SIZE,
   DEFAULT_TEXT_COLOR,
@@ -138,10 +146,10 @@ export function renderEditor(): HTMLElement {
 }
 
 function buildEditor(): HTMLElement {
-  // The active constraint set (SPEC §6-7). Sticker mode is the only one wired
-  // in the UI; Thumbnail mode (SPM-12) passes THUMBNAIL instead.
-  const constraints = STICKER;
-  const targetSide = constraints.side;
+  // The active constraint set (SPEC §6-7): Sticker mode for a sticker
+  // session, Thumbnail mode (SPM-12) for a pack's thumbnail session. It is
+  // session state: never changed mid-session, only on open and close.
+  let constraints: ConstraintSet = STICKER;
   let session: EditorSession | null = null;
   let stage: EditorStage | null = null;
   let busy = false;
@@ -162,6 +170,8 @@ function buildEditor(): HTMLElement {
   let lastFormat: SaveFormat = "png";
   // The sticker this session edits when the Pack Manager's Edit opened it, else null (SPM-10).
   let origin: StickerOrigin | null = null;
+  // The pack whose thumbnail a Thumbnail mode session saves into (SPM-12), else null.
+  let thumbnailOrigin: ThumbnailOrigin | null = null;
   // Counts Library changes, so a saved note's link knows its sticker is from an old one.
   let libraryGeneration = 0;
 
@@ -184,12 +194,14 @@ function buildEditor(): HTMLElement {
     clearNote();
     session?.redo();
   });
-  // Sizing tools (SPEC §6), all on the whole image as one group.
-  const fitButton = button(`Fit to ${targetSide}×${targetSide}`, () =>
-    resizeWholeImage((doc, c) => fitToBox(doc, c, targetSide)),
+  // Sizing tools (SPEC §6), all on the whole image as one group. Their labels
+  // and titles come from the active constraint set and are (re)set in
+  // refresh(), which every session start runs.
+  const fitButton = button("Fit", () =>
+    resizeWholeImage((doc, c) => fitToBox(doc, c, constraints.side)),
   );
-  const longestButton = button(`Longest side ${targetSide}`, () =>
-    resizeWholeImage((doc, c) => scaleLongestSide(doc, c, targetSide)),
+  const longestButton = button("Longest side", () =>
+    resizeWholeImage((doc, c) => scaleLongestSide(doc, c, constraints.side)),
   );
   const sideInput = el("input", {
     class: "editor-side-input",
@@ -207,7 +219,11 @@ function buildEditor(): HTMLElement {
   const resetViewButton = button("Reset view", () => stage?.fit());
   const closeButton = button("Close", () => run(async () => void (await closeSession())));
   const saveButton = button("Save…", () => run(saveSession), "primary");
-  const saveTitle = "Save the canvas as a sticker in a pack (Ctrl+S)";
+  /** The Save button's idle title: what saving does in the session's mode. */
+  const saveTitle = () =>
+    constraints.mode === "thumbnail"
+      ? "Save the canvas as this pack's thumbnail (Ctrl+S)"
+      : "Save the canvas as a sticker in a pack (Ctrl+S)";
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
@@ -341,16 +357,9 @@ function buildEditor(): HTMLElement {
 
   undoButton.title = "Undo (Ctrl+Z)";
   redoButton.title = "Redo (Ctrl+Y)";
-  const fitTitle =
-    `Scale everything on the canvas together, as one image, so its longest side is ${targetSide} px; ` +
-    `the canvas becomes ${targetSide}×${targetSide} with transparent padding`;
-  const longestTitle =
-    `Scale everything on the canvas together so its longest side is ${targetSide} px; the canvas becomes the image (no padding)`;
   const resizeTitle =
     `Scale everything on the canvas together so its longest side is the entered size (1–${IMPORT_MAX_SIDE} px); ` +
     "the canvas size stays";
-  fitButton.title = fitTitle;
-  longestButton.title = longestTitle;
   resizeButton.title = resizeTitle;
   resetViewButton.title = "Zoom and centre the canvas in view (changes the view only)";
   boxButton.title = "Show or hide the crop box";
@@ -488,6 +497,34 @@ function buildEditor(): HTMLElement {
     return link;
   }
 
+  /**
+   * The saved note's link for a thumbnail save (SPM-12), mirroring stickerLink:
+   * shows the pack's thumbnail slot in the Pack Manager, this session staying
+   * as it is. A pack gone since (deleted, another Library) is reported here.
+   */
+  function thumbnailLink(packId: number, packTitle: string): HTMLElement {
+    const { text, label } = showThumbnailLink(packTitle);
+    const link = el("button", { type: "button", class: "editor-link", "aria-label": label, title: label }, text);
+    // Not through run(): that clears the message line, and the note (with its link) should stay.
+    const generation = libraryGeneration;
+    link.addEventListener("click", async () => {
+      if (busy) return;
+      // Its ids belong to the Library it was saved into: never look them up in another.
+      if (generation !== libraryGeneration) {
+        say(thumbnailGoneText(packTitle, true));
+        return;
+      }
+      try {
+        await loadPackView(packId);
+        editorNav?.showThumbnail(packId);
+      } catch {
+        // the pack is gone
+        say(thumbnailGoneText(packTitle));
+      }
+    });
+    return link;
+  }
+
   /** Undo and redo take the neutral note back with them (owner decision 2026-11-22); errors stay. */
   function clearNote(): void {
     if (message.classList.contains("is-note")) say("");
@@ -559,12 +596,21 @@ function buildEditor(): HTMLElement {
     return image ? { image, name: baseName(path) } : null;
   }
 
-  async function openImage(path?: string, from: StickerOrigin | null = null): Promise<void> {
-    if (session) return; // one session at a time: Close first
-    const picked = await pickAndImport(path);
-    if (!picked) return;
-    origin = from;
-    session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(constraints)));
+  /**
+   * Start the one session with `picked`: adopt the mode's constraint set and
+   * origins, then build the stage (the wiring both entry modes share, in
+   * one place). The set's mode decides which origin is meaningful.
+   */
+  function startSession(
+    picked: { image: RgbaImage; name: string },
+    set: ConstraintSet,
+    stickerFrom: StickerOrigin | null,
+    thumbnailFrom: ThumbnailOrigin | null,
+  ): void {
+    constraints = set;
+    origin = stickerFrom;
+    thumbnailOrigin = thumbnailFrom;
+    session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(set)));
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
     stage.setCropGuidesVisible(showBox);
@@ -584,6 +630,13 @@ function buildEditor(): HTMLElement {
     });
   }
 
+  async function openImage(path?: string, from: StickerOrigin | null = null): Promise<void> {
+    if (session) return; // one session at a time: Close first
+    const picked = await pickAndImport(path);
+    if (!picked) return;
+    startSession(picked, STICKER, from, null);
+  }
+
   async function addImageAsLayer(): Promise<void> {
     const current = session;
     if (!current) return;
@@ -592,6 +645,18 @@ function buildEditor(): HTMLElement {
     const id = nextLayerId(current.doc);
     current.apply((doc) => addRasterLayer(doc, picked.image, picked.name, centeredPlacement(doc, picked.image)));
     current.select(id);
+  }
+
+  /**
+   * Open the image at `path` in Thumbnail mode (SPM-12): the canvas starts
+   * at the thumbnail side square and the session saves into `from`'s pack.
+   * One session at a time, guaranteed by the hook that calls here.
+   */
+  async function openThumbnail(path: string, from: ThumbnailOrigin): Promise<void> {
+    if (session) return; // one session at a time: Close first
+    const picked = await pickAndImport(path);
+    if (!picked) return;
+    startSession(picked, THUMBNAIL, null, from);
   }
 
   async function mergeSelected(): Promise<void> {
@@ -652,7 +717,7 @@ function buildEditor(): HTMLElement {
    * button from it, and Crop runs from it, so all four use the same box.
    */
   function cropState(doc: Doc): { box: Rect; plan: CropAction[]; blocker: string | null } {
-    const box = cropBox(doc, targetSide);
+    const box = cropBox(doc, constraints.side);
     const plan = planCrop(doc, box);
     return { box, plan, blocker: cropBlocker(plan, box) };
   }
@@ -678,7 +743,10 @@ function buildEditor(): HTMLElement {
     // copy away (owner decision 2026-11-23). The save dialog's own lookup
     // decides, so Replace-gone and this warning can never disagree; a dirty
     // session never reaches here (its warning has decided), and one without
-    // an origin (a plain file, never saved into a slot) never warns.
+    // an origin (a plain file, never saved into a slot) never warns. A
+    // Thumbnail mode session deliberately never warns either: its origin is
+    // a pack, not the only copy of an image (SPEC §6 warns for origin
+    // stickers only), and `origin` stays null there.
     if (!session.isDirty && origin && originGoneCloseWarning(origin, await originNow(origin))) {
       if (!(await confirmCloseOriginGone())) return false;
     }
@@ -692,6 +760,9 @@ function buildEditor(): HTMLElement {
     warp = null;
     basis = null;
     origin = null;
+    thumbnailOrigin = null;
+    // Back to the default set: the toolbar's labels and rules read it.
+    constraints = STICKER;
     textOverlay.close();
     stage?.destroy();
     stage = null;
@@ -706,12 +777,47 @@ function buildEditor(): HTMLElement {
   // ---- Save (SPM-10) ----
 
   /**
+   * The over-cap save flow both modes share (owner decision 2026-11-21,
+   * CMT-144): save in `format` to `target`; a PNG over the cap offers WEBP.
+   * Resolves the saved outcome; the line that keeps the save dialog open
+   * (nothing was saved: the PNG was declined); or null when the dialog
+   * should close without a save because the cap was exhausted -
+   * `onExhausted` then received the outcome for the question that follows
+   * the dialog. The target decides the saved outcome's kind, so the caller
+   * narrows it.
+   */
+  async function saveTo(
+    doc: Doc,
+    format: SaveFormat,
+    target: SaveTarget,
+    setFormat: (format: SaveFormat) => void,
+    onExhausted: (outcome: TooLarge) => void,
+  ): Promise<SaveOutcome | string | null> {
+    const result = await runSave(format, {
+      save: (f) => saveImage(doc, f, target),
+      offerWebp: async (outcome) => {
+        const ok = await confirmWebp(pngTooLargeText(outcome));
+        if (ok) setFormat("webp");
+        return ok;
+      },
+    });
+    if (result.kind === "declined") return declinedText(result.outcome);
+    if (result.kind === "exhausted") {
+      onExhausted(result.outcome);
+      return null; // the save dialog closes; the question below follows
+    }
+    return result.outcome;
+  }
+
+  /**
    * Save (SPEC §6, hard-blocked): the save dialog picks the pack and the
    * format; Rust flattens what is inside the canvas, encodes it within the
    * size cap and appends it to the pack. A PNG over the cap offers WEBP; a
    * WEBP over the cap even at its lowest quality sends the user back to the
    * Editor (owner decision 2026-11-21, CMT-144). A save clears the unsaved
-   * changes; the session stays open.
+   * changes; the session stays open. A Thumbnail mode session (SPM-12) runs
+   * the same flow into the pack's thumbnail instead: the pack is already
+   * chosen, so its dialog picks only the format.
    */
   async function saveSession(): Promise<void> {
     const current = session;
@@ -725,45 +831,76 @@ function buildEditor(): HTMLElement {
     if (refusal) return say(refusal);
     const doc = current.doc;
     let exhausted: TooLarge | null = null;
-    await saveDialog({
-      constraints,
-      format: lastFormat,
-      origin,
-      submit: async (choice, setFormat) => {
-        const { format } = choice;
-        const target: SaveTarget =
-          choice.kind === "replace"
-            ? { kind: "replace", stickerId: choice.origin.stickerId }
-            : { kind: "append", packId: choice.pack.id };
-        const packTitle = choice.kind === "replace" ? choice.now.packTitle : choice.pack.title;
-        const result = await runSave(format, {
-          save: (f) => saveImage(doc, f, target),
-          offerWebp: async (outcome) => {
-            const ok = await confirmWebp(pngTooLargeText(outcome));
-            if (ok) setFormat("webp");
-            return ok;
-          },
-        });
-        if (result.kind === "declined") return declinedText(result.outcome);
-        if (result.kind === "exhausted") {
-          exhausted = result.outcome;
-          return null; // the save dialog closes; the question below follows
-        }
-        const saved = result.outcome;
-        packMemory.lastSavedPackId = saved.sticker.packId;
-        lastFormat = saved.sticker.format;
-        // The open pack view must not keep showing the old picture of a replaced sticker.
-        if (target.kind === "replace") markStickerFileChanged(saved.sticker.id);
-        // The session now edits the saved sticker: the next save replaces it (design decision 2026-11-22).
-        origin = originAfterSave(saved, packTitle);
-        // An Erase, Restore or Warp press could commit under this dialog; the
-        // mid-stroke refusal above makes that known path impossible. The
-        // check stays as defence in depth for anything unforeseen.
-        if (current.doc === doc) current.markSaved();
-        say(savedText(saved, packTitle, target), "note", " ", stickerLink(saved.sticker, packTitle));
-        return null;
-      },
-    });
+    if (constraints.mode === "thumbnail") {
+      // Thumbnail mode (SPM-12): the pack is the session's origin, already
+      // chosen; only the format is picked. The over-cap flow is the same
+      // owner decision as a sticker save (CMT-144).
+      const from = thumbnailOrigin;
+      if (!from) return; // unreachable: a thumbnail session always has one
+      await thumbnailSaveDialog({
+        constraints,
+        format: lastFormat,
+        origin: from,
+        submit: async (choice, setFormat) => {
+          const { format } = choice;
+          const target: SaveTarget = { kind: "thumbnail", packId: from.packId };
+          const saved = await saveTo(doc, format, target, setFormat, (outcome) => {
+            exhausted = outcome;
+          });
+          // Nothing was saved: the declined line stays in the dialog, or the exhausted
+          // null closes it for the give-up question below.
+          if (saved === null || typeof saved === "string") return saved;
+          const outcome = saved as SavedThumbnail; // the target decides the saved kind; TS cannot see it
+          // The open pack view must not keep showing the old thumbnail picture.
+          markThumbnailChanged(outcome.pack.id);
+          lastFormat = format;
+          // An Erase, Restore or Warp press could commit under this dialog; the
+          // mid-stroke refusal above makes that known path impossible. The
+          // check stays as defence in depth for anything unforeseen.
+          if (current.doc === doc) current.markSaved();
+          say(
+            thumbnailSavedText(outcome.pack, outcome.bytes, outcome.quality),
+            "note",
+            " ",
+            thumbnailLink(outcome.pack.id, outcome.pack.title),
+          );
+          return null;
+        },
+      });
+    } else {
+      await saveDialog({
+        constraints,
+        format: lastFormat,
+        origin,
+        submit: async (choice, setFormat) => {
+          const { format } = choice;
+          const target: SaveTarget =
+            choice.kind === "replace"
+              ? { kind: "replace", stickerId: choice.origin.stickerId }
+              : { kind: "append", packId: choice.pack.id };
+          const packTitle = choice.kind === "replace" ? choice.now.packTitle : choice.pack.title;
+          const saved = await saveTo(doc, format, target, setFormat, (outcome) => {
+            exhausted = outcome;
+          });
+          // Nothing was saved: the declined line stays in the dialog, or the exhausted
+          // null closes it for the give-up question below.
+          if (saved === null || typeof saved === "string") return saved;
+          const outcome = saved as Saved; // the target decides the saved kind; TS cannot see it
+          packMemory.lastSavedPackId = outcome.sticker.packId;
+          lastFormat = outcome.sticker.format;
+          // The open pack view must not keep showing the old picture of a replaced sticker.
+          if (target.kind === "replace") markStickerFileChanged(outcome.sticker.id);
+          // The session now edits the saved sticker: the next save replaces it (design decision 2026-11-22).
+          origin = originAfterSave(outcome, packTitle);
+          // An Erase, Restore or Warp press could commit under this dialog; the
+          // mid-stroke refusal above makes that known path impossible. The
+          // check stays as defence in depth for anything unforeseen.
+          if (current.doc === doc) current.markSaved();
+          say(savedText(outcome, packTitle, target), "note", " ", stickerLink(outcome.sticker, packTitle));
+          return null;
+        },
+      });
+    }
     // Even WEBP at its lowest quality is too large (owner decision 2026-11-22):
     // back to the Editor, or give up on this session without the unsaved-changes question.
     // Its limit is the cap Rust held the save to: the constraint set's (or the debug override's).
@@ -1018,7 +1155,7 @@ function buildEditor(): HTMLElement {
       // The model's inference wait is a generic busy action: Save shows its
       // canvas reason again (or its normal title) until run()'s closing refresh().
       const saveReason = session ? saveBlocker(session.doc, constraints) : null;
-      saveButton.title = saveReason ?? saveTitle;
+      saveButton.title = saveReason ?? saveTitle();
     }
   }
 
@@ -1228,6 +1365,18 @@ function buildEditor(): HTMLElement {
     }
     renderLayers(current);
     const doc = current.doc;
+    // The toolbar's mode-dependent labels (SPEC §6): the sizing tools take
+    // their side from the active constraint set, and Save's idle title says
+    // what saving does in this mode. The mode never changes mid-session, so
+    // this is stable across refreshes.
+    const side = constraints.side;
+    fitButton.textContent = `Fit to ${side}×${side}`;
+    longestButton.textContent = `Longest side ${side}`;
+    const fitTitle =
+      `Scale everything on the canvas together, as one image, so its longest side is ${side} px; ` +
+      `the canvas becomes ${side}×${side} with transparent padding`;
+    const longestTitle =
+      `Scale everything on the canvas together so its longest side is ${side} px; the canvas becomes the image (no padding)`;
     const single = current.selection.length === 1 ? current.selection[0] : null;
     const index = single ? layerIndex(doc, single) : -1;
     const blocker = mergeBlocker(current.selection);
@@ -1266,7 +1415,7 @@ function buildEditor(): HTMLElement {
     saveButton.disabled = busy || saveReason !== null;
     // While the model downloads (the one long busy wait), the disabled Save
     // says the download's progress instead of its idle title (SPEC §2).
-    saveButton.title = saveReason ?? downloadNote ?? saveTitle;
+    saveButton.title = saveReason ?? downloadNote ?? saveTitle();
     undoButton.disabled = busy || !current.canUndo;
     redoButton.disabled = busy || !current.canRedo;
     upButton.disabled = busy || !single || index === doc.layers.length - 1;
@@ -1428,9 +1577,18 @@ function buildEditor(): HTMLElement {
       showEditor(); // either way: Keep editing shows the open image
       if (closed) await openImage(path, from ?? null);
     });
+  // The thumbnail slot's hook (SPM-12): the same questions, then Thumbnail mode.
+  openThumbnailHook = (path, showEditor, from) =>
+    run(async () => {
+      const closed = await closeSession();
+      showEditor();
+      if (closed) await openThumbnail(path, from);
+    });
   // The dialog then says why Replace is gone, rather than silently dropping it.
   forgetOriginHook = () => {
     if (origin) origin = { ...origin, otherLibrary: true };
+    // A thumbnail session's pack id is just as old: its save says so too.
+    if (thumbnailOrigin) thumbnailOrigin = { ...thumbnailOrigin, otherLibrary: true };
     libraryGeneration++; // a saved note's link now points into the old Library
   };
 
@@ -1445,12 +1603,15 @@ interface WarpInProgress {
 }
 
 let openFileHook: ((path: string, showEditor: () => void, origin?: StickerOrigin) => Promise<void>) | null = null;
+let openThumbnailHook: ((path: string, showEditor: () => void, from: ThumbnailOrigin) => Promise<void>) | null = null;
 let forgetOriginHook: (() => void) | null = null;
 
 /** What the Editor asks of the app shell. */
 export interface EditorNav {
   /** Switch to the Pack Manager showing this sticker (the saved note's link). */
   showSticker(packId: number, stickerId: number): void;
+  /** Switch to the Pack Manager showing the pack's thumbnail slot (the saved note's link). */
+  showThumbnail(packId: number): void;
 }
 
 let editorNav: EditorNav | null = null;
@@ -1483,6 +1644,21 @@ export function forgetEditorOrigin(): void {
 export function openFileInEditor(path: string, showEditor: () => void, origin?: StickerOrigin): Promise<void> {
   renderEditor(); // builds the Editor once, which installs the hook
   return openFileHook ? openFileHook(path, showEditor, origin) : Promise.resolve();
+}
+
+/**
+ * Open the image at `path` in the Editor's Thumbnail mode (SPM-12): the
+ * pack view's thumbnail slot sends a new image or a copy of a pack sticker.
+ * Saving the session replaces the pack's thumbnail. One session at a time:
+ * an open session is asked its questions first, as Open image asks them
+ * (unsaved changes, or the gone-origin question for a clean sticker session
+ * whose origin is gone). The thumbnail session itself never gets the
+ * gone-origin question: a thumbnail is not an origin sticker (deliberate;
+ * SPEC §6's warning is about stickers).
+ */
+export function openThumbnailFileInEditor(path: string, showEditor: () => void, origin: ThumbnailOrigin): Promise<void> {
+  renderEditor();
+  return openThumbnailHook ? openThumbnailHook(path, showEditor, origin) : Promise.resolve();
 }
 
 /** The unsaved-changes question, worded for both Close and opening another image. */

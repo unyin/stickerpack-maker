@@ -1,8 +1,9 @@
 import type { AppState } from "./api";
 import { clear, el } from "./ui";
-import { forgetEditorOrigin, openFileInEditor, renderEditor, setEditorNav } from "./views/editor";
+import { forgetEditorOrigin, openFileInEditor, openThumbnailFileInEditor, renderEditor, setEditorNav } from "./views/editor";
 import type { StickerOrigin } from "./shared/sticker-origin";
-import { forgetPackManager, renderPackManager, revealStickerOnShow } from "./views/pack-manager";
+import type { ThumbnailOrigin } from "./shared/thumbnail-origin";
+import { forgetPackManager, renderPackManager, revealStickerOnShow, revealThumbnailOnShow } from "./views/pack-manager";
 import { resetPackMemory } from "./pack-manager/model/pack-memory";
 import { renderSettings } from "./views/settings";
 
@@ -34,7 +35,8 @@ export function renderShell(
     }
     clear(content);
     if (view === "editor") content.append(renderEditor());
-    else if (view === "pack-manager") content.append(renderPackManager(state.libraryPath, { openInEditor }));
+    else if (view === "pack-manager")
+      content.append(renderPackManager(state.libraryPath, { openInEditor, openThumbnailInEditor }));
     else
       renderSettings(content, state, () => {
         forgetPackManager(); // a new Library may sit at the same path
@@ -44,10 +46,15 @@ export function renderShell(
       });
   }
 
-  // Editor -> Pack Manager: the saved note's link shows the sticker there (SPM-10).
+  // Editor -> Pack Manager: the saved note's links show the sticker or the
+  // pack's thumbnail slot there (SPM-10, SPM-12).
   setEditorNav({
     showSticker: (packId, stickerId) => {
       revealStickerOnShow(packId, stickerId);
+      show("pack-manager");
+    },
+    showThumbnail: (packId) => {
+      revealThumbnailOnShow(packId);
       show("pack-manager");
     },
   });
@@ -55,6 +62,11 @@ export function renderShell(
   /** Pack Manager -> Editor: the Editor asks about unsaved changes, then switches tabs and opens the file. */
   function openInEditor(path: string, origin?: StickerOrigin): void {
     void openFileInEditor(path, () => show("editor"), origin);
+  }
+
+  /** Pack Manager -> Editor: the thumbnail slot's Create/Replace opens Thumbnail mode. */
+  function openThumbnailInEditor(path: string, origin: ThumbnailOrigin): void {
+    void openThumbnailFileInEditor(path, () => show("editor"), origin);
   }
 
   for (const item of NAV) {

@@ -41,6 +41,7 @@ test("commands use the Rust names and camelCase argument keys", async () => {
   await api.stickerFilePath(5);
   await api.revealSticker(5);
   await api.revealThumbnail(1);
+  await api.deleteThumbnail(1);
   await api.stickerImage(5);
   await api.thumbnailImage(1);
   expect(calls).toEqual([
@@ -62,6 +63,7 @@ test("commands use the Rust names and camelCase argument keys", async () => {
     { cmd: "sticker_file_path", args: { stickerId: 5 } },
     { cmd: "reveal_sticker", args: { stickerId: 5 } },
     { cmd: "reveal_thumbnail", args: { packId: 1 } },
+    { cmd: "delete_thumbnail", args: { packId: 1 } },
     { cmd: "sticker_image", args: { stickerId: 5 } },
     { cmd: "thumbnail_image", args: { packId: 1 } },
   ]);

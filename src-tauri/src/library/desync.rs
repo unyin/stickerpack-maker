@@ -89,6 +89,14 @@ impl PresenceMemo {
         }
     }
 
+    /// Forget the remembered thumbnail file, after it was written or removed by
+    /// an operation: the next view reads the folder once.
+    pub fn forget_thumbnail(&self, pack_id: i64) {
+        if let Some(p) = self.lock().get_mut(&pack_id) {
+            p.thumbnail = None;
+        }
+    }
+
     /// Forget everything (the active Library changed: pack ids no longer
     /// mean the same packs).
     pub fn clear(&self) {

@@ -1,7 +1,8 @@
 //! The Editor's save command (SPEC §6 Save, SPM-10): flatten and encode in
 //! Rust (editor/save.rs, editor/encode.rs), then write through the Library
-//! core (`add_stickers` / `replace_sticker_file`), which validates the file
-//! once more as a sticker before it enters the pack. The typed TS wrapper is
+//! core (`add_stickers` / `replace_sticker_file` for stickers,
+//! `packs::set_thumbnail` for the thumbnail target, SPM-12), which validates
+//! the file once more before it enters the pack. The typed TS wrapper is
 //! `saveImage` in src/editor/api.ts.
 
 use std::path::{Path, PathBuf};
@@ -14,13 +15,15 @@ use tauri::State;
 
 use crate::editor::encode::{EncodeOutcome, Encoded, SaveFormat};
 use crate::editor::save::{render_for_save, ConstraintSet, SaveDoc};
-use crate::library::schema::Sticker;
+use crate::library::packs;
+use crate::library::schema::{Pack, Sticker};
 use crate::library::stickers::{self, NewSticker};
 use crate::pack_commands::{with_library, LibraryLock};
 use crate::{editor, SharedConfig};
 
-/// Where a save goes. Both are sticker slots, so a save is held to the
-/// sticker constraint set; Thumbnail mode (SPM-12) adds its own target.
+/// Where a save goes: a sticker slot, or the pack's thumbnail (SPM-12). A
+/// sticker slot save is held to the sticker constraint set, a thumbnail save
+/// to the thumbnail one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum SaveTarget {
@@ -29,6 +32,9 @@ pub enum SaveTarget {
     /// The image of an existing sticker, keeping its position and Emoji
     /// String (the replace-in-slot path, consumed by SPM-11).
     Replace { sticker_id: i64 },
+    /// The pack's thumbnail slot (SPM-12): the pack's unnumbered thumbnail
+    /// file, replacing any existing one.
+    Thumbnail { pack_id: i64 },
 }
 
 /// The save request's header: the document, the chosen format and target.
@@ -48,6 +54,9 @@ pub enum SaveOutcome {
     /// Written: the sticker as it now is, the file's size, and the lossy
     /// WEBP quality used (None: lossless).
     Saved { sticker: Sticker, bytes: usize, quality: Option<u8> },
+    /// Written (a thumbnail save, SPM-12): the pack as it now is (thumbnail
+    /// set), the file's size, and the lossy WEBP quality used (None: lossless).
+    SavedThumbnail { pack: Pack, bytes: usize, quality: Option<u8> },
     /// Nothing was written: even the smallest encoding is over the cap.
     TooLarge { format: SaveFormat, bytes: usize, max_kilobytes: u64 },
 }
@@ -77,8 +86,12 @@ pub fn editor_save_image(
         .to_str()
         .map_err(|e| format!("the {SAVE_HEADER} header is not text: {e}"))?;
     let meta: SaveMeta = serde_json::from_str(header).map_err(|e| format!("the save header is invalid: {e}"))?;
-    // Every target is a sticker slot (see SaveTarget).
-    let set = ConstraintSet::Sticker;
+    // The target picks the constraint set (SPEC §6-7): a thumbnail save is
+    // held to exactly the thumbnail side square within its own cap.
+    let set = match meta.target {
+        SaveTarget::Thumbnail { .. } => ConstraintSet::Thumbnail,
+        _ => ConstraintSet::Sticker,
+    };
     let cap_kb = save_cap_kb(set);
     // The pixel work runs before taking the Library lock.
     let encoded = match render_for_save(set, &meta.doc, body, editor::text::system_fonts(), meta.format, cap_kb)? {
@@ -88,13 +101,21 @@ pub fn editor_save_image(
             return Ok(SaveOutcome::TooLarge { format, bytes: smallest, max_kilobytes: cap_kb })
         }
     };
-    with_library(&config, &lock, |conn, dir| {
-        let sticker = write_sticker(conn, dir, meta.target, &encoded)?;
-        if let SaveTarget::Replace { sticker_id } = meta.target {
-            // The file is new: the Pack Manager reads it again instead of trusting its last check.
-            lock.memo().forget_sticker(sticker.pack_id, sticker_id);
+    with_library(&config, &lock, |conn, dir| match meta.target {
+        SaveTarget::Thumbnail { pack_id } => {
+            let pack = write_thumbnail(conn, dir, pack_id, &encoded)?;
+            // The file is new: the Pack Manager reads it once instead of trusting its last check.
+            lock.memo().forget_thumbnail(pack_id);
+            Ok(SaveOutcome::SavedThumbnail { pack, bytes: encoded.bytes.len(), quality: encoded.quality })
         }
-        Ok(SaveOutcome::Saved { sticker, bytes: encoded.bytes.len(), quality: encoded.quality })
+        _ => {
+            let sticker = write_sticker(conn, dir, meta.target, &encoded)?;
+            if let SaveTarget::Replace { sticker_id } = meta.target {
+                // The file is new: the Pack Manager reads it again instead of trusting its last check.
+                lock.memo().forget_sticker(sticker.pack_id, sticker_id);
+            }
+            Ok(SaveOutcome::Saved { sticker, bytes: encoded.bytes.len(), quality: encoded.quality })
+        }
     })
 }
 
@@ -145,7 +166,19 @@ pub fn write_sticker(conn: &mut Connection, library_dir: &Path, target: SaveTarg
             outcome.added.pop().ok_or_else(|| "internal error: the saved sticker was not added".to_string())
         }
         SaveTarget::Replace { sticker_id } => stickers::replace_sticker_file(conn, library_dir, sticker_id, &temp.0),
+        // The command branches on the target before this helper
+        // (editor_save_image): a thumbnail save goes through write_thumbnail.
+        SaveTarget::Thumbnail { .. } => Err("internal error: a thumbnail save is not a sticker save".to_string()),
     }
+}
+
+/// Write encoded bytes as a pack's thumbnail (SPM-12): the bytes go to a
+/// temporary file, then the core checks it as a thumbnail (format, size,
+/// exact dimensions) like any other and places it as the pack's unnumbered
+/// `thumbnail.<ext>` file, replacing any existing one.
+pub fn write_thumbnail(conn: &mut Connection, library_dir: &Path, pack_id: i64, encoded: &Encoded) -> Result<Pack, String> {
+    let temp = TempFile::write(encoded.format.as_str(), &encoded.bytes)?;
+    packs::set_thumbnail(conn, library_dir, pack_id, &temp.0)
 }
 
 /// A file in the OS temp folder, deleted when dropped.
@@ -176,8 +209,8 @@ mod tests {
     use crate::editor::Rgba;
     use crate::library;
     use crate::library::packs::create_pack;
-    use crate::library::schema::{load_stickers, Format};
-    use crate::limits::{STICKER_MAX_KB, STICKER_SIDE};
+    use crate::library::schema::{load_pack, load_stickers, Format};
+    use crate::limits::{STICKER_MAX_KB, STICKER_SIDE, THUMBNAIL_MAX_KB, THUMBNAIL_SIDE};
 
     struct Lib {
         dir: tempfile::TempDir,
@@ -278,6 +311,75 @@ mod tests {
             temp.0.clone()
         };
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_thumbnail_save_writes_the_unnumbered_file_and_reports_the_pack() {
+        let mut lib = Lib::new();
+        let pack = create_pack(&mut lib.conn, lib.dir.path(), "Cats", None).unwrap();
+        let png = encoded(&noise(THUMBNAIL_SIDE, THUMBNAIL_SIDE), SaveFormat::Png);
+        let webp = encoded(&noise(THUMBNAIL_SIDE, THUMBNAIL_SIDE), SaveFormat::Webp);
+        let saved = write_thumbnail(&mut lib.conn, lib.dir.path(), pack.id, &png).unwrap();
+        assert_eq!(saved.thumbnail.as_deref(), Some("thumbnail.png"));
+        // The file is exactly the encoded bytes, and decodes at its size.
+        assert_eq!(lib.file("cats", "thumbnail.png"), png.bytes);
+        let back = image::load_from_memory(&lib.file("cats", "thumbnail.png")).unwrap();
+        assert_eq!((back.width(), back.height()), (THUMBNAIL_SIDE, THUMBNAIL_SIDE));
+        // A WEBP save replaces the file (and the name) like a PNG one.
+        let saved = write_thumbnail(&mut lib.conn, lib.dir.path(), pack.id, &webp).unwrap();
+        assert_eq!(saved.thumbnail.as_deref(), Some("thumbnail.webp"));
+        assert_eq!(lib.file("cats", "thumbnail.webp"), webp.bytes);
+        assert!(!lib.dir.path().join("cats").join("thumbnail.png").exists());
+        assert_eq!(load_pack(&lib.conn, pack.id).unwrap().thumbnail.as_deref(), Some("thumbnail.webp"));
+    }
+
+    #[test]
+    fn a_wrong_sized_thumbnail_is_refused_before_anything_is_written() {
+        use crate::editor::layers::LayerMeta;
+        use crate::editor::placement::LayerTransform;
+        // The command picks the thumbnail set for a thumbnail target
+        // (editor_save_image); its size rule refuses before the Library is
+        // ever touched.
+        let fonts = crate::editor::text::system_fonts();
+        let image = noise(THUMBNAIL_SIDE, THUMBNAIL_SIDE - 1);
+        let doc = SaveDoc {
+            width: THUMBNAIL_SIDE,
+            height: THUMBNAIL_SIDE - 1,
+            layers: vec![LayerMeta {
+                width: THUMBNAIL_SIDE,
+                height: THUMBNAIL_SIDE - 1,
+                transform: LayerTransform::IDENTITY,
+                text: None,
+            }],
+        };
+        let err = render_for_save(ConstraintSet::Thumbnail, &doc, &image.pixels, fonts, SaveFormat::Png, THUMBNAIL_MAX_KB).unwrap_err();
+        assert!(err.starts_with("Not saved:"), "{err}");
+        // And the core refuses a non-square file even if encoding let it through.
+        let mut lib = Lib::new();
+        let pack = create_pack(&mut lib.conn, lib.dir.path(), "Birds", None).unwrap();
+        let small = encoded(&noise(THUMBNAIL_SIDE, THUMBNAIL_SIDE - 1), SaveFormat::Png);
+        let err = write_thumbnail(&mut lib.conn, lib.dir.path(), pack.id, &small).unwrap_err();
+        assert!(err.contains("px"), "{err}");
+        assert_eq!(load_pack(&lib.conn, pack.id).unwrap().thumbnail, None);
+        assert!(lib.dir.path().join("birds").read_dir().unwrap().next().is_none());
+    }
+
+    #[test]
+    fn thumbnail_targets_and_outcomes_round_trip_with_the_typescript_names() {
+        let thumbnail: SaveTarget = serde_json::from_str(r#"{"kind":"thumbnail","packId":5}"#).unwrap();
+        assert_eq!(thumbnail, SaveTarget::Thumbnail { pack_id: 5 });
+        let mut lib = Lib::new();
+        let pack = create_pack(&mut lib.conn, lib.dir.path(), "Cats", None).unwrap();
+        let saved_thumbnail =
+            SaveOutcome::SavedThumbnail { pack: load_pack(&lib.conn, pack.id).unwrap(), bytes: 2048, quality: Some(80) };
+        let json = serde_json::to_value(&saved_thumbnail).unwrap();
+        assert_eq!(json["kind"], "savedThumbnail");
+        assert_eq!(json["bytes"], 2048);
+        assert_eq!(json["quality"], 80);
+        assert_eq!(json["pack"]["shortName"], "cats");
+        assert!(json["pack"].get("thumbnail").is_some(), "the pack fields serialize camelCase and flattened");
+        let lossless = SaveOutcome::SavedThumbnail { pack: load_pack(&lib.conn, pack.id).unwrap(), bytes: 9, quality: None };
+        assert_eq!(serde_json::to_value(&lossless).unwrap()["quality"], serde_json::json!(null));
     }
 
     #[test]

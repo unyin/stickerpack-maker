@@ -14,7 +14,10 @@ import {
   resolveOrigin,
   saveRefusal,
   showStickerLink,
+  showThumbnailLink,
   stickerGoneText,
+  thumbnailGoneText,
+  thumbnailSavedText,
   runSave,
   saveBlocker,
   savedText,
@@ -23,6 +26,7 @@ import {
   type SaveOutcome,
   type TooLarge,
 } from "../src/editor/save";
+import type { Pack } from "../src/pack-manager/api";
 
 const S = limits.sticker.side;
 const T = limits.thumbnail.side;
@@ -209,4 +213,34 @@ test("the saved note's link names the sticker; a gone sticker is reported", () =
   });
   expect(stickerGoneText(4, "Cats")).toBe("Sticker #4 of “Cats” no longer exists (it was deleted or moved since it was saved).");
   expect(stickerGoneText(4, "Cats", true)).toContain("saved into the Library used before");
+});
+
+const pack = (thumbnail: string | null): Pack => ({
+  id: 2,
+  title: "Cats",
+  shortName: "cats",
+  status: "draft",
+  thumbnail,
+  folderRenameFrom: null,
+});
+
+test("a thumbnail save's note names the file, the pack and the size", () => {
+  expect(thumbnailSavedText(pack("thumbnail.png"), 2 * KB, 80)).toBe(
+    "Thumbnail of “Cats” saved as thumbnail.png (2.0 KB, WEBP quality 80).",
+  );
+  // A lossless save has no quality to name.
+  expect(thumbnailSavedText(pack("thumbnail.webp"), 900, null)).toBe(
+    "Thumbnail of “Cats” saved as thumbnail.webp (900 bytes).",
+  );
+});
+
+test("the thumbnail note's link names the pack; a gone pack is reported", () => {
+  expect(showThumbnailLink("Cats")).toEqual({
+    text: "Show in Pack Manager",
+    label: "Show in Pack Manager: thumbnail of “Cats”",
+  });
+  expect(thumbnailGoneText("Cats")).toBe(
+    "The pack “Cats” no longer exists (it was deleted since the thumbnail was saved).",
+  );
+  expect(thumbnailGoneText("Cats", true)).toContain("it belongs to the Library used before");
 });
