@@ -1,13 +1,12 @@
 //! Tauri commands exposed to the webview. The typed TS wrappers live in
 //! `src/api.ts`; command names and camelCase field names must stay in sync.
 
-use std::path::PathBuf;
-use std::sync::MutexGuard;
+use std::{fs, path::PathBuf, sync::MutexGuard};
 
 use serde::Serialize;
 use tauri::{Manager, State};
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, EmojiStyle};
 use crate::pack_commands::LibraryLock;
 use crate::{editor, library, ml, SharedConfig};
 
@@ -29,27 +28,34 @@ pub struct AppStateDto {
     pub library_status: LibraryStatus,
     /// Why the configured Library is unusable (set only when status = Invalid).
     pub library_error: Option<String>,
+    /// The emoji style the app draws with (SPM-17); mirrors the EmojiStyle
+    /// union in src/emoji-style.ts (serde lowercase).
+    pub emoji_style: EmojiStyle,
+    /// The stored custom emoji font path, shown in Settings; only set for
+    /// a style chosen at least once, never verified at read time.
+    pub custom_emoji_font_path: Option<String>,
 }
 
 fn build_state_dto(cfg: &AppConfig) -> AppStateDto {
-    match &cfg.library_path {
-        None => AppStateDto {
-            library_path: None,
-            library_status: LibraryStatus::Unconfigured,
-            library_error: None,
-        },
+    let (library_path, library_status, library_error) = match &cfg.library_path {
+        None => (None, LibraryStatus::Unconfigured, None),
         Some(dir) => {
             let path = dir.to_string_lossy().into_owned();
-            let (status, error) = match library::validate_intact(dir) {
-                Ok(()) => (LibraryStatus::Ready, None),
-                Err(e) => (LibraryStatus::Invalid, Some(e)),
-            };
-            AppStateDto {
-                library_path: Some(path),
-                library_status: status,
-                library_error: error,
+            match library::validate_intact(dir) {
+                Ok(()) => (Some(path), LibraryStatus::Ready, None),
+                Err(e) => (Some(path), LibraryStatus::Invalid, Some(e)),
             }
         }
+    };
+    AppStateDto {
+        library_path,
+        library_status,
+        library_error,
+        emoji_style: cfg.emoji_style,
+        custom_emoji_font_path: cfg
+            .custom_emoji_font_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned()),
     }
 }
 
@@ -133,6 +139,82 @@ pub fn repoint_library(
     let dir = PathBuf::from(path);
     library::validate_intact(&dir)?;
     set_library_path(&app, &state, &lock, dir)
+}
+
+// ---- Emoji style (SPM-17) ----
+
+/// Custom emoji font files the Custom style accepts: real font containers
+/// the webview's FontFace can parse. Case-insensitive.
+const CUSTOM_EMOJI_FONT_EXTENSIONS: [&str; 3] = ["ttf", "otf", "woff2"];
+
+/// A colour-emoji font reaches a few tens of MB (Noto's CBDT build is
+/// ~24 MB); a file past this generous cap is not a font and would only drag
+/// memory into the webview on every style application.
+const CUSTOM_EMOJI_FONT_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Validate a picked custom emoji font path: suffix, existence, size cap.
+/// The command takes any path from the webview, so the guard (not the UI's
+/// file filter) is the real bound (the editor_import_image precedent).
+fn custom_emoji_font_problem(path: &str) -> Option<String> {
+    let p = PathBuf::from(path);
+    let ext_ok = p
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|e| CUSTOM_EMOJI_FONT_EXTENSIONS.contains(&e.as_str()));
+    if !ext_ok {
+        return Some(format!("not a .ttf, .otf or .woff2 font file: {path}"));
+    }
+    match fs::metadata(&p) {
+        Ok(m) if m.len() > CUSTOM_EMOJI_FONT_MAX_BYTES => Some(format!(
+            "font file is {} MB; the limit is {} MB",
+            m.len() / (1024 * 1024),
+            CUSTOM_EMOJI_FONT_MAX_BYTES / (1024 * 1024)
+        )),
+        Ok(_) => None,
+        Err(e) => Some(format!("cannot read {path}: {e}")),
+    }
+}
+
+/// Settings: choose the emoji style (SPM-17) and persist it, then return the
+/// resulting state snapshot. `custom_path` goes with style = "custom": the
+/// freshly picked font file's path, stored to be read from its original
+/// location — never copied into the app or the Library. A non-custom style
+/// keeps a stored path, so switching back to Custom needs no re-pick.
+#[tauri::command(async)]
+pub fn set_emoji_style(
+    style: String,
+    custom_path: Option<String>,
+    app: tauri::AppHandle,
+    state: State<'_, SharedConfig>,
+) -> Result<AppStateDto, String> {
+    // Reject a typo from the UI instead of silently landing on the default.
+    let style = EmojiStyle::parse(&style)?;
+    let file = crate::config_file_path(&app)?;
+    let mut guard = lock_config(&state)?;
+    let mut next = guard.clone();
+    next.emoji_style = style;
+    if let Some(path) = custom_path {
+        next.custom_emoji_font_path = Some(PathBuf::from(path));
+    }
+    // One guard across clone -> save -> assign (the set_library_path pattern):
+    // disk is written before memory is updated, so a failed write never
+    // leaves the two disagreeing.
+    next.save(&file)?;
+    *guard = next;
+    Ok(build_state_dto(&guard))
+}
+
+/// Custom emoji style (SPM-17): the stored font file's bytes, for a FontFace
+/// in the webview. Missing or oversized files are refused; a file that exists
+/// but is not a real font fails at FontFace.load in the webview, which then
+/// falls back to the Android style with a message.
+#[tauri::command(async)]
+pub fn read_custom_emoji_font(path: String) -> Result<tauri::ipc::Response, String> {
+    if let Some(problem) = custom_emoji_font_problem(&path) {
+        return Err(problem);
+    }
+    let bytes = fs::read(&path).map_err(|e| format!("cannot read {path}: {e}"))?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 // ---- Editor (ADR-0005: one-shot pixel work in Rust) ----
@@ -361,6 +443,8 @@ mod tests {
             library_path: Some("C:\\lib".into()),
             library_status: LibraryStatus::Ready,
             library_error: None,
+            emoji_style: EmojiStyle::Custom,
+            custom_emoji_font_path: Some("C:\\Fonts\\my-emoji.ttf".into()),
         };
         let json = serde_json::to_value(&dto).unwrap();
         assert_eq!(json["libraryPath"], "C:\\lib");
@@ -368,5 +452,46 @@ mod tests {
         assert!(json["libraryError"].is_null());
         assert!(json.get("library_path").is_none());
         assert!(json.get("library_status").is_none());
+        // The emoji fields mirror the EmojiStyle union in src/emoji-style.ts.
+        assert_eq!(json["emojiStyle"], "custom");
+        assert_eq!(json["customEmojiFontPath"], "C:\\Fonts\\my-emoji.ttf");
+    }
+
+    #[test]
+    fn emoji_style_serializes_lowercase_for_the_webview() {
+        for (value, text) in [
+            (EmojiStyle::Android, "android"),
+            (EmojiStyle::Twemoji, "twemoji"),
+            (EmojiStyle::Windows, "windows"),
+            (EmojiStyle::Custom, "custom"),
+        ] {
+            // Must match the EmojiStyle union in src/emoji-style.ts exactly.
+            assert_eq!(serde_json::to_string(&value).unwrap(), format!("\"{text}\""));
+            assert_eq!(EmojiStyle::parse(&format!("\"{text}\"")).unwrap(), value);
+        }
+        assert!(EmojiStyle::parse("\"apple\"").is_err());
+    }
+
+    #[test]
+    fn custom_emoji_font_guard_checks_suffix_existence_and_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let ttf = dir.path().join("my.ttf");
+        fs::write(&ttf, b"x").unwrap();
+        // A real file with a font suffix passes; extension matching is
+        // case-insensitive the way Windows paths are.
+        assert_eq!(custom_emoji_font_problem(ttf.to_str().unwrap()), None);
+        let uppercase = dir.path().join("MY.TTF");
+        fs::write(&uppercase, b"x").unwrap();
+        assert_eq!(custom_emoji_font_problem(uppercase.to_str().unwrap()), None);
+        // Wrong container: refused even though the file exists.
+        let exe = dir.path().join("font.exe");
+        fs::write(&exe, b"x").unwrap();
+        assert!(custom_emoji_font_problem(exe.to_str().unwrap()).is_some());
+        // Missing file: the suffix is right, the read would not be.
+        let missing = dir.path().join("gone.woff2");
+        let problem = custom_emoji_font_problem(missing.to_str().unwrap());
+        assert!(problem.unwrap().starts_with("cannot read"));
+        // No extension at all.
+        assert!(custom_emoji_font_problem("C:\\Fonts\\font").is_some());
     }
 }

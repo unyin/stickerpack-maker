@@ -1,19 +1,55 @@
 //! Persisted app configuration.
 //!
-//! Holds the configured Library path (and nothing else yet). This module is
-//! deliberately free of Tauri types so it can be unit-tested with plain paths.
-//! The config file location is resolved in `lib.rs::config_file_path`.
+//! Holds the configured Library path and the emoji style choice (SPM-17).
+//! This module is deliberately free of Tauri types so it can be unit-tested
+//! with plain paths. The config file location is resolved in
+//! `lib.rs::config_file_path`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EmojiStyle {
+    /// Bundled Noto Color Emoji (default; owner decision 2026-11-21).
+    #[default]
+    Android,
+    /// Bundled Twemoji.
+    Twemoji,
+    /// System Segoe UI Emoji; nothing bundled.
+    Windows,
+    /// A local font file the user picked; the path is stored, never shipped.
+    Custom,
+}
+
+impl EmojiStyle {
+    /// Parse the IPC style value (the command's argument). Unknown values
+    /// are an error, not a silent default: a typo in the UI must not land
+    /// the app on Android. The config uses the typed field, so its load
+    /// path is strict the same way (this module's corrupt-file doctrine).
+    /// Mirrors the value set of parseEmojiStyle in src/emoji-style.ts.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        serde_json::from_str(value)
+            .map_err(|_| format!("unknown emoji style: {value}"))
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     /// Absolute path of the Library folder, once configured.
+    #[serde(default)]
     pub library_path: Option<PathBuf>,
+    /// Which emoji style the app draws with (SPM-17); the default when absent.
+    /// A new field a later version could not have written defaults cleanly.
+    #[serde(default)]
+    pub emoji_style: EmojiStyle,
+    /// Absolute path of the user's custom emoji font, as picked. Only read
+    /// from its original location; never copied into the app or the Library.
+    #[serde(default)]
+    pub custom_emoji_font_path: Option<PathBuf>,
 }
 
 impl AppConfig {
@@ -48,22 +84,59 @@ mod tests {
     use super::*;
 
     #[test]
-    fn missing_file_means_first_run() {
-        let dir = tempfile::tempdir().unwrap();
-        let cfg = AppConfig::load(&dir.path().join("config.json")).unwrap();
-        assert_eq!(cfg, AppConfig::default());
-        assert!(cfg.library_path.is_none());
-    }
-
-    #[test]
     fn save_load_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nested").join("config.json");
         let cfg = AppConfig {
             library_path: Some(PathBuf::from(r"C:\Users\test\Documents\Stickerpack Library")),
+            emoji_style: EmojiStyle::Custom,
+            custom_emoji_font_path: Some(PathBuf::from(r"C:\Fonts\my-emoji.ttf")),
         };
         cfg.save(&path).unwrap();
         assert_eq!(AppConfig::load(&path).unwrap(), cfg);
+    }
+
+    #[test]
+    fn missing_file_means_first_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = AppConfig::load(&dir.path().join("config.json")).unwrap();
+        assert_eq!(cfg, AppConfig::default());
+        assert!(cfg.library_path.is_none());
+        // Default style: the bundled Android (Noto) choice, no custom path.
+        assert_eq!(cfg.emoji_style, EmojiStyle::Android);
+        assert!(cfg.custom_emoji_font_path.is_none());
+    }
+
+    #[test]
+    fn emoji_style_field_defaults_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        // An older config version without the SPM-17 fields loads untouched,
+        // exactly like the enum's default: nothing is rewritten silently.
+        fs::write(&path, r#"{"libraryPath": "C:\\lib"}"#).unwrap();
+        let cfg = AppConfig::load(&path).unwrap();
+        assert_eq!(cfg.library_path, Some(PathBuf::from(r"C:\lib")));
+        assert_eq!(cfg.emoji_style, EmojiStyle::Android);
+        assert!(cfg.custom_emoji_font_path.is_none());
+    }
+
+    #[test]
+    fn unknown_emoji_style_is_corrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        fs::write(&path, r#"{"emojiStyle": "apple"}"#).unwrap();
+        // The typed field keeps the file's doctrine: never silently reset.
+        assert!(AppConfig::load(&path).is_err());
+    }
+
+    #[test]
+    fn emoji_style_parse_accepted_and_rejected() {
+        assert_eq!(EmojiStyle::parse("\"android\"").unwrap(), EmojiStyle::Android);
+        assert_eq!(EmojiStyle::parse("\"twemoji\"").unwrap(), EmojiStyle::Twemoji);
+        assert_eq!(EmojiStyle::parse("\"windows\"").unwrap(), EmojiStyle::Windows);
+        assert_eq!(EmojiStyle::parse("\"custom\"").unwrap(), EmojiStyle::Custom);
+        assert!(EmojiStyle::parse("\"apple\"").is_err());
+        assert!(EmojiStyle::parse("android").is_err()); // bare: not valid JSON
     }
 
     #[test]
@@ -78,8 +151,12 @@ mod tests {
     fn serializes_camel_case_for_the_webview() {
         let cfg = AppConfig {
             library_path: Some(PathBuf::from(r"C:\lib")),
+            emoji_style: EmojiStyle::Twemoji,
+            custom_emoji_font_path: None,
         };
         let json = serde_json::to_string(&cfg).unwrap();
         assert!(json.contains("libraryPath"));
+        assert!(json.contains("emojiStyle"));
+        assert!(!json.contains("library_path"));
     }
 }

@@ -1,12 +1,21 @@
 import {
   createLibrary,
   LIBRARY_DB_FILE_NAME,
+  pickEmojiFont,
   pickFolder,
   pickLibraryDb,
   repointLibrary,
   resolveLibraryDbSelection,
   type AppState,
 } from "../api";
+import {
+  chooseEmojiStyle,
+  EMOJI_STYLE_CHOICES,
+  emojiStyleProblem,
+  getCustomEmojiFontPath,
+  getEmojiStylePreference,
+  parseEmojiStyle,
+} from "../emoji-style";
 import { confirmChoice } from "../dialog";
 import {
   getThemePreference,
@@ -20,6 +29,8 @@ import { clear, el, withMessage } from "../ui";
  * Settings: show the Library path, re-point at another intact Library, or
  * create a fresh Library in an empty folder (SPEC §3). An older Library's
  * database is upgraded when opened; no reconstruction from orphaned files.
+ * Also the emoji font choice (SPM-17), which applies in place via a runtime
+ * font stack and never re-boots the app.
  */
 export function renderSettings(
   container: HTMLElement,
@@ -71,6 +82,78 @@ export function renderSettings(
       : state.libraryStatus === "invalid"
         ? `Not usable: ${state.libraryError ?? "unknown problem"}`
         : "Not configured";
+
+  // The emoji style card (SPM-17). Live state reads from the emoji-style
+  // module, not the boot-time snapshot: the style can change in place
+  // without re-booting the app (unlike the Library, which re-points).
+  const styleMessage = el("p", { class: "message", role: "alert" });
+  const styleProblem = el("p", { class: "message", role: "alert" });
+  const customPathRow = el("p", { class: "muted" });
+  const repickButton = el(
+    "button",
+    { class: "secondary", type: "button" },
+    "Choose another file…",
+  ) as HTMLButtonElement;
+  repickButton.addEventListener("click", () => {
+    void withMessage(styleMessage, async () => {
+      const file = await pickEmojiFont();
+      if (!file) return; // user cancelled: keep the current font
+      await chooseEmojiStyle("custom", file);
+      refreshEmojiCard();
+    });
+  });
+  const styleSelect = el(
+    "select",
+    {
+      class: "emoji-style-select",
+      "aria-label": "Emoji font",
+      onchange: (event) => {
+        const value = parseEmojiStyle((event.target as HTMLSelectElement).value);
+        void withMessage(styleMessage, async () => {
+          // Custom is picked THROUGH a file: the choice applies only after a
+          // font has loaded from a real file, so the option never lands
+          // without one. Cancelling the picker keeps the previous style.
+          if (value === "custom") {
+            const file = await pickEmojiFont();
+            if (!file) {
+              styleSelect.value = getEmojiStylePreference();
+              return;
+            }
+            await chooseEmojiStyle("custom", file);
+          } else {
+            await chooseEmojiStyle(value);
+          }
+          refreshEmojiCard();
+        });
+      },
+    },
+    ...EMOJI_STYLE_CHOICES.map(({ value, label }) =>
+      el(
+        "option",
+        { value, selected: getEmojiStylePreference() === value },
+        label,
+      ),
+    ),
+  ) as HTMLSelectElement;
+  /** Refresh the in-place card bits: the choice, the problem line, the
+   * custom file row and its re-pick button. The style itself is the runtime
+   * var, not a re-render. */
+  function refreshEmojiCard(): void {
+    styleSelect.value = getEmojiStylePreference();
+    const problem = emojiStyleProblem();
+    styleProblem.textContent = problem ?? "";
+    styleProblem.hidden = problem === null;
+    const customPath = getCustomEmojiFontPath();
+    customPathRow.replaceChildren(
+      "Using: ",
+      el("code", { class: "path" }, customPath ?? "no file chosen"),
+    );
+    // "Custom font file…" only fires onchange when the value CHANGES, so an
+    // active Custom needs its own route to a different file.
+    repickButton.hidden = getEmojiStylePreference() !== "custom";
+    customPathRow.hidden = getEmojiStylePreference() !== "custom";
+  }
+  refreshEmojiCard();
 
   container.append(
     el(
@@ -135,6 +218,28 @@ export function renderSettings(
           "p",
           { class: "muted" },
           "The app follows your system dark/light setting by default. Choose Light or Dark to override it on this machine.",
+        ),
+      ),
+      el(
+        "div",
+        { class: "card" },
+        el("label", { class: "field-label" }, "Emoji font"),
+        styleSelect,
+        // The choice, the custom file row, the problem and any message all
+        // sit under the select: eye order is use-case order.
+        customPathRow,
+        repickButton,
+        styleProblem,
+        styleMessage,
+        el(
+          "p",
+          { class: "muted" },
+          "How emoji are drawn everywhere in the app. Android bundles Noto Color Emoji; Windows uses the system's Segoe UI Emoji; Custom uses a font file of yours, read from where it is — a broken or deleted file falls back to Android.",
+        ),
+        el(
+          "p",
+          { class: "muted" },
+          "Credits: Noto Color Emoji by Google, SIL OFL 1.1. Twemoji graphics by the Twemoji project, CC-BY 4.0 (https://github.com/jdecked/twemoji). Licence texts ship with the app.",
         ),
       ),
     ),

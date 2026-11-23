@@ -8,6 +8,8 @@ const fakeState = {
   libraryPath: null,
   libraryStatus: "unconfigured",
   libraryError: null,
+  emojiStyle: "android",
+  customEmojiFontPath: null,
 };
 
 mock.module("@tauri-apps/api/core", () => ({
@@ -127,4 +129,36 @@ test("resolveLibraryDbSelection covers cancel, invalid name, and re-point wiring
     kind: "ok",
     folder: ".",
   });
+});
+
+test("setEmojiStyle posts the style and the camelCase custom path (SPM-17)", async () => {
+  await api.setEmojiStyle("custom", "C:\\Fonts\\my-emoji.ttf");
+  expect(calls[calls.length - 1]).toEqual({
+    cmd: "set_emoji_style",
+    args: { style: "custom", customPath: "C:\\Fonts\\my-emoji.ttf" },
+  });
+  await api.setEmojiStyle("twemoji");
+  expect(calls[calls.length - 1]).toEqual({
+    cmd: "set_emoji_style",
+    args: { style: "twemoji", customPath: undefined },
+  });
+});
+
+test("readCustomEmojiFont posts the path under the same command name as Rust (SPM-17)", async () => {
+  await api.readCustomEmojiFont("C:\\Fonts\\my-emoji.ttf");
+  expect(calls[calls.length - 1]).toEqual({
+    cmd: "read_custom_emoji_font",
+    args: { path: "C:\\Fonts\\my-emoji.ttf" },
+  });
+});
+
+test("pickEmojiFont is a single-file picker filtered to font containers (SPM-17)", async () => {
+  const file = await api.pickEmojiFont();
+  expect(file).toBe("F:\\Libraries\\cats\\library.db"); // the dialog mock's return
+  const opts = dialogCalls[dialogCalls.length - 1];
+  expect(opts.directory).toBe(false);
+  expect(opts.multiple).toBe(false);
+  expect(opts.filters).toEqual([
+    { name: "Font file", extensions: ["ttf", "otf", "woff2"] },
+  ]);
 });
