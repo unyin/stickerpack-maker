@@ -13,7 +13,7 @@ import { packPicker } from "../../pack-manager/view/dialogs";
 import { loadPackView, type PackSummary } from "../../pack-manager/api";
 import { initialFocus } from "../../pack-manager/model/pack-memory";
 import type { ConstraintSet } from "../model/constraints";
-import { FORMAT_LABEL, replaceLabel, resolveOrigin, type OriginNow, type SaveFormat } from "../save";
+import { FORMAT_LABEL, replaceLabel, resolveOrigin, type OriginLookup, type OriginNow, type SaveFormat } from "../save";
 import type { StickerOrigin } from "../../shared/sticker-origin";
 
 /** Where the save goes: over the origin sticker, or a new sticker in a pack. */
@@ -42,7 +42,7 @@ export interface SaveDialogOptions {
  * clean-close warning (owner decision 2026-11-23) ask, so the two can
  * never disagree.
  */
-export async function originNow(origin: StickerOrigin): Promise<OriginNow | { readonly gone: string }> {
+export async function originNow(origin: StickerOrigin): Promise<OriginLookup> {
   // Never look an old Library's pack id up in the new one.
   if (origin.otherLibrary) return resolveOrigin(origin, null);
   try {

@@ -22,9 +22,9 @@ import {
 } from "../model/effects";
 import { WARP_DEFAULTS, WARP_RADIUS, WARP_STRENGTH, type WarpSettings } from "../model/warp";
 import { isHexColor } from "../model/text";
+import type { CanvasTool } from "../model/tools";
 import { eyedropperButton } from "./eyedropper";
 import { el } from "../../ui";
-import type { CanvasTool } from "./stage";
 
 export interface EffectControlHandlers {
   /** A setting changed (live, while a slider moves). */
@@ -155,16 +155,17 @@ export class EffectControls {
     });
     // Give up focus once chosen, so the Editor's shortcuts work at once (as the text controls do).
     input.addEventListener("change", () => input.blur());
-    // The eyedropper sets the colour exactly as typing it into the picker would.
-    const dropper = eyedropperButton((hex) => {
-      set(hex);
-      input.value = hex;
-      this.handlers.change();
-    });
+    // The eyedropper sets the colour exactly as typing it into the picker
+    // would; it enrolls itself with the bar's busy-disable inputs.
+    const dropper = eyedropperButton(
+      (hex) => {
+        set(hex);
+        input.value = hex;
+        this.handlers.change();
+      },
+      this.inputs,
+    );
     this.inputs.push(input); // busy disables the picker with the rest of the bar
-    // A dropper without the API is disabled for good: the busy loop must not
-    // re-enable it.
-    if (!dropper.disabled) this.inputs.push(dropper);
     return el("span", { class: "editor-effect-color" }, input, dropper);
   }
 

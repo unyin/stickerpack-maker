@@ -4,13 +4,14 @@
 // while the settings change, and Apply bakes it in as ONE undo step; the
 // preview itself never enters the document or its history (CMT-186).
 import { layerIndex, type Doc, type Layer, type RasterLayer, type Transform } from "./document";
+import type { CanvasTool } from "./tools";
 import type { RgbaImage } from "./image";
 
 /** The effects with settings and an Apply button. */
 export type EffectKind = "outline" | "glow";
 
 /** The effect a canvas tool previews and applies, or null for every other tool. */
-export function effectKindOf(tool: string): EffectKind | null {
+export function effectKindOf(tool: CanvasTool): EffectKind | null {
   return tool === "outline" || tool === "glow" ? tool : null;
 }
 
@@ -148,7 +149,7 @@ export function nextEffectBasis(basis: EffectBasis, doc: Doc, selection: readonl
  * preview stay, and every other tool (Warp, Erase, Restore) keeps today's
  * Esc: the selection clears, the tool stays.
  */
-export function escDiscardsEffect(tool: string, selection: readonly string[]): boolean {
+export function escDiscardsEffect(tool: CanvasTool, selection: readonly string[]): boolean {
   return effectKindOf(tool) !== null && selection.length > 0;
 }
 

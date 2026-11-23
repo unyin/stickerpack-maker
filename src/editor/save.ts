@@ -27,13 +27,16 @@ export interface OriginNow {
   readonly format: SaveFormat;
 }
 
+/** The origin sticker's lookup: where it is now, or why it cannot be replaced. */
+export type OriginLookup = OriginNow | { readonly gone: string };
+
 /**
  * Find the origin sticker in its pack as it is now (`view` null: the pack
  * could not be read, e.g. deleted). It may have moved within its pack
  * (Reorder): that is still the same sticker. Gone (deleted, moved to another
  * pack, another Library): why it cannot be replaced.
  */
-export function resolveOrigin(origin: StickerOrigin, view: PackView | null): OriginNow | { readonly gone: string } {
+export function resolveOrigin(origin: StickerOrigin, view: PackView | null): OriginLookup {
   if (origin.otherLibrary) {
     return {
       gone: `Sticker #${origin.position} of “${origin.packTitle}” belongs to the Library used before, so it cannot be replaced. Save it as a new sticker instead.`,
@@ -56,7 +59,7 @@ export function resolveOrigin(origin: StickerOrigin, view: PackView | null): Ori
  * (originNow), so the two can never disagree. A dirty session never gets
  * here: its own unsaved-changes warning has already decided.
  */
-export function originGoneCloseWarning(origin: StickerOrigin | null, now: OriginNow | { readonly gone: string }): boolean {
+export function originGoneCloseWarning(origin: StickerOrigin | null, now: OriginLookup): boolean {
   return origin !== null && "gone" in now;
 }
 
@@ -98,11 +101,11 @@ export function saveBlocker(canvas: Size, set: ConstraintSet): string | null {
 
 /**
  * Why a save is refused before the save dialog opens (owner decision
- * 2026-11-23): a pixel-changing press is mid-stroke — a refine stroke
- * (Erase/Restore, SPM-7) or a warp gesture (Warp, SPM-8) — and its pixels
- * are painted live but not in the model yet, so the dialog would snapshot
- * the document without them — and the stroke's release would commit them
- * under it. The stroke ends first.
+ * 2026-11-23): a pixel-changing operation is still in progress — a refine
+ * stroke (Erase/Restore, SPM-7) or a warp gesture (Warp, SPM-8) — and its
+ * pixels are painted live but not in the model yet, so the dialog would
+ * snapshot the document without them — and the operation's release would
+ * commit them under it. The operation ends first.
  */
 export const SAVE_MID_STROKE =
   "Save is blocked: an Erase, Restore or Warp operation is still in progress. Finish the operation first, then save.";

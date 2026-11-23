@@ -8,9 +8,6 @@ import { el } from "../../ui";
 import { icon } from "../../icons";
 import { isHexColor } from "../model/text";
 
-/** The eyedropper button's meaning, as its tooltip and aria-label. */
-export const EYEDROPPER_LABEL = "Pick a colour from the screen";
-
 /** Why the button is disabled when the webview lacks the API (SPEC section 2). */
 const EYEDROPPER_MISSING = "The eyedropper is not available here.";
 
@@ -32,11 +29,19 @@ function eyeDropperApi(): EyeDropperConstructor | null {
  * nothing, silently. Where the webview lacks the API the button renders
  * disabled with its reason as its tooltip, so the feature stays
  * discoverable (SPEC section 2).
+ *
+ * `enroll` joins the button with the caller's busy-disable loop: the
+ * button pushes itself only when the API exists, since one without it is
+ * disabled for good and a re-enabling loop must never pick it up. Passing
+ * the loop is all the caller does — a new picker cannot forget the rule.
  */
-export function eyedropperButton(pick: (hex: string) => void): HTMLButtonElement {
+export function eyedropperButton(
+  pick: (hex: string) => void,
+  enroll: { disabled: boolean }[] = [],
+): HTMLButtonElement {
   const button = el(
     "button",
-    { class: "editor-eyedropper", type: "button", title: EYEDROPPER_LABEL, "aria-label": EYEDROPPER_LABEL },
+    { class: "editor-eyedropper", type: "button", title: "Pick a colour from the screen", "aria-label": "Pick a colour from the screen" },
     icon("eyedropper"),
   ) as HTMLButtonElement;
   const api = eyeDropperApi();
@@ -45,6 +50,7 @@ export function eyedropperButton(pick: (hex: string) => void): HTMLButtonElement
     button.title = EYEDROPPER_MISSING;
     return button;
   }
+  enroll.push(button);
   button.addEventListener("click", async () => {
     try {
       const { sRGBHex } = await new api().open();

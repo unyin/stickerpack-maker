@@ -117,7 +117,8 @@ import {
   type SizeTool,
   type ViewTransform,
 } from "../editor/view/geometry";
-import { EditorStage, type CanvasTool } from "../editor/view/stage";
+import { EditorStage } from "../editor/view/stage";
+import type { CanvasTool } from "../editor/model/tools";
 import { TextEditOverlay } from "../editor/view/text-edit";
 import { FontPicker } from "../editor/view/font-picker";
 import { EffectControls } from "../editor/view/effect-controls";
@@ -264,15 +265,16 @@ function buildEditor(): HTMLElement {
     "aria-label": "Font size in pixels",
   }) as HTMLInputElement;
   const colorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": "Text colour" }) as HTMLInputElement;
-  // The eyedropper beside the text colour picker (owner decision 2026-11-23):
-  // the pick lands exactly as typing the hex into the picker would. Without
-  // the API it is disabled for good, so the busy/text-reason loop skips it.
-  const textEyedropper = eyedropperButton((hex) => {
-    colorInput.value = hex;
-    restyle({ color: hex });
-  });
+  // The text controls' busy/text-reason disable loop; the eyedropper beside
+  // the text colour picker enrolls itself (owner decision 2026-11-23).
   const textControls: { disabled: boolean }[] = [fontPicker, fontSizeInput, colorInput];
-  if (!textEyedropper.disabled) textControls.push(textEyedropper);
+  const textEyedropper = eyedropperButton(
+    (hex) => {
+      colorInput.value = hex;
+      restyle({ color: hex });
+    },
+    textControls,
+  );
   // After a committed change the control gives up focus, so the editor's
   // shortcuts (Ctrl+Z, Delete, Esc, Ctrl+V) work at once. Typing in the size
   // input is not hijacked: it commits only on Enter or when focus leaves.
@@ -658,9 +660,10 @@ function buildEditor(): HTMLElement {
   }
 
   /**
-   * End the session, asking first when it has unsaved changes (Close, and
-   * opening another image from the Pack Manager). Resolves false when the
-   * user keeps editing, so the session stays.
+   * End the session, asking first when it has unsaved changes, or when a
+   * clean session's origin sticker is gone (Close, and opening another
+   * image from the Pack Manager). Resolves false when the user keeps
+   * editing, so the session stays.
    */
   async function closeSession(): Promise<boolean> {
     if (!session) return true;
@@ -1413,7 +1416,9 @@ function buildEditor(): HTMLElement {
   // Pack Manager hook (SPM-3), see openFileInEditor below.
   openFileHook = (path, showEditor, from) =>
     run(async () => {
-      const closed = await closeSession(); // warns on unsaved changes
+      // Both questions go through closeSession: unsaved changes first, and
+      // the gone-origin one for a clean session (owner decision 2026-11-23).
+      const closed = await closeSession();
       showEditor(); // either way: Keep editing shows the open image
       if (closed) await openImage(path, from ?? null);
     });
@@ -1462,11 +1467,12 @@ export function forgetEditorOrigin(): void {
  * Open the image at `path` in the Editor, as Open image would (import cap
  * dialog included): the Pack Manager's Edit and "open in editor" (SPM-3).
  * One session at a time. In order (owner decision 2026-11-21): an open
- * session with unsaved changes asks first, while the caller's view is still
- * showing; then `showEditor` switches to the Editor either way (the canvas
- * must be on screen to measure itself); then, unless the user kept editing,
- * the file opens. `origin` is the sticker it is (Edit): saving then offers
- * to replace it (owner decision 2026-11-22).
+ * session asks first, while the caller's view is still showing — unsaved
+ * changes, or the gone-origin question for a clean one (owner decision
+ * 2026-11-23); then `showEditor` switches to the Editor either way (the
+ * canvas must be on screen to measure itself); then, unless the user kept
+ * editing, the file opens. `origin` is the sticker it is (Edit): saving then
+ * offers to replace it (owner decision 2026-11-22).
  */
 export function openFileInEditor(path: string, showEditor: () => void, origin?: StickerOrigin): Promise<void> {
   renderEditor(); // builds the Editor once, which installs the hook
