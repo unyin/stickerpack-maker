@@ -18,6 +18,7 @@ import {
 } from "../api";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import {
+  dimensionsText,
   fileNameOf,
   GO_LIVE_CONFIRMATION,
   matchPacks,
@@ -256,10 +257,27 @@ export function thumbnailSourceDialog(hasThumbnail: boolean, canCopySticker: boo
 }
 
 /**
+ * One sticker as the thumbnail picker shows it (owner re-test 2026-11-23):
+ * its preview, position and dimensions only - no emoji; the sticker's own
+ * detail panel is where its Emoji String belongs.
+ */
+function choiceCard(sticker: StickerView, previews: Previews): HTMLElement {
+  const image = sticker.missing
+    ? el("div", { class: "pm-missing-art" }, "Missing")
+    : previewImage(previews.sticker(sticker.id, sticker.format), `Sticker ${sticker.position}`, "pm-confirm-img");
+  return el(
+    "figure",
+    { class: "pm-confirm-card" },
+    image,
+    el("figcaption", {}, el("span", { class: "pm-pos" }, `#${sticker.position}`), " ", dimensionsText(sticker.file)),
+  );
+}
+
+/**
  * Copy which sticker (SPM-12): the pack's stickers as clickable cards —
- * the same cards the delete confirmation shows. A Missing sticker renders
- * disabled with its reason and cannot be picked. Cancel (the safe choice)
- * and Esc resolve null.
+ * preview, position and dimensions, no emoji (owner re-test 2026-11-23).
+ * A Missing sticker renders disabled with its reason and cannot be picked.
+ * Cancel (the safe choice) and Esc resolve null.
  */
 export function stickerChoiceDialog(stickers: readonly StickerView[], previews: Previews): Promise<StickerView | null> {
   let chosen: StickerView | null = null;
@@ -271,7 +289,7 @@ export function stickerChoiceDialog(stickers: readonly StickerView[], previews: 
         "div",
         { class: "pm-confirm-grid pm-thumb-picker" },
         ...stickers.map((sticker) => {
-          const card = stickerCard(sticker, previews, false);
+          const card = choiceCard(sticker, previews);
           if (sticker.missing) {
             card.classList.add("missing");
             card.setAttribute("aria-disabled", "true");
