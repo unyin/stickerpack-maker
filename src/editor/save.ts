@@ -3,7 +3,7 @@
 // (editor_save_image); this decides when Save is blocked, runs the owner's
 // size flow (CMT-144) and words what happened.
 import { formatBytes } from "../pack-manager/model/messages";
-import type { PackView, Sticker } from "../pack-manager/api";
+import type { Pack, PackView, Sticker } from "../pack-manager/api";
 import { stickerOrigin, type StickerOrigin } from "../shared/sticker-origin";
 import { constraintStatus, readoutText, type ConstraintSet } from "./model/constraints";
 import type { Size } from "./model/document";
@@ -18,7 +18,9 @@ export type SaveTarget =
    * An existing sticker's image, keeping its position and Emoji String
    * (the edited sticker; SPM-11's Replace too).
    */
-  | { readonly kind: "replace"; readonly stickerId: number };
+  | { readonly kind: "replace"; readonly stickerId: number }
+  /** The pack's thumbnail slot (SPM-12): the pack's unnumbered thumbnail file. */
+  | { readonly kind: "thumbnail"; readonly packId: number };
 
 /** The origin sticker as it is now: where it sits and its format. */
 export interface OriginNow {
@@ -80,10 +82,12 @@ export function originAfterSave(saved: Saved, packTitle: string): StickerOrigin 
 /** What the save command did; mirrors `SaveOutcome` in save_commands.rs. */
 export type SaveOutcome =
   | { readonly kind: "saved"; readonly sticker: Sticker; readonly bytes: number; readonly quality: number | null }
+  | { readonly kind: "savedThumbnail"; readonly pack: Pack; readonly bytes: number; readonly quality: number | null }
   | { readonly kind: "tooLarge"; readonly format: SaveFormat; readonly bytes: number; readonly maxKilobytes: number };
 
 export type TooLarge = Extract<SaveOutcome, { kind: "tooLarge" }>;
 export type Saved = Extract<SaveOutcome, { kind: "saved" }>;
+export type SavedThumbnail = Extract<SaveOutcome, { kind: "savedThumbnail" }>;
 
 export const FORMAT_LABEL: Record<SaveFormat, string> = { png: "PNG", webp: "WEBP" };
 
@@ -124,7 +128,8 @@ export function saveRefusal(midStroke: boolean, canvas: Size, set: ConstraintSet
 
 /** How the save went, for the Editor. */
 export type SaveResult =
-  | { readonly kind: "saved"; readonly outcome: Saved }
+  /** Written: the sticker or the pack's thumbnail, as the target decided. */
+  | { readonly kind: "saved"; readonly outcome: Saved | SavedThumbnail }
   /** Too large as PNG and the user kept PNG: back to the save dialog. */
   | { readonly kind: "declined"; readonly outcome: TooLarge }
   /** Too large even as WEBP at its lowest quality: back to the Editor. */
@@ -210,4 +215,22 @@ export function savedText(outcome: Saved, packTitle: string, target: SaveTarget)
   if (target.kind === "replace") return `Replaced #${sticker.position} in “${packTitle}”.`;
   const emoji = sticker.emojiString === "" ? " Give it an Emoji String in the Pack Manager." : "";
   return `Saved as ${sticker.fileName}, sticker #${sticker.position} of “${packTitle}” (${size}).${emoji}`;
+}
+
+/** The neutral note after a thumbnail save: which file, which pack, and the size. */
+export function thumbnailSavedText(pack: Pack, bytes: number, quality: number | null): string {
+  const q = quality === null ? "" : `, WEBP quality ${quality}`;
+  return `Thumbnail of “${pack.title}” saved as ${pack.thumbnail} (${formatBytes(bytes)}${q}).`;
+}
+
+/** The saved note's link to the thumbnail: visible text and accessible name. */
+export function showThumbnailLink(packTitle: string): { text: string; label: string } {
+  // The accessible name starts with the visible text (WCAG 2.5.3, label in name).
+  return { text: "Show in Pack Manager", label: `Show in Pack Manager: thumbnail of “${packTitle}”` };
+}
+
+/** Clicking the saved note's link when the pack is gone (deleted, or another Library). */
+export function thumbnailGoneText(packTitle: string, otherLibrary = false): string {
+  const why = otherLibrary ? "it belongs to the Library used before" : "it was deleted since the thumbnail was saved";
+  return `The pack “${packTitle}” no longer exists (${why}).`;
 }

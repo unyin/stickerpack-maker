@@ -667,6 +667,13 @@
   gap: 8px;
 }
 
+/* The sticker picker of a thumbnail Create/Replace (SPM-12): the same card
+   grid, but a whole pack's stickers can outgrow the dialog. */
+.pm-thumb-picker {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
 .pm-confirm-one {
   display: flex;
   justify-content: center;

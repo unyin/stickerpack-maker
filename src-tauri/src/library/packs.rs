@@ -15,8 +15,9 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-use super::files;
+use super::files::{self, FaultPoint, Step};
 use super::schema::{load_pack, load_packs, Pack, PackStatus};
+use super::stickers;
 use crate::limits::{SHORT_NAME_MAX_CHARS, TITLE_MAX_CHARS};
 
 /// Folder of `pack` inside the Library: named after its Short Name. While a
@@ -322,6 +323,84 @@ pub fn set_status(conn: &Connection, pack_id: i64, status: PackStatus) -> Result
         "UPDATE packs SET status = ?1 WHERE id = ?2",
         status.as_str(),
     )
+}
+
+/// Set a pack's thumbnail (SPM-12): `source` is validated as a thumbnail
+/// (exactly the thumbnail side square, within its cap, SPEC §7) and copied
+/// in as the pack's unnumbered `thumbnail.<ext>` file, replacing any
+/// existing one. The delete step vacates the old file's name first, so a
+/// same-name overwrite (or a PNG→WEBP change) lands cleanly through the
+/// crash-safe engine (ADR-0004), like every file change.
+pub fn set_thumbnail(conn: &mut Connection, library_dir: &Path, pack_id: i64, source: &Path) -> Result<Pack, String> {
+    set_thumbnail_with_fault(conn, library_dir, pack_id, source, &|_| Ok(()))
+}
+
+/// `set_thumbnail` with the engine's crash-simulation seam (tests).
+pub(crate) fn set_thumbnail_with_fault(
+    conn: &mut Connection,
+    library_dir: &Path,
+    pack_id: i64,
+    source: &Path,
+    fault: &dyn Fn(FaultPoint) -> Result<(), String>,
+) -> Result<Pack, String> {
+    let format = stickers::validate_thumbnail_file(source)?;
+    let (pack, dir) = open_pack_files(conn, library_dir, pack_id)?;
+    let new_name = files::thumbnail_file_name(format);
+    let staged = files::stage_copy(&dir, source)?;
+    // The delete comes first, so the old file's name is vacated before the
+    // placement (re)uses it — exactly how apply_new_order orders its steps.
+    let mut steps = Vec::new();
+    if let Some(old) = &pack.thumbnail {
+        steps.push(Step::delete(old.clone()));
+    }
+    steps.push(Step::rename(staged.clone(), new_name.clone()));
+    if let Err(e) = files::apply_plan_with_fault(conn, &dir, pack_id, &steps, |tx| {
+        tx.execute("UPDATE packs SET thumbnail = ?2 WHERE id = ?1", params![pack_id, new_name])
+            .map_err(|e| format!("cannot set the thumbnail of pack {pack_id}: {e}"))?;
+        Ok(())
+    }, fault) {
+        // Err means the commit state is unknown. Only a definite "not
+        // committed" may delete the staged copy; after a commit the journal
+        // owns it and recovery places it (ADR-0004, like replace_sticker_file).
+        if Ok(false) == files::has_pending_plan(conn, pack_id) {
+            let _ = files::remove_names(&dir, &[staged]);
+        }
+        return Err(e);
+    }
+    load_pack(conn, pack_id)
+}
+
+/// Delete a pack's thumbnail (SPM-12): the DB row and the file. Nothing to
+/// delete (no thumbnail) is fine: the pack comes back unchanged.
+pub fn delete_thumbnail(conn: &mut Connection, library_dir: &Path, pack_id: i64) -> Result<Pack, String> {
+    delete_thumbnail_with_fault(conn, library_dir, pack_id, &|_| Ok(()))
+}
+
+/// `delete_thumbnail` with the engine's crash-simulation seam (tests).
+pub(crate) fn delete_thumbnail_with_fault(
+    conn: &mut Connection,
+    library_dir: &Path,
+    pack_id: i64,
+    fault: &dyn Fn(FaultPoint) -> Result<(), String>,
+) -> Result<Pack, String> {
+    let (pack, dir) = open_pack_files(conn, library_dir, pack_id)?;
+    let Some(old) = pack.thumbnail.clone() else {
+        return Ok(pack);
+    };
+    let steps = [Step::delete(old)];
+    files::apply_plan_with_fault(
+        conn,
+        &dir,
+        pack_id,
+        &steps,
+        |tx| {
+            tx.execute("UPDATE packs SET thumbnail = NULL WHERE id = ?1", params![pack_id])
+                .map_err(|e| format!("cannot delete the thumbnail of pack {pack_id}: {e}"))?;
+            Ok(())
+        },
+        fault,
+    )?;
+    load_pack(conn, pack_id)
 }
 
 /// A pack folder that survived a committed pack deletion.
@@ -914,6 +993,207 @@ mod tests {
         assert_eq!(set_status(&lib.conn, pack.id, PackStatus::Live).unwrap().status, PackStatus::Live);
         assert_eq!(set_status(&lib.conn, pack.id, PackStatus::Draft).unwrap().status, PackStatus::Draft);
         assert!(set_status(&lib.conn, 999, PackStatus::Live).is_err());
+    }
+
+    // ---- Thumbnails (SPM-12) ----
+
+    use crate::library::test_images::{png_sized, tag_of, webp_sized};
+    use crate::limits::{THUMBNAIL_MAX_KB, THUMBNAIL_SIDE};
+
+    /// A Library plus a separate folder of thumbnail source images.
+    struct ThumbLib {
+        dir: tempfile::TempDir,
+        sources: tempfile::TempDir,
+        conn: Connection,
+    }
+
+    impl ThumbLib {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            crate::library::create_fresh(dir.path()).unwrap();
+            let conn = crate::library::open(dir.path()).unwrap();
+            ThumbLib { dir, sources: tempfile::tempdir().unwrap(), conn }
+        }
+
+        fn path(&self) -> &Path {
+            self.dir.path()
+        }
+
+        fn create(&mut self, title: &str) -> Pack {
+            create_pack(&mut self.conn, self.dir.path(), title, None).unwrap()
+        }
+
+        /// Write a thumbnail source file; `name`'s extension picks PNG or WEBP bytes.
+        fn source(&self, name: &str, width: u32, height: u32, tag: &str) -> PathBuf {
+            let path = self.sources.path().join(name);
+            let bytes = if name.to_ascii_lowercase().ends_with(".webp") {
+                webp_sized(width, height, tag)
+            } else {
+                png_sized(width, height, tag)
+            };
+            fs::write(&path, bytes).unwrap();
+            path
+        }
+
+        fn pack_dir_of(&self, pack: &Pack) -> PathBuf {
+            pack_dir(self.path(), &load_pack(&self.conn, pack.id).unwrap())
+        }
+
+        fn names(&self, pack: &Pack) -> Vec<String> {
+            let mut names: Vec<String> = fs::read_dir(self.pack_dir_of(pack))
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        }
+
+        /// set_thumbnail, with the Library path copied first (the call takes
+        /// the connection mutably and the path immutably).
+        fn set(&mut self, pack_id: i64, source: &Path) -> Result<Pack, String> {
+            let dir = self.dir.path().to_path_buf();
+            set_thumbnail(&mut self.conn, &dir, pack_id, source)
+        }
+
+        fn set_crash(
+            &mut self,
+            pack_id: i64,
+            source: &Path,
+            fault: &dyn Fn(FaultPoint) -> Result<(), String>,
+        ) -> Result<Pack, String> {
+            let dir = self.dir.path().to_path_buf();
+            set_thumbnail_with_fault(&mut self.conn, &dir, pack_id, source, fault)
+        }
+
+        fn delete(&mut self, pack_id: i64) -> Result<Pack, String> {
+            let dir = self.dir.path().to_path_buf();
+            delete_thumbnail(&mut self.conn, &dir, pack_id)
+        }
+
+        fn delete_crash(
+            &mut self,
+            pack_id: i64,
+            fault: &dyn Fn(FaultPoint) -> Result<(), String>,
+        ) -> Result<Pack, String> {
+            let dir = self.dir.path().to_path_buf();
+            delete_thumbnail_with_fault(&mut self.conn, &dir, pack_id, fault)
+        }
+    }
+
+    #[test]
+    fn set_thumbnail_writes_the_unnumbered_file_and_the_row() {
+        let mut lib = ThumbLib::new();
+        let pack = lib.create("Cats");
+        let src = lib.source("t.png", THUMBNAIL_SIDE, THUMBNAIL_SIDE, "A");
+        let saved = lib.set(pack.id, &src).unwrap();
+        assert_eq!(saved.thumbnail.as_deref(), Some("thumbnail.png"));
+        assert_eq!(load_pack(&lib.conn, pack.id).unwrap().thumbnail.as_deref(), Some("thumbnail.png"));
+        let dir = lib.pack_dir_of(&pack);
+        assert_eq!(tag_of(&fs::read(dir.join("thumbnail.png")).unwrap()), "A");
+    }
+
+    #[test]
+    fn a_format_change_removes_the_old_thumbnail_file() {
+        let mut lib = ThumbLib::new();
+        let pack = lib.create("Cats");
+        let png = lib.source("t.png", THUMBNAIL_SIDE, THUMBNAIL_SIDE, "A");
+        lib.set(pack.id, &png).unwrap();
+        let webp = lib.source("t.webp", THUMBNAIL_SIDE, THUMBNAIL_SIDE, "B");
+        let saved = lib.set(pack.id, &webp).unwrap();
+        assert_eq!(saved.thumbnail.as_deref(), Some("thumbnail.webp"));
+        let dir = lib.pack_dir_of(&pack);
+        assert!(!dir.join("thumbnail.png").exists());
+        assert_eq!(tag_of(&fs::read(dir.join("thumbnail.webp")).unwrap()), "B");
+    }
+
+    #[test]
+    fn a_same_format_thumbnail_replaces_the_file_bytes() {
+        let mut lib = ThumbLib::new();
+        let pack = lib.create("Cats");
+        let first = lib.source("t.png", THUMBNAIL_SIDE, THUMBNAIL_SIDE, "A");
+        lib.set(pack.id, &first).unwrap();
+        let second = lib.source("t2.png", THUMBNAIL_SIDE, THUMBNAIL_SIDE, "B");
+        lib.set(pack.id, &second).unwrap();
+        let dir = lib.pack_dir_of(&pack);
+        assert_eq!(tag_of(&fs::read(dir.join("thumbnail.png")).unwrap()), "B");
+        assert_eq!(lib.names(&pack), vec!["thumbnail.png"]);
+    }
+
+    #[test]
+    fn an_invalid_thumbnail_source_changes_nothing() {
+        let mut lib = ThumbLib::new();
+        let pack = lib.create("Cats");
+        let good = lib.source("t.png", THUMBNAIL_SIDE, THUMBNAIL_SIDE, "A");
+        lib.set(pack.id, &good).unwrap();
+        let before = lib.names(&pack);
+        // Not exactly the thumbnail side square.
+        let wrong = lib.source("small.png", THUMBNAIL_SIDE - 1, THUMBNAIL_SIDE, "S");
+        assert!(lib.set(pack.id, &wrong).unwrap_err().contains("px"));
+        // Over the cap.
+        let padded = {
+            let image = png_sized(THUMBNAIL_SIDE, THUMBNAIL_SIDE, "");
+            [image.clone(), vec![0u8; stickers::MAX_THUMBNAIL_BYTES as usize - image.len() + 1]].concat()
+        };
+        let big = lib.sources.path().join("big.png");
+        fs::write(&big, padded).unwrap();
+        let err = lib.set(pack.id, &big).unwrap_err();
+        assert!(err.contains(&format!("{THUMBNAIL_MAX_KB} KB")), "unexpected error: {err}");
+        // Pack and folder unchanged, and no stray temps.
+        assert_eq!(load_pack(&lib.conn, pack.id).unwrap().thumbnail.as_deref(), Some("thumbnail.png"));
+        assert_eq!(lib.names(&pack), before);
+        assert!(!crate::library::files::has_pending_plan(&lib.conn, pack.id).unwrap());
+    }
+
+    #[test]
+    fn delete_thumbnail_clears_the_row_and_removes_the_file() {
+        let mut lib = ThumbLib::new();
+        let pack = lib.create("Cats");
+        // Nothing to delete is fine.
+        let untouched = lib.delete(pack.id).unwrap();
+        assert_eq!(untouched.thumbnail, None);
+        let src = lib.source("t.png", THUMBNAIL_SIDE, THUMBNAIL_SIDE, "A");
+        lib.set(pack.id, &src).unwrap();
+        let deleted = lib.delete(pack.id).unwrap();
+        assert_eq!(deleted.thumbnail, None);
+        assert_eq!(load_pack(&lib.conn, pack.id).unwrap().thumbnail, None);
+        assert_eq!(lib.names(&pack), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_crash_during_a_thumbnail_save_recovers_to_the_committed_state() {
+        for point in [FaultPoint::AfterCommit, FaultPoint::Phase2Step(0)] {
+            let mut lib = ThumbLib::new();
+            let pack = lib.create("Cats");
+            let old = lib.source("old.png", THUMBNAIL_SIDE, THUMBNAIL_SIDE, "A");
+            lib.set(pack.id, &old).unwrap();
+            let src = lib.source("new.webp", THUMBNAIL_SIDE, THUMBNAIL_SIDE, "B");
+            let crash = |p: FaultPoint| if p == point { Err("simulated crash".to_string()) } else { Ok(()) };
+            assert_eq!(lib.set_crash(pack.id, &src, &crash).unwrap_err(), "simulated crash");
+            let dir = lib.pack_dir_of(&pack);
+            files::recover(&lib.conn, &dir, pack.id).unwrap();
+            // The committed state rolls forward: the WEBP thumbnail, old PNG gone.
+            assert_eq!(load_pack(&lib.conn, pack.id).unwrap().thumbnail.as_deref(), Some("thumbnail.webp"), "after a crash at {point:?}");
+            assert!(!dir.join("thumbnail.png").exists(), "the old file stays after a crash at {point:?}");
+            assert_eq!(tag_of(&fs::read(dir.join("thumbnail.webp")).unwrap()), "B");
+            assert!(!crate::library::files::has_pending_plan(&lib.conn, pack.id).unwrap());
+        }
+    }
+
+    #[test]
+    fn a_crash_during_a_thumbnail_delete_recovers_to_the_committed_state() {
+        for point in [FaultPoint::AfterCommit, FaultPoint::Phase2Step(0)] {
+            let mut lib = ThumbLib::new();
+            let pack = lib.create("Cats");
+            let src = lib.source("t.png", THUMBNAIL_SIDE, THUMBNAIL_SIDE, "A");
+            lib.set(pack.id, &src).unwrap();
+            let crash = |p: FaultPoint| if p == point { Err("simulated crash".to_string()) } else { Ok(()) };
+            assert_eq!(lib.delete_crash(pack.id, &crash).unwrap_err(), "simulated crash");
+            let dir = lib.pack_dir_of(&pack);
+            files::recover(&lib.conn, &dir, pack.id).unwrap();
+            assert_eq!(load_pack(&lib.conn, pack.id).unwrap().thumbnail, None, "after a crash at {point:?}");
+            assert!(!dir.join("thumbnail.png").exists());
+            assert!(!crate::library::files::has_pending_plan(&lib.conn, pack.id).unwrap());
+        }
     }
 
     #[test]

@@ -235,6 +235,21 @@ pub fn delete_stickers(
     })
 }
 
+/// Delete the pack's thumbnail (SPM-12): the DB row and the file. Returns
+/// the pack view without a presence scan, like the other write commands.
+#[tauri::command(async)]
+pub fn delete_thumbnail(
+    pack_id: i64,
+    config: State<'_, SharedConfig>,
+    lock: State<'_, LibraryLock>,
+) -> Result<PackView, String> {
+    with_library(&config, &lock, |conn, dir| {
+        packs::delete_thumbnail(conn, dir, pack_id)?;
+        lock.memo().forget_thumbnail(pack_id);
+        desync::load_pack_view(conn, dir, pack_id, lock.memo())
+    })
+}
+
 /// Store an Emoji String exactly as typed (warn-only, SPEC §3).
 #[tauri::command(async)]
 pub fn set_emoji_string(

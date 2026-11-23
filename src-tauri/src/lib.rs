@@ -95,6 +95,7 @@ pub fn run() {
             pack_commands::set_pack_status,
             pack_commands::reorder_sticker,
             pack_commands::delete_stickers,
+            pack_commands::delete_thumbnail,
             pack_commands::set_emoji_string,
             pack_commands::import_stickers,
             pack_commands::check_sticker_file,

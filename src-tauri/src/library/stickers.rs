@@ -17,10 +17,13 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::files::{self, has_pending_plan, remove_names, stage_copy, sticker_file_name, FaultPoint, Step};
 use super::packs::open_pack_files;
 use super::schema::{load_pack, load_sticker, load_stickers, Format, Sticker};
-use crate::limits::{EMOJI_MAX, EMOJI_MIN, KB, PACK_MAX_STICKERS, STICKER_MAX_KB, STICKER_SIDE};
+use crate::limits::{EMOJI_MAX, EMOJI_MIN, KB, PACK_MAX_STICKERS, STICKER_MAX_KB, STICKER_SIDE, THUMBNAIL_MAX_KB, THUMBNAIL_SIDE};
 
 /// Largest sticker file Telegram accepts (SPEC §7).
 pub const MAX_STICKER_BYTES: u64 = STICKER_MAX_KB * KB;
+
+/// Largest thumbnail file the pack view shows (SPEC §7).
+pub const MAX_THUMBNAIL_BYTES: u64 = THUMBNAIL_MAX_KB * KB;
 
 /// A warn-only condition (SPEC §3: drafts may be incomplete).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -138,6 +141,50 @@ pub fn validate_sticker_file(path: &Path) -> Result<Format, String> {
     if !sticker_dimensions_ok(width, height) {
         return Err(format!(
             "is {width}×{height} px; one side must be exactly {STICKER_SIDE} px and the other at most {STICKER_SIDE} px"
+        ));
+    }
+    Ok(format)
+}
+
+/// Validate a file entering a pack as its thumbnail (SPM-12, SPEC §5/§7):
+/// PNG or WEBP by extension AND by content signature, at most
+/// `THUMBNAIL_MAX_KB`, and exactly `THUMBNAIL_SIDE`×`THUMBNAIL_SIDE` (read
+/// from the image header, not decoded). Returns its format.
+pub fn validate_thumbnail_file(path: &Path) -> Result<Format, String> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .ok_or_else(|| "has no file extension; expected .png or .webp".to_string())?;
+    let format = Format::from_extension(ext)?;
+    let meta = fs::metadata(path).map_err(|e| format!("cannot read file: {e}"))?;
+    if !meta.is_file() {
+        return Err("is not a file".to_string());
+    }
+    if meta.len() > MAX_THUMBNAIL_BYTES {
+        return Err(format!(
+            "is {} KB; thumbnails must be at most {THUMBNAIL_MAX_KB} KB",
+            meta.len().div_ceil(KB)
+        ));
+    }
+    let mut head = [0u8; 12];
+    let read = fs::File::open(path)
+        .and_then(|mut f| f.read(&mut head))
+        .map_err(|e| format!("cannot read file: {e}"))?;
+    let head = &head[..read];
+    let matches = match format {
+        Format::Png => head.starts_with(b"\x89PNG\r\n\x1a\n"),
+        Format::Webp => head.len() == 12 && &head[..4] == b"RIFF" && &head[8..12] == b"WEBP",
+    };
+    if !matches {
+        return Err(format!(
+            "is not a real {} image (its content does not match the extension)",
+            format.as_str().to_ascii_uppercase()
+        ));
+    }
+    let (width, height) = image_dimensions(path)?;
+    if (width, height) != (THUMBNAIL_SIDE, THUMBNAIL_SIDE) {
+        return Err(format!(
+            "is {width}×{height} px; a thumbnail must be exactly {THUMBNAIL_SIDE}×{THUMBNAIL_SIDE} px"
         ));
     }
     Ok(format)
@@ -630,7 +677,7 @@ mod tests {
     use std::fs;
 
     use crate::library::test_images::{png, png_sized, tag_of, webp, webp_sized};
-    use crate::limits::STICKER_SIDE;
+    use crate::limits::{STICKER_SIDE, THUMBNAIL_MAX_KB, THUMBNAIL_SIDE};
 
     /// A Library plus a separate folder of source images to import.
     struct Lib {
@@ -850,6 +897,38 @@ mod tests {
         assert!(validate_sticker_file(&jpeg).is_err());
         assert!(validate_sticker_file(&lib.sources.path().join("absent.png")).is_err());
         assert!(validate_sticker_file(lib.sources.path()).is_err());
+    }
+
+    #[test]
+    fn thumbnail_files_must_be_exactly_square_within_the_size_limit() {
+        let lib = Lib::new();
+        let write = |name: &str, bytes: Vec<u8>| {
+            let path = lib.sources.path().join(name);
+            fs::write(&path, bytes).unwrap();
+            path
+        };
+        // Exactly the thumbnail side square, PNG or WEBP.
+        assert_eq!(validate_thumbnail_file(&write("ok.png", png_sized(THUMBNAIL_SIDE, THUMBNAIL_SIDE, ""))).unwrap(), Format::Png);
+        assert_eq!(validate_thumbnail_file(&write("ok.webp", webp_sized(THUMBNAIL_SIDE, THUMBNAIL_SIDE, ""))).unwrap(), Format::Webp);
+        // Any other size is rejected, either way round.
+        for (w, h) in [(THUMBNAIL_SIDE - 1, THUMBNAIL_SIDE), (THUMBNAIL_SIDE, THUMBNAIL_SIDE + 1)] {
+            let err = validate_thumbnail_file(&write("bad.png", png_sized(w, h, ""))).unwrap_err();
+            assert!(err.contains(&format!("{w}×{h}")), "unexpected error: {err}");
+            assert!(err.contains(&format!("exactly {THUMBNAIL_SIDE}×{THUMBNAIL_SIDE} px")), "unexpected error: {err}");
+            assert!(validate_thumbnail_file(&write("bad.webp", webp_sized(w, h, ""))).is_err());
+        }
+        // Over the thumbnail cap.
+        let padded = {
+            let image = png_sized(THUMBNAIL_SIDE, THUMBNAIL_SIDE, "");
+            [image.clone(), vec![0u8; MAX_THUMBNAIL_BYTES as usize - image.len() + 1]].concat()
+        };
+        let err = validate_thumbnail_file(&write("big.png", padded)).unwrap_err();
+        assert!(err.contains(&format!("{THUMBNAIL_MAX_KB} KB")), "unexpected error: {err}");
+        // Wrong signature: the extension says PNG, the content is WEBP.
+        let liar = write("liar.png", webp_sized(THUMBNAIL_SIDE, THUMBNAIL_SIDE, ""));
+        assert!(validate_thumbnail_file(&liar).unwrap_err().contains("PNG"));
+        // A sticker-sized image is not a thumbnail.
+        assert!(validate_thumbnail_file(&lib.source("sticker.png", "x")).is_err());
     }
 
     // ---- Add / insert ----

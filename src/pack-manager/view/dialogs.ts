@@ -12,6 +12,7 @@ import {
   suggestShortName,
   type Pack,
   type PackSummary,
+  type PackView,
   type SendReport,
   type StickerView,
 } from "../api";
@@ -25,6 +26,7 @@ import {
   statusLabel,
   STICKER_RULE,
   stickerCountText,
+  thumbnailFormat,
 } from "../model/messages";
 import { confirmChoice, openDialog, type DialogHandle } from "../../dialog";
 import { previewImage, type Previews } from "./previews";
@@ -214,6 +216,97 @@ export function invalidFileDialog(path: string, reason: string): Promise<boolean
       el("p", { class: "muted" }, `A sticker must be ${STICKER_RULE}. Open it in the Editor to make it one.`),
     ],
     { actionLabel: "Open in editor", keepLabel: "Cancel" },
+  );
+}
+
+/** Where a thumbnail's Create/Replace starts from (SPM-12, SPEC §5). */
+export type ThumbnailSource = "new" | "sticker" | "cancel";
+
+/**
+ * The thumbnail slot's Create/Replace asks first (SPM-12, SPEC §5): a new
+ * image, or a copy of one of the pack's stickers — both are made in the
+ * Editor's Thumbnail mode. Cancel is the safe choice: focused, primary, and
+ * what Esc chooses (SPEC §2 conventions).
+ */
+export function thumbnailSourceDialog(hasThumbnail: boolean, canCopySticker: boolean): Promise<ThumbnailSource> {
+  const handle = openDialog<ThumbnailSource>(
+    hasThumbnail ? "Replace the thumbnail?" : "Create a thumbnail?",
+    [
+      el("p", {}, "A thumbnail is a 100×100 PNG or WEBP image, made in the Editor."),
+      el("p", {}, "Start from a new image, or copy one of this pack's stickers and adjust it."),
+    ],
+    [
+      { label: "From a new image…", value: "new" },
+      { label: "From a copy of a sticker…", value: "sticker" },
+      { label: "Cancel", value: "cancel", variant: "primary" },
+    ],
+    "cancel",
+    { defaultChoice: "cancel" },
+  );
+  if (!canCopySticker) {
+    // The dialog's button spec has no disabled flag, so the button is
+    // reached through the handle; a disabled control shows its reason (SPEC §2).
+    const sticker = handle.buttons.get("sticker");
+    if (sticker) {
+      sticker.disabled = true;
+      sticker.title = "This pack has no stickers yet";
+    }
+  }
+  return handle.result;
+}
+
+/**
+ * Copy which sticker (SPM-12): the pack's stickers as clickable cards —
+ * the same cards the delete confirmation shows. A Missing sticker renders
+ * disabled with its reason and cannot be picked. Cancel (the safe choice)
+ * and Esc resolve null.
+ */
+export function stickerChoiceDialog(stickers: readonly StickerView[], previews: Previews): Promise<StickerView | null> {
+  let chosen: StickerView | null = null;
+  const handle = openDialog<"pick" | "cancel">(
+    "Copy which sticker?",
+    [
+      el("p", {}, "The sticker's image opens in the Editor's Thumbnail mode; saving makes it this pack's thumbnail."),
+      el(
+        "div",
+        { class: "pm-confirm-grid pm-thumb-picker" },
+        ...stickers.map((sticker) => {
+          const card = stickerCard(sticker, previews, false);
+          if (sticker.missing) {
+            card.classList.add("missing");
+            card.setAttribute("aria-disabled", "true");
+            card.title = "The file is not in the pack folder";
+          } else {
+            card.addEventListener("click", () => {
+              chosen = sticker;
+              handle.close("pick");
+            });
+          }
+          return card;
+        }),
+      ),
+    ],
+    [{ label: "Cancel", value: "cancel", variant: "primary" }],
+    "cancel",
+    { defaultChoice: "cancel" },
+  );
+  return handle.result.then((value) => (value === "pick" ? chosen : null));
+}
+
+/** Confirm a permanent thumbnail delete, showing the thumbnail (SPM-12). */
+export function confirmThumbnailDelete(view: PackView, previews: Previews): Promise<boolean> {
+  const name = view.pack.thumbnail;
+  const art =
+    name && view.thumbnailFile && !view.thumbnailMissing
+      ? previewImage(previews.thumbnailOf(view.pack.id, thumbnailFormat(name)), "Thumbnail", "pm-detail-img")
+      : el("div", { class: "pm-missing-art large" }, "File Missing");
+  return confirmChoice(
+    "Delete thumbnail?",
+    [
+      el("div", { class: "pm-confirm-one" }, art),
+      el("p", {}, "The thumbnail and its file are deleted permanently. The pack's stickers are kept."),
+    ],
+    { actionLabel: "Delete thumbnail", keepLabel: "Cancel", danger: true },
   );
 }
 

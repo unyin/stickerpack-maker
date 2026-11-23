@@ -7,18 +7,24 @@ import "../pack-manager/pack-manager.css";
 import { el, errorMessage } from "../ui";
 import { packMemory } from "../pack-manager/model/pack-memory";
 import type { StickerOrigin } from "../shared/sticker-origin";
+import type { ThumbnailOrigin } from "../shared/thumbnail-origin";
 import { buildPackList } from "../pack-manager/view/pack-list";
 import { buildPackView, type PackViewHandle } from "../pack-manager/view/pack-view";
 
 export interface PackManagerNav {
   /** Show the Editor with this image open; `origin` when it is a pack's sticker (Edit). */
   openInEditor(path: string, origin?: StickerOrigin): void;
+  /** Show the Editor's Thumbnail mode with this image open; the pack's thumbnail session. */
+  openThumbnailInEditor(path: string, origin: ThumbnailOrigin): void;
 }
 
 let cached: { library: string | null; root: HTMLElement; shown(): void; dispose(): void } | null = null;
 
-/** A sticker to show the next time the Pack Manager is shown (the Editor's saved-note link). */
-let pendingReveal: { packId: number; stickerId: number } | null = null;
+/**
+ * What the Pack Manager shows the next time it is shown (the Editor's
+ * saved-note links): a sticker, or `stickerId` null for the thumbnail slot.
+ */
+let pendingReveal: { packId: number; stickerId: number | null } | null = null;
 
 /**
  * Show sticker `stickerId` of pack `packId` when the Pack Manager is next
@@ -28,6 +34,11 @@ let pendingReveal: { packId: number; stickerId: number } | null = null;
  */
 export function revealStickerOnShow(packId: number, stickerId: number): void {
   pendingReveal = { packId, stickerId };
+}
+
+/** Show the pack's thumbnail slot when the Pack Manager is next shown (SPM-12). */
+export function revealThumbnailOnShow(packId: number): void {
+  pendingReveal = { packId, stickerId: null };
 }
 
 export function renderPackManager(library: string | null, nav: PackManagerNav): HTMLElement {
@@ -65,7 +76,11 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
 
   async function openPack(packId: number): Promise<boolean> {
     try {
-      const handle = await buildPackView(packId, { back: showList, openInEditor: nav.openInEditor });
+      const handle = await buildPackView(packId, {
+        back: showList,
+        openInEditor: nav.openInEditor,
+        openThumbnailInEditor: nav.openThumbnailInEditor,
+      });
       pack?.destroy();
       pack = handle;
       openId = packId;
@@ -79,8 +94,8 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
     }
   }
 
-  /** Open pack `packId` unless it is open, then select sticker `stickerId` there. */
-  async function showSticker(packId: number, stickerId: number): Promise<void> {
+  /** Open pack `packId` unless it is open, then select sticker `stickerId` there (null: the thumbnail slot). */
+  async function showSticker(packId: number, stickerId: number | null): Promise<void> {
     if (openId === packId && pack) pack.reveal(stickerId, false);
     else if (await openPack(packId)) pack?.reveal(stickerId, true);
   }
