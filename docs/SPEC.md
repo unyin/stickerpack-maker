@@ -638,6 +638,11 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 - Settings: Editor defaults (the tool settings a session starts with) configurable in the
   Settings tab. In v1 Editor settings last only until the app closes and always start from
   the defaults (owner, 2026-11-22).
+- Editor: mirror a layer along its vertical axis (flip it left ↔ right); its horizontal
+  axis too (flip top ↔ bottom) if that is cheap and easy once the first one is built
+  (owner, 2026-11-23).
+- Editor: remove a layer's excess transparency — crop the layer to its visible content,
+  the "crop to content" function of other graphics editors (owner, 2026-11-23).
 
 ### v3 parking lot
 - Drag and drop an image file onto an open session to add it as a layer (owner, 2026-11-20).
