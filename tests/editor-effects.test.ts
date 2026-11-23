@@ -17,6 +17,7 @@ import {
 import {
   applyEffectResult,
   effectBasis,
+  escDiscardsEffect,
   nextEffectBasis,
   effectTarget,
   effectTextNotice,
@@ -94,6 +95,24 @@ test("with no target yet (several selected), choosing one layer makes it the tar
   expect(chosen).toEqual({ doc, targetId: "layer-2" });
   // From then on, picking another layer is a discard as usual.
   expect(nextEffectBasis(chosen as EffectBasis, doc, ["layer-3"])).toBe("discard");
+});
+
+test("an Esc that deselects ends an Outline/Glow tool; Esc with nothing selected does not", () => {
+  // CMT-243 restored (owner decision 2026-11-23): a deselect is a discard
+  // even when the target survives it — the base image selected, clearing the
+  // selection still targets the base — which nextEffectBasis's re-pick
+  // shortcut would otherwise swallow.
+  expect(escDiscardsEffect("outline", ["layer-1"])).toBe(true); // the base image itself
+  expect(escDiscardsEffect("glow", ["layer-2"])).toBe(true);
+  expect(escDiscardsEffect("glow", ["layer-1", "layer-2"])).toBe(true); // several selected, no target yet
+  expect(escDiscardsEffect("outline", [])).toBe(false); // nothing selected: Esc does nothing
+  expect(escDiscardsEffect("warp", ["layer-1"])).toBe(false); // Warp keeps today's Esc
+  expect(escDiscardsEffect("erase", ["layer-1"])).toBe(false);
+  expect(escDiscardsEffect("move", ["layer-1"])).toBe(false);
+  // The picking rules are untouched: re-picking the target keeps the tool.
+  const doc = threeLayers();
+  const base = effectBasis(doc, []);
+  expect(nextEffectBasis(base, doc, ["layer-1"])).toEqual(base);
 });
 
 // ---- Settings on the wire ----

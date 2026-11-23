@@ -97,7 +97,7 @@ import {
   type NextStyle,
 } from "../editor/model/text";
 import { EditorSession } from "../editor/model/session";
-import { applyEffectResult, effectBasis, effectKindOf, nextEffectBasis, effectTarget, effectTextNotice, warpTarget, type EffectBasis, type EffectResult } from "../editor/model/effects";
+import { applyEffectResult, effectBasis, effectKindOf, escDiscardsEffect, nextEffectBasis, effectTarget, effectTextNotice, warpTarget, type EffectBasis, type EffectResult } from "../editor/model/effects";
 import {
   cropBlocker,
   cropTextNotice,
@@ -1356,8 +1356,19 @@ function buildEditor(): HTMLElement {
       if (reason) say(reason);
       else void run(cutSelection);
     }
-    // Esc drops the cut selection first, then the layer selection.
-    else if (e.key === "Escape") escapeTarget(current.region) === "region" ? current.setRegion(null) : current.clearSelection();
+    // Esc drops the cut selection first, then the layer selection. In
+    // Outline and Glow an Esc that deselects is a discard (CMT-243, restored
+    // by the owner 2026-11-23): back to Move whatever layer was selected,
+    // the base image included — nextEffectBasis's re-pick shortcut must not
+    // swallow it. Esc with nothing selected does nothing (the tool and its
+    // preview stay), and Warp/Erase/Restore keep today's Esc.
+    else if (e.key === "Escape") {
+      if (escapeTarget(current.region) === "region") current.setRegion(null);
+      else if (escDiscardsEffect(tool, current.selection)) {
+        setTool("move"); // first, so the clearSelection's refresh finds no basis to re-decide
+        current.clearSelection();
+      } else current.clearSelection();
+    }
     else if (e.key === "Delete") deleteSelected();
     else return;
     e.preventDefault();

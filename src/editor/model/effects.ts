@@ -127,6 +127,20 @@ export function nextEffectBasis(basis: EffectBasis, doc: Doc, selection: readonl
 }
 
 /**
+ * Whether an Esc press that clears the layer selection ALSO ends an
+ * Outline/Glow tool (owner decision 2026-11-23, restoring CMT-243's intent,
+ * which the later picking refinement CMT-250/256 had swallowed): a deselect
+ * is a discard whatever layer was selected — the base image included, whose
+ * empty-selection target survives nextEffectBasis's target-equality
+ * shortcut. Esc with nothing selected clears nothing, so the tool and its
+ * preview stay, and every other tool (Warp, Erase, Restore) keeps today's
+ * Esc: the selection clears, the tool stays.
+ */
+export function escDiscardsEffect(tool: string, selection: readonly string[]): boolean {
+  return effectKindOf(tool) !== null && selection.length > 0;
+}
+
+/**
  * The layer the warp/bulge brush paints on: the selected image layer, or
  * the base image when nothing is selected. Text is not warped (like Cut):
  * merge it into an image first.
