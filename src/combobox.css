@@ -1,0 +1,72 @@
+/* The app's combobox (src/combobox.ts): a field with a list that opens
+   below it. Each use adds its own sizes (e.g. .font-picker-input). */
+.combobox {
+  position: relative;
+}
+
+.combobox-input {
+  padding: 6px 8px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: inherit;
+  text-overflow: ellipsis;
+}
+
+.combobox-input:disabled {
+  opacity: 0.6;
+}
+
+.combobox-list {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  width: max-content;
+  min-width: 100%;
+  max-width: 360px;
+  max-height: min(360px, 60vh);
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
+}
+
+.combobox-list li {
+  padding: 4px 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+/* One highlight for the mouse and the arrow keys alike (owner, 2026-11-22):
+   hovering an option makes it the active one (combobox.ts), so only the
+   active option is marked, in the quiet hover style. That fill alone is
+   ~1.1:1 against the list in both themes, so a bar in --accent-ink (5.2:1
+   light, 7.0:1 dark) marks the row too, as the old Send list did. */
+.combobox-list li[aria-selected="true"] {
+  background: var(--bg);
+  box-shadow: inset 3px 0 0 var(--accent-ink);
+}
+
+.combobox-empty {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  margin: 0;
+  padding: 4px 12px;
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  white-space: nowrap;
+}

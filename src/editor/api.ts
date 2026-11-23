@@ -3,9 +3,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
-import { textStyleOf, type CropInput, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
+import { layerInput, textStyleOf, type CropInput, type Doc, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
 
 import { IMPORT_EXTENSIONS } from "../shared/import-extensions";
+import type { SaveFormat, SaveOutcome, SaveTarget } from "./save";
 
 /** Extensions the Editor imports (shared with the Pack Manager). */
 export { IMPORT_EXTENSIONS } from "../shared/import-extensions";
@@ -75,8 +76,17 @@ export const MERGE_LAYERS_HEADER = "x-merge-layers";
  * Call a command whose request is raw bytes plus one JSON header: the shape
  * every pixel command shares (the body stays raw, never JSON, ADR-0005).
  */
-function invokeRaw(command: string, body: Uint8Array, header: string, meta: unknown): Promise<ArrayBuffer> {
-  return invoke<ArrayBuffer>(command, body, { headers: { [header]: JSON.stringify(meta) } });
+function invokeRaw<T = ArrayBuffer>(command: string, body: Uint8Array, header: string, meta: unknown): Promise<T> {
+  return invoke<T>(command, body, { headers: { [header]: asciiJson(meta) } });
+}
+
+/**
+ * JSON with every non-ASCII character escaped (`\u00e9`), so it is a valid
+ * HTTP header value: a header carries only visible ASCII, and text layers
+ * can hold any character ("café", emoji). The JSON means the same.
+ */
+export function asciiJson(value: unknown): string {
+  return JSON.stringify(value).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 
 /** A raster's pixels as the bytes of a request body (only the view, not its whole buffer). */
@@ -229,4 +239,25 @@ export function probePasted(bytes: Uint8Array): Promise<ImageInfo> {
 export async function importPasted(bytes: Uint8Array, scaleToFit: boolean): Promise<RgbaImage> {
   const frame = await invokeRaw("editor_import_pasted", bytes, SCALE_TO_FIT_HEADER, scaleToFit);
   return decodeFrame(frame);
+}
+
+/** Header carrying the save request (canvas, layers, format, target); mirrors SAVE_HEADER. */
+export const SAVE_HEADER = "x-save-image";
+
+/**
+ * Save the document (SPEC §6, SPM-10): Rust flattens what is inside the
+ * canvas, encodes it as `format` within the size cap and writes it to
+ * `target` through the Library core. Layers go as for merge (raster pixels
+ * as the raw body, text as text). A canvas that misses the sticker
+ * constraint set is refused (rejects); over the cap resolves `tooLarge`.
+ */
+export function saveImage(doc: Doc, format: SaveFormat, target: SaveTarget): Promise<SaveOutcome> {
+  const { body, meta } = encodeLayers(doc.layers.map(layerInput));
+  return invokeRaw<SaveOutcome>("editor_save_image", body, SAVE_HEADER, {
+    width: doc.width,
+    height: doc.height,
+    layers: meta,
+    format,
+    target,
+  });
 }

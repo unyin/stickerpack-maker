@@ -1,7 +1,9 @@
 import type { AppState } from "./api";
 import { clear, el } from "./ui";
-import { openFileInEditor, renderEditor } from "./views/editor";
-import { forgetPackManager, renderPackManager } from "./views/pack-manager";
+import { forgetEditorOrigin, openFileInEditor, renderEditor, setEditorNav } from "./views/editor";
+import type { StickerOrigin } from "./shared/sticker-origin";
+import { forgetPackManager, renderPackManager, revealStickerOnShow } from "./views/pack-manager";
+import { resetPackMemory } from "./pack-manager/model/pack-memory";
 import { renderSettings } from "./views/settings";
 
 type ViewId = "editor" | "pack-manager" | "settings";
@@ -36,13 +38,23 @@ export function renderShell(
     else
       renderSettings(content, state, () => {
         forgetPackManager(); // a new Library may sit at the same path
+        resetPackMemory(); // pack pickers must not start on a pack of the old one
+        forgetEditorOrigin(); // nor may a save replace a sticker id of the old one
         onChanged();
       });
   }
 
+  // Editor -> Pack Manager: the saved note's link shows the sticker there (SPM-10).
+  setEditorNav({
+    showSticker: (packId, stickerId) => {
+      revealStickerOnShow(packId, stickerId);
+      show("pack-manager");
+    },
+  });
+
   /** Pack Manager -> Editor: the Editor asks about unsaved changes, then switches tabs and opens the file. */
-  function openInEditor(path: string): void {
-    void openFileInEditor(path, () => show("editor"));
+  function openInEditor(path: string, origin?: StickerOrigin): void {
+    void openFileInEditor(path, () => show("editor"), origin);
   }
 
   for (const item of NAV) {

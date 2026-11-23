@@ -298,3 +298,16 @@ button:has(> .icon) {
   white-space: nowrap;
   border: 0;
 }
+
+/* A button that reads as a link, inside running text: the Pack Manager's
+   in-message links and the Editor's saved-note "Show in Pack Manager". */
+button.pm-link,
+button.editor-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-ink);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: inherit;
+}
