@@ -22,4 +22,8 @@ Always run the `review-cycle` skill on a change, until both axes converge, befor
 
 ### Review-cycle sub-agent models (OpenCode harness)
 
-Pin model AND effort variant explicitly on every `review-cycle` spawn — a bare model ID leaves effort at its default. Reviewer sub-agents (both axes, every round): `opencode-go/glm-5.3#high`. Implementer sub-agent (applies the fixes): `opencode-go/glm-5.3#low` (owner decision 2026-11-23, superseding the same-day max/high pinning; DeepSeek V4.1 Flash is blocked by the org's EU/US-only hosting setting, so GLM-5.3 stands in).
+Pin model AND effort variant explicitly on every `review-cycle` spawn — a bare model ID leaves effort at its default. Reviewer sub-agents (both axes, every round): `opencode-go/glm-5.3#high` — no review round needs max (owner, 2026-11-23: the earlier same-day max/high pinning was itself an oversight, the effort change being meant from the start). Implementer sub-agent (applies the fixes): `opencode-go/glm-5.3#low`. DeepSeek V4.1 Flash is blocked by the org's EU/US-only hosting setting, so GLM-5.3 stands in.
+
+### Icons
+
+An icon change never ships without being rendered at its real toolbar size first and judged: pixel math where fidelity is the question (bounds within the viewBox, overlap against a reference), the owner's eyes where taste is. No current model in this setup can view images — verify by measurement, and show the owner a rendered sheet before landing anything visual. (Owner, 2026-11-23, after the SPM-8 icon saga: CMT-300/301.)
