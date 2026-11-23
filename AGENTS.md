@@ -22,4 +22,4 @@ Always run the `review-cycle` skill on a change, until both axes converge, befor
 
 ### Review-cycle sub-agent models (OpenCode harness)
 
-Pin model AND effort variant explicitly on every `review-cycle` spawn — a bare model ID leaves effort at its default. Reviewer sub-agents (both axes, every round): `opencode-go/glm-5.3#max`. Implementer sub-agent (applies the fixes): `opencode-go/deepseek-v4.1-flash#high` (owner decision 2026-11-23: high, not the max the skill's table lists).
+Pin model AND effort variant explicitly on every `review-cycle` spawn — a bare model ID leaves effort at its default. Reviewer sub-agents (both axes, every round): `opencode-go/glm-5.3#max`. Implementer sub-agent (applies the fixes): `opencode-go/glm-5.3#high` (owner decision 2026-11-23: high effort; DeepSeek V4.1 Flash is blocked by the org's EU/US-only hosting setting, so GLM-5.3 stands in).
