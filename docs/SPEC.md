@@ -459,11 +459,11 @@ stickers, Missing stickers, and the thumbnail.
   - **Save…** sits at the right of the Editor toolbar, before Close; **Ctrl+S** does the
     same. While the canvas misses the constraint set it is disabled, with the reason (the
     live readout's text and the sizing tool that fixes it) as its tooltip; Ctrl+S then shows
-    that reason in the message line. A save attempted while an Erase/Restore stroke (above)
-    is mid-press is refused with its reason in the message line instead — the stroke's
-    pixels reach the document only when it ends — and while the model download runs, the
-    disabled Save… shows the download's progress as its tooltip, with Ctrl+S putting that
-    reason in the message line (owner decision 2026-11-23).
+    that reason in the message line. A save attempted while an Erase, Restore or Warp
+    stroke (above) is mid-press is refused with its reason in the message line instead —
+    the stroke's pixels reach the document only when it ends — and while the model
+    download runs, the disabled Save… shows the download's progress as its tooltip, with
+    Ctrl+S putting that reason in the message line (owner decision 2026-11-23).
   - The pack is chosen in the same pack picker as Send to pack (owner decision 2026-11-22): a
     field like the font picker. Clicking or typing opens the list of packs (Title, Short
     Name, sticker count, Draft/Live badge); typing filters it (Titles starting with the text

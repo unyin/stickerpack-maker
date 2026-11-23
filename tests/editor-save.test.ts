@@ -51,6 +51,18 @@ test("a save attempted mid-brush-stroke is refused and never reaches the dialog;
   expect(saveRefusal(false, canvas, STICKER)).toBeNull();
 });
 
+test("a save attempted mid-warp-drag is refused and never reaches the dialog; after the release it proceeds", () => {
+  // The same seam as a brush stroke, now covering SPM-8: a warp press lives
+  // in the stage's brushing flag, its bulge previewed live but committed to
+  // the model only at release, so even a canvas that passes the rule is
+  // refused before the dialog could open on a snapshot without it.
+  const canvas = { width: S, height: S };
+  expect(saveRefusal(true, canvas, STICKER)).toBe(SAVE_MID_STROKE);
+  expect(SAVE_MID_STROKE).toContain("Warp");
+  // After the release only the canvas rule decides again, and it passes.
+  expect(saveRefusal(false, canvas, STICKER)).toBeNull();
+});
+
 test("Thumbnail mode saves only exactly square, and only Fit is offered as the fix", () => {
   expect(saveBlocker({ width: T, height: T }, THUMBNAIL)).toBeNull();
   const off = saveBlocker({ width: T, height: T + 2 }, THUMBNAIL)!;

@@ -388,12 +388,13 @@ export class EditorStage {
   }
 
   /**
-   * True while a refine brush stroke is mid-press (SPM-7): its pixels are
+   * True while a pixel-changing press is in progress: a refine stroke
+   * (Erase/Restore, SPM-7) or a warp gesture (Warp, SPM-8). Its pixels are
    * painted live but reach the model only at release, so Save is refused
-   * until the stroke ends (owner decision 2026-11-23).
+   * until the press ends (owner decision 2026-11-23).
    */
   strokeInProgress(): boolean {
-    return this.stroke !== null;
+    return this.stroke !== null || this.brushing;
   }
 
   /**
@@ -800,7 +801,6 @@ export class EditorStage {
     doc.layers.forEach((layer, index) => {
       const node = this.nodeFor(layer);
       // skew is reset so the view can never hold skew the model lacks
-      // (ADR-0005). Text shows its Rust rendering (SPM-9), so the view draws
       // (ADR-0005). Text shows its Rust rendering (SPM-9), so the view draws
       // the pixels merge, Crop and the save produce, in the same box. An
       // override (effect preview, warp press) shows instead, never stored;

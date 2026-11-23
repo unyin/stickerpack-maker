@@ -684,10 +684,11 @@ function buildEditor(): HTMLElement {
   async function saveSession(): Promise<void> {
     const current = session;
     if (!current) return;
-    // A mid-press stroke (SPM-7) owns pixels the model does not have yet: the
-    // dialog would save the document without them, and the stroke's release
-    // would commit them under it. Both save entry points refuse here
-    // (owner decision 2026-11-23); the canvas rule follows once no stroke runs.
+    // A mid-press stroke — Erase/Restore (SPM-7) or Warp (SPM-8) — owns pixels
+    // the model does not have yet: the dialog would save the document without
+    // them, and the stroke's release would commit them under it. Both save
+    // entry points refuse here (owner decision 2026-11-23); the canvas rule
+    // follows once no stroke runs.
     const refusal = saveRefusal(stage?.strokeInProgress() ?? false, current.doc, constraints);
     if (refusal) return say(refusal);
     const doc = current.doc;
@@ -723,8 +724,8 @@ function buildEditor(): HTMLElement {
         if (target.kind === "replace") markStickerFileChanged(saved.sticker.id);
         // The session now edits the saved sticker: the next save replaces it (design decision 2026-11-22).
         origin = originAfterSave(saved, packTitle);
-        // Since the SPM-7 merge a brush stroke could commit under this dialog;
-        // the mid-stroke refusal above makes that known path impossible. The
+        // An Erase, Restore or Warp press could commit under this dialog; the
+        // mid-stroke refusal above makes that known path impossible. The
         // check stays as defence in depth for anything unforeseen.
         if (current.doc === doc) current.markSaved();
         say(savedText(saved, packTitle, target), "note", " ", stickerLink(saved.sticker, packTitle));

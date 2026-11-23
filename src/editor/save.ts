@@ -86,20 +86,22 @@ export function saveBlocker(canvas: Size, set: ConstraintSet): string | null {
 
 /**
  * Why a save is refused before the save dialog opens (owner decision
- * 2026-11-23): a refine brush stroke mid-press (SPM-7) owns pixels that are
- * painted live but not in the model yet, so the dialog would snapshot the
- * document without them — and the stroke's release would commit them under
- * it. The stroke ends first.
+ * 2026-11-23): a pixel-changing press is mid-stroke — a refine stroke
+ * (Erase/Restore, SPM-7) or a warp gesture (Warp, SPM-8) — and its pixels
+ * are painted live but not in the model yet, so the dialog would snapshot
+ * the document without them — and the stroke's release would commit them
+ * under it. The stroke ends first.
  */
 export const SAVE_MID_STROKE =
-  "Save is blocked: an Erase or Restore stroke is still being painted. Finish the stroke first, then save.";
+  "Save is blocked: an Erase, Restore or Warp stroke is still in progress. Finish the stroke first, then save.";
 
 /**
  * Why this save attempt is refused before the save dialog opens, or null
- * when the dialog may open: a mid-press stroke (SPM-7) refuses even a canvas
- * that passes the rule; otherwise the canvas rule (SPEC §6: hard-blocked)
- * decides. Both of the Editor's save entry points — the Save… button and
- * Ctrl+S — go through here, so a stroke in progress never reaches the dialog.
+ * when the dialog may open: a mid-press stroke (Erase/Restore, SPM-7; Warp,
+ * SPM-8) refuses even a canvas that passes the rule; otherwise the canvas
+ * rule (SPEC §6: hard-blocked) decides. Both of the Editor's save entry
+ * points — the Save… button and Ctrl+S — go through here, so a stroke in
+ * progress never reaches the dialog.
  */
 export function saveRefusal(midStroke: boolean, canvas: Size, set: ConstraintSet): string | null {
   return midStroke ? SAVE_MID_STROKE : saveBlocker(canvas, set);
