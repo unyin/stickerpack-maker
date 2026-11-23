@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import { IMPORT_MAX_SIDE, type RgbaImage } from "../src/editor/model/image";
 import { startCanvas, STICKER, THUMBNAIL } from "../src/editor/model/constraints";
-import { addRasterLayer, addTextLayer, fitToBox, newDocument, scaleLongestSide } from "../src/editor/model/document";
+import { addRasterLayer, addTextLayer, fillToBox, fitToBox, newDocument, scaleLongestSide, setTransform, IDENTITY } from "../src/editor/model/document";
 import {
   deleteBlocker,
   fitView,
@@ -12,6 +12,7 @@ import {
   mergeBlocker,
   MIN_ZOOM,
   selectModeFor,
+  selectedLayerSize,
   sizeToolBlocker,
   panView,
   zoomAround,
@@ -125,6 +126,62 @@ test("Longest side is greyed out with a reason when the set needs a square canva
   expect(sizeToolBlocker("longest", thumb, null, NaN, THUMBNAIL)).toBe(reason);
   // Free resize is the same in both modes.
   expect(sizeToolBlocker("free", thumb, content, 50, THUMBNAIL)).toBeNull();
+});
+
+test("Fill runs in both modes; once it has run, the blocker says the image already covers the side", () => {
+  // 384x256: the ratios are exact in floating point, so the post-Fill
+  // content rect is exactly what the blocker recomputes.
+  const doc = newDocument(image(384, 256), "b", STICKER_CANVAS);
+  const content = { x: 0, y: 0, width: 384, height: 256 };
+  for (const set of [STICKER, THUMBNAIL]) {
+    const S = set.side;
+    expect(sizeToolBlocker("fill", doc, content, NaN, set)).toBeNull();
+    expect(sizeToolBlocker("fill", doc, null, NaN, set)).toBe("There is nothing to resize.");
+    // After a Fill: side-square canvas, shortest side S, centred -> no-op.
+    const wide = 384 * (S / 256); // the landscape content spills left and right
+    const filled = { x: Math.floor((S - wide) / 2), y: 0, width: wide, height: S };
+    expect(sizeToolBlocker("fill", fillToBox(doc, content, S), filled, NaN, set)).toBe(
+      `The image already covers ${S}×${S}.`,
+    );
+  }
+});
+
+test("the free-resize blocker follows the side-kind choice (CMT-152)", () => {
+  const doc = newDocument(image(300, 200), "b", STICKER_CANVAS);
+  const content = { x: 0, y: 0, width: 300, height: 200 };
+  expect(sizeToolBlocker("free", doc, content, NaN, STICKER, "shortest")).toBe(
+    `The shortest side must be a whole number of pixels from 1 to ${IMPORT_MAX_SIDE}.`,
+  );
+  // The shortest side is 200: entered 200 changes nothing; entered as the
+  // longest side it would change something.
+  expect(sizeToolBlocker("free", doc, content, 200, STICKER, "shortest")).toBe(
+    "The image's shortest side is already 200 px.",
+  );
+  expect(sizeToolBlocker("free", doc, content, 200, STICKER, "longest")).toBeNull();
+});
+
+test("the selected layer's size is its on-canvas bounding box, whole px (owner decision 2026-11-23)", () => {
+  const doc = newDocument(image(300, 200), "base", STICKER_CANVAS);
+  const base = doc.layers[0].id;
+  // Nothing with no layer or several layers selected.
+  expect(selectedLayerSize(doc, [])).toBeNull();
+  expect(selectedLayerSize(doc, [base, "layer-9"])).toBeNull();
+  expect(selectedLayerSize(doc, [base])).toBe("300×200 px");
+  // Scaled: the box grows with the layer.
+  const scaled = setTransform(doc, base, { ...IDENTITY, x: 0, y: 0, scaleX: 2, scaleY: 2 });
+  expect(selectedLayerSize(scaled, [base])).toBe("600×400 px");
+  // Rotated 30 degrees: the axis-aligned box on the canvas, NOT the layer's
+  // own 300x200 (that was the owner-rejected scaled-size reading).
+  const rotated = setTransform(doc, base, { ...IDENTITY, x: 100, y: 100, rotation: 30 });
+  expect(selectedLayerSize(rotated, [base])).toBe("360×324 px");
+  // A text layer is measured by its rendered box (CMT-61), like everywhere.
+  const text = addTextLayer(
+    doc,
+    { text: "hi", fontFamily: "Arial", fontSize: 12, color: "#000000" },
+    { image: image(100, 15), metrics: { originX: 0, originY: 0, ascent: 8, descent: 2, lineHeight: 11 } },
+    { ...IDENTITY, scaleX: 2, scaleY: 2 },
+  );
+  expect(selectedLayerSize(text, [text.layers[1].id])).toBe("200×30 px");
 });
 
 test("fitView offsets are whole device pixels, so adjacent layers show no seams", () => {

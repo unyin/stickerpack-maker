@@ -27,7 +27,7 @@ export const STICKER: ConstraintSet = {
   square: false,
 };
 
-/** Thumbnail mode (not wired in the UI yet): exactly the thumbnail side square, file within its cap. */
+/** Thumbnail mode (a pack's thumbnail sessions, SPM-12): exactly the thumbnail side square, file within its cap. */
 export const THUMBNAIL: ConstraintSet = {
   mode: "thumbnail",
   side: limits.thumbnail.side,

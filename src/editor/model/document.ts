@@ -333,11 +333,14 @@ const EPSILON = 1e-6;
  */
 const PIXEL_SNAP = 1e-3;
 
-/** Why `value` is not a valid free-resize longest side, or null when it is (SPEC §6). */
-export function resizeSideProblem(value: number): string | null {
+/** Which side of the whole image a free resize sets (SPEC §6, CMT-152). */
+export type ResizeSide = "longest" | "shortest";
+
+/** Why `value` is not a valid free-resize `kind` side, or null when it is (SPEC §6). */
+export function resizeSideProblem(value: number, kind: ResizeSide = "longest"): string | null {
   return Number.isInteger(value) && value >= 1 && value <= IMPORT_MAX_SIDE
     ? null
-    : `The longest side must be a whole number of pixels from 1 to ${IMPORT_MAX_SIDE}.`;
+    : `The ${kind} side must be a whole number of pixels from 1 to ${IMPORT_MAX_SIDE}.`;
 }
 
 /**
@@ -388,6 +391,12 @@ function longestSideOf(content: Rect): number {
   return longest;
 }
 
+function shortestSideOf(content: Rect): number {
+  const shortest = Math.min(content.width, content.height);
+  if (!(shortest > 0)) throw new Error("there is no content to resize");
+  return shortest;
+}
+
 /**
  * Sizing tool 1 (SPEC §6): fit the whole image (`content`, the union of all
  * layers' on-screen boxes) into a `box` x `box` square (`box` is the
@@ -396,6 +405,21 @@ function longestSideOf(content: Rect): number {
  */
 export function fitToBox(doc: Doc, content: Rect, box: number): Doc {
   return scaleGroup(doc, content, box / longestSideOf(content), box, box);
+}
+
+/**
+ * Sizing tool 4 (SPEC §6): Fill is to Fit what CSS cover is to contain (owner
+ * request 2026-11-21). Scale the whole image (`content`, the union of all
+ * layers' on-screen boxes) so its SHORTEST side is `box` px, set the canvas
+ * to `box` x `box` and centre the image. What spills outside the canvas is
+ * KEPT — only transforms change, so the user can drag the image to choose
+ * which part shows, and Save clips it (SPEC §6 Save) or Crop is available.
+ * The result meets either constraint set, so it runs in both modes. Already
+ * covering the box, centred, on a box-sized canvas: the document is
+ * returned as is (no undo step).
+ */
+export function fillToBox(doc: Doc, content: Rect, box: number): Doc {
+  return scaleGroup(doc, content, box / shortestSideOf(content), box, box);
 }
 
 /**
@@ -424,6 +448,23 @@ export function resizeLongestSide(doc: Doc, content: Rect, side: number): Doc {
   const problem = resizeSideProblem(side);
   if (problem) throw new Error(problem);
   const factor = side / longestSideOf(content);
+  if (Math.abs(factor - 1) < EPSILON) return doc;
+  const x = Math.round(content.x + (content.width - content.width * factor) / 2);
+  const y = Math.round(content.y + (content.height - content.height * factor) / 2);
+  return scaleGroupTo(doc, content, factor, x, y);
+}
+
+/**
+ * Sizing tool 3, free resize with the shortest-side choice (CMT-152): like
+ * `resizeLongestSide`, but the entered `side` px is the whole image's
+ * SHORTEST side. The canvas size does not change; the group keeps its
+ * centre, with its top-left rounded to whole pixels. Already that size:
+ * the document is returned as is (no undo step).
+ */
+export function resizeShortestSide(doc: Doc, content: Rect, side: number): Doc {
+  const problem = resizeSideProblem(side, "shortest");
+  if (problem) throw new Error(problem);
+  const factor = side / shortestSideOf(content);
   if (Math.abs(factor - 1) < EPSILON) return doc;
   const x = Math.round(content.x + (content.width - content.width * factor) / 2);
   const y = Math.round(content.y + (content.height - content.height * factor) / 2);

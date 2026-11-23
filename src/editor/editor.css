@@ -42,6 +42,16 @@
   font: inherit;
 }
 
+/* The free-resize side-kind choice (CMT-152), styled like the field it names. */
+.editor-side-kind {
+  padding: 6px 8px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+
 .editor-spacer {
   flex: 1;
 }
@@ -154,6 +164,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The single selected layer's live pixel size (CMT-152), right-aligned in
+   its row; its whole-px numbers need no shifting as they tick. */
+.editor-layer-size {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .editor-layer-actions {
