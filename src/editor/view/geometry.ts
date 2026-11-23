@@ -1,4 +1,5 @@
 // Pure decisions behind the Editor view: no Konva, no DOM, unit-tested.
+import { matchNames } from "../../shared/match-names";
 import {
   cropOutcome,
   fitToBox,
@@ -260,16 +261,7 @@ export function fontChoices(installed: readonly string[], family: string): reado
  * empty query lists every font.
  */
 export function matchFonts(fonts: readonly string[], query: string): readonly string[] {
-  const q = query.trim().toLowerCase();
-  if (q === "") return fonts;
-  const starts: string[] = [];
-  const contains: string[] = [];
-  for (const font of fonts) {
-    const name = font.toLowerCase();
-    if (name.startsWith(q)) starts.push(font);
-    else if (name.includes(q)) contains.push(font);
-  }
-  return [...starts, ...contains];
+  return matchNames(fonts, query, (f) => f);
 }
 
 /** What Esc clears: the cut selection first, then the layer selection (SPEC §6). */

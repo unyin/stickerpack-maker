@@ -22,12 +22,33 @@ import {
   probePasted,
   removeImageBackground,
   renderText,
+  saveImage,
   type BackgroundModelId,
   type ImageInfo,
 } from "../editor/api";
 import { backgroundTarget, refineLayerPixels } from "../editor/model/background";
 import { downloadProgressText, megabytes } from "../editor/view/download-text";
 import { BRUSH_SIZE, brushSizeProblem } from "../editor/model/brush";
+import {
+  declinedText,
+  EXHAUSTED_TITLE,
+  exhaustedText,
+  pngTooLargeText,
+  runSave,
+  saveBlocker,
+  savedText,
+  type SaveFormat,
+  originAfterSave,
+  showStickerLink,
+  stickerGoneText,
+  type SaveTarget,
+  type TooLarge,
+} from "../editor/save";
+import type { StickerOrigin } from "../shared/sticker-origin";
+import { saveDialog } from "../editor/view/save-dialog";
+import { packMemory } from "../pack-manager/model/pack-memory";
+import { markStickerFileChanged } from "../pack-manager/model/changed-files";
+import { loadPackView, type Sticker } from "../pack-manager/api";
 import {
   addRasterLayer,
   addTextLayer,
@@ -123,6 +144,12 @@ function buildEditor(): HTMLElement {
   // The style the next new text gets: the text controls edit it while no
   // text layer is selected.
   let nextStyle: NextStyle = { fontFamily: "", fontSize: DEFAULT_FONT_SIZE, color: DEFAULT_TEXT_COLOR };
+  // The save dialog starts on the last save's format (SPM-10); its pack comes from packMemory.
+  let lastFormat: SaveFormat = "png";
+  // The sticker this session edits when the Pack Manager's Edit opened it, else null (SPM-10).
+  let origin: StickerOrigin | null = null;
+  // Counts Library changes, so a saved note's link knows its sticker is from an old one.
+  let libraryGeneration = 0;
 
   const message = el("p", { class: "message editor-message", role: "alert" });
   const canvasHost = el("div", { class: "editor-canvas" }) as HTMLDivElement;
@@ -165,6 +192,8 @@ function buildEditor(): HTMLElement {
   const cropButton = button("Crop", () => run(cropToBox));
   const resetViewButton = button("Reset view", () => stage?.fit());
   const closeButton = button("Close", () => run(async () => void (await closeSession())));
+  const saveButton = button("Save…", () => run(saveSession), "primary");
+  const saveTitle = "Save the canvas as a sticker in a pack (Ctrl+S)";
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
@@ -353,7 +382,8 @@ function buildEditor(): HTMLElement {
     zoomLabel,
     dirtyLabel,
     el("span", { class: "editor-spacer" }),
-    closeButton,
+    // Save and Close stay together when the toolbar wraps.
+    el("span", { class: "editor-session-actions" }, saveButton, closeButton),
   );
 
   const layersPanel = el(
@@ -376,9 +406,38 @@ function buildEditor(): HTMLElement {
    * `run()` clears the line (and its tone) with `say("")` before an action,
    * so errors that `withMessage` writes directly always show in the error tone.
    */
-  function say(text: string, tone: "error" | "note" = "error"): void {
-    message.textContent = text;
+  function say(text: string, tone: "error" | "note" = "error", ...extra: (Node | string)[]): void {
+    message.replaceChildren(text, ...extra);
     message.classList.toggle("is-note", tone === "note");
+  }
+
+  /**
+   * The saved note's link (owner decision 2026-11-22): a link-styled button
+   * that shows the saved sticker in the Pack Manager, leaving this session
+   * as it is. A sticker gone since (deleted, moved) is reported here instead.
+   */
+  function stickerLink(sticker: Sticker, packTitle: string): HTMLElement {
+    const { text, label } = showStickerLink(sticker, packTitle);
+    const link = el("button", { type: "button", class: "editor-link", "aria-label": label, title: label }, text);
+    // Not through run(): that clears the message line, and the note (with its link) should stay.
+    const generation = libraryGeneration;
+    link.addEventListener("click", async () => {
+      if (busy) return;
+      // Its ids belong to the Library it was saved into: never look them up in another.
+      if (generation !== libraryGeneration) {
+        say(stickerGoneText(sticker.position, packTitle, true));
+        return;
+      }
+      let present = false;
+      try {
+        present = (await loadPackView(sticker.packId)).stickers.some((s) => s.id === sticker.id);
+      } catch {
+        // the pack is gone too
+      }
+      if (!present) say(stickerGoneText(sticker.position, packTitle));
+      else editorNav?.showSticker(sticker.packId, sticker.id);
+    });
+    return link;
   }
 
   /** Undo and redo take the neutral note back with them (owner decision 2026-11-22); errors stay. */
@@ -452,10 +511,11 @@ function buildEditor(): HTMLElement {
     return image ? { image, name: baseName(path) } : null;
   }
 
-  async function openImage(path?: string): Promise<void> {
+  async function openImage(path?: string, from: StickerOrigin | null = null): Promise<void> {
     if (session) return; // one session at a time: Close first
     const picked = await pickAndImport(path);
     if (!picked) return;
+    origin = from;
     session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(constraints)));
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
@@ -561,12 +621,80 @@ function buildEditor(): HTMLElement {
   async function closeSession(): Promise<boolean> {
     if (!session) return true;
     if (session.isDirty && !(await confirmDiscard())) return false;
+    endSession();
+    return true;
+  }
+
+  /** End the session at once, unsaved changes included (the caller has asked). */
+  function endSession(): void {
+    origin = null;
     textOverlay.close();
     stage?.destroy();
     stage = null;
     session = null;
     tool = "move";
-    return true;
+  }
+
+  // ---- Save (SPM-10) ----
+
+  /**
+   * Save (SPEC §6, hard-blocked): the save dialog picks the pack and the
+   * format; Rust flattens what is inside the canvas, encodes it within the
+   * size cap and appends it to the pack. A PNG over the cap offers WEBP; a
+   * WEBP over the cap even at its lowest quality sends the user back to the
+   * Editor (owner decision 2026-11-21, CMT-144). A save clears the unsaved
+   * changes; the session stays open.
+   */
+  async function saveSession(): Promise<void> {
+    const current = session;
+    if (!current || saveBlocker(current.doc, constraints)) return;
+    const doc = current.doc;
+    let exhausted: TooLarge | null = null;
+    await saveDialog({
+      constraints,
+      format: lastFormat,
+      origin,
+      submit: async (choice, setFormat) => {
+        const { format } = choice;
+        const target: SaveTarget =
+          choice.kind === "replace"
+            ? { kind: "replace", stickerId: choice.origin.stickerId }
+            : { kind: "append", packId: choice.pack.id };
+        const packTitle = choice.kind === "replace" ? choice.now.packTitle : choice.pack.title;
+        const result = await runSave(format, {
+          save: (f) => saveImage(doc, f, target),
+          offerWebp: async (outcome) => {
+            const ok = await confirmWebp(pngTooLargeText(outcome));
+            if (ok) setFormat("webp");
+            return ok;
+          },
+        });
+        if (result.kind === "declined") return declinedText(result.outcome);
+        if (result.kind === "exhausted") {
+          exhausted = result.outcome;
+          return null; // the save dialog closes; the question below follows
+        }
+        const saved = result.outcome;
+        packMemory.lastSavedPackId = saved.sticker.packId;
+        lastFormat = saved.sticker.format;
+        // The open pack view must not keep showing the old picture of a replaced sticker.
+        if (target.kind === "replace") markStickerFileChanged(saved.sticker.id);
+        // The session now edits the saved sticker: the next save replaces it (design decision 2026-11-22).
+        origin = originAfterSave(saved, packTitle);
+        // The session cannot change while the dialog is open; check anyway.
+        if (current.doc === doc) current.markSaved();
+        say(savedText(saved, packTitle, target), "note", " ", stickerLink(saved.sticker, packTitle));
+        return null;
+      },
+    });
+    // Even WEBP at its lowest quality is too large (owner decision 2026-11-22):
+    // back to the Editor, or give up on this session without the unsaved-changes question.
+    // Its limit is the cap Rust held the save to: the constraint set's (or the debug override's).
+    // (`submit` sets `exhausted` in a callback, which TypeScript's narrowing cannot see.)
+    const tooLarge = exhausted as TooLarge | null;
+    if (tooLarge && (await confirmGiveUp(exhaustedText(tooLarge.maxKilobytes))) && session === current) {
+      endSession();
+    }
   }
 
   // ---- Cut and paste (SPM-9) ----
@@ -922,6 +1050,9 @@ function buildEditor(): HTMLElement {
     readout.classList.toggle("off", !status.ok);
     resetViewButton.disabled = busy;
     closeButton.disabled = busy;
+    const saveReason = saveBlocker(doc, constraints);
+    saveButton.disabled = busy || saveReason !== null;
+    saveButton.title = saveReason ?? saveTitle;
     undoButton.disabled = busy || !current.canUndo;
     redoButton.disabled = busy || !current.canRedo;
     upButton.disabled = busy || !single || index === doc.layers.length - 1;
@@ -998,6 +1129,8 @@ function buildEditor(): HTMLElement {
   // Esc act on the text (SPM-9).
   document.addEventListener("keydown", (e) => {
     const current = session;
+    // Ctrl+S never reaches the webview's own "save page", even while busy.
+    if (view.isConnected && isSaveShortcut(e)) e.preventDefault();
     if (!current || !view.isConnected || busy || textOverlay.isOpen) return;
     if (isTextTarget(e.target)) return;
     // A lasso in progress takes Enter, Esc and Backspace first (SPM-9).
@@ -1013,6 +1146,12 @@ function buildEditor(): HTMLElement {
     else if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) {
       clearNote();
       current.redo();
+    }
+    // Ctrl+S saves; a blocked save says why (SPEC §6: hard-blocked).
+    else if (isSaveShortcut(e)) {
+      const reason = saveBlocker(current.doc, constraints);
+      if (reason) say(reason);
+      else void run(saveSession);
     }
     // Ctrl+X is the Cut tool, not the clipboard; a blocked cut says why.
     else if (isCutShortcut(e)) {
@@ -1043,18 +1182,46 @@ function buildEditor(): HTMLElement {
   void loadFonts();
 
   // Pack Manager hook (SPM-3), see openFileInEditor below.
-  openFileHook = (path, showEditor) =>
+  openFileHook = (path, showEditor, from) =>
     run(async () => {
       const closed = await closeSession(); // warns on unsaved changes
       showEditor(); // either way: Keep editing shows the open image
-      if (closed) await openImage(path);
+      if (closed) await openImage(path, from ?? null);
     });
+  // The dialog then says why Replace is gone, rather than silently dropping it.
+  forgetOriginHook = () => {
+    if (origin) origin = { ...origin, otherLibrary: true };
+    libraryGeneration++; // a saved note's link now points into the old Library
+  };
 
   refresh();
   return view;
 }
 
-let openFileHook: ((path: string, showEditor: () => void) => Promise<void>) | null = null;
+let openFileHook: ((path: string, showEditor: () => void, origin?: StickerOrigin) => Promise<void>) | null = null;
+let forgetOriginHook: (() => void) | null = null;
+
+/** What the Editor asks of the app shell. */
+export interface EditorNav {
+  /** Switch to the Pack Manager showing this sticker (the saved note's link). */
+  showSticker(packId: number, stickerId: number): void;
+}
+
+let editorNav: EditorNav | null = null;
+
+/** The shell tells the Editor how to reach the other views. */
+export function setEditorNav(nav: EditorNav): void {
+  editorNav = nav;
+}
+
+/**
+ * The Library changed: a session opened with Edit no longer replaces its
+ * sticker, whose id belongs to the old Library; its save dialog says so and
+ * it can still save as a new sticker.
+ */
+export function forgetEditorOrigin(): void {
+  forgetOriginHook?.();
+}
 
 /**
  * Open the image at `path` in the Editor, as Open image would (import cap
@@ -1063,11 +1230,12 @@ let openFileHook: ((path: string, showEditor: () => void) => Promise<void>) | nu
  * session with unsaved changes asks first, while the caller's view is still
  * showing; then `showEditor` switches to the Editor either way (the canvas
  * must be on screen to measure itself); then, unless the user kept editing,
- * the file opens.
+ * the file opens. `origin` is the sticker it is (Edit): saving then offers
+ * to replace it (owner decision 2026-11-22).
  */
-export function openFileInEditor(path: string, showEditor: () => void): Promise<void> {
+export function openFileInEditor(path: string, showEditor: () => void, origin?: StickerOrigin): Promise<void> {
   renderEditor(); // builds the Editor once, which installs the hook
-  return openFileHook ? openFileHook(path, showEditor) : Promise.resolve();
+  return openFileHook ? openFileHook(path, showEditor, origin) : Promise.resolve();
 }
 
 /** The unsaved-changes question, worded for both Close and opening another image. */
@@ -1095,6 +1263,33 @@ function confirmModelDownload(label: string, sizeBytes: number): Promise<boolean
     ],
     { actionLabel: "Download", keepLabel: "Cancel" },
   );
+}
+
+/**
+ * Even WEBP is too large (owner decision 2026-11-22, the owner's copy):
+ * "Maybe I can fix it", the default, returns to the Editor; "Nah fuck it"
+ * closes the Editor at once, unsaved changes and all. Resolves true for that.
+ */
+function confirmGiveUp(text: string): Promise<boolean> {
+  return confirmChoice(EXHAUSTED_TITLE, [el("p", {}, text)], {
+    actionLabel: "Nah fuck it",
+    keepLabel: "Maybe I can fix it",
+    danger: true,
+    keepFirst: true, // the owner's order (2026-11-22), unlike the other dialogs
+  });
+}
+
+/** Ctrl+S (Cmd+S): Save. */
+function isSaveShortcut(e: KeyboardEvent): boolean {
+  return (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s";
+}
+
+/** A PNG over the size cap (owner decision 2026-11-21): offer WEBP; Cancel, the safe choice, keeps the dialog. */
+function confirmWebp(body: readonly string[]): Promise<boolean> {
+  return confirmChoice("Too large as PNG", body.map((line) => el("p", {}, line)), {
+    actionLabel: "Save as WEBP",
+    keepLabel: "Cancel",
+  });
 }
 
 /** The import cap question (SPEC §6); Cancel, the safe choice, aborts the import. */

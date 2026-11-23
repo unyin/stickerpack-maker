@@ -2,6 +2,8 @@
 // (Reorder toggle, Refresh, Add images), banners, the sticker grid with the
 // thumbnail slot at its end, and the selection panel. Rules live in
 // ../model; this file wires them to the DOM and the commands.
+import { stickerOrigin, type StickerOrigin } from "../../shared/sticker-origin";
+import { takeChangedStickers } from "../model/changed-files";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { editorCanImport } from "../../shared/import-extensions";
 import { explorerLabel, icon } from "../../icons";
@@ -31,6 +33,8 @@ import {
   fileNameOf,
   importSummary,
   missingSummary,
+  REVEAL_BUSY,
+  REVEAL_GONE,
   SHORT_NAME_LOCKED,
   stickerCountText,
   thumbnailFormat,
@@ -58,12 +62,21 @@ import { cancelReorderDrag, startReorderDrag, type ReorderDragHost } from "./reo
 export interface PackViewHost {
   /** Back to the pack list. */
   back(): void;
-  /** Show the Editor with this image open. */
-  openInEditor(path: string): void;
+  /** Show the Editor with this image open; `origin` when it is this pack's sticker (Edit). */
+  openInEditor(path: string, origin?: StickerOrigin): void;
 }
 
 export interface PackViewHandle {
   element: HTMLElement;
+  /** Re-read the pack without a Missing scan (e.g. the Editor saved into it). */
+  reload(): void;
+  /**
+   * Show sticker `id` (the Editor's saved-note link): re-read the pack unless
+   * `fresh` (just opened), then Normal mode, that sticker alone selected
+   * (detail panel), scrolled into view. Runs like every pack action: one at
+   * a time, errors (and a sticker gone meanwhile) in the message line.
+   */
+  reveal(id: number, fresh: boolean): void;
   destroy(): void;
 }
 
@@ -276,7 +289,10 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     edit: (s) =>
       void run(async () => {
         const choice = await editChoiceDialog(s.position);
-        if (choice === "edit") host.openInEditor(await stickerFilePath(s.id));
+        if (choice === "edit") {
+          // Saving the session then offers to replace this sticker (owner decision 2026-11-22).
+          host.openInEditor(await stickerFilePath(s.id), stickerOrigin(s, view.pack.title));
+        }
         else if (choice === "replace") await replace(s);
       }),
     replace: (s) => void run(() => replace(s)),
@@ -533,9 +549,34 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     if (!panel.contains(document.activeElement) || !editing) renderPanel();
   }
 
+  /** Re-read the pack (no Missing scan); the Editor may have replaced a file, whose cached preview is stale. */
+  async function reread(): Promise<void> {
+    for (const id of takeChangedStickers()) previews.forget(id);
+    setView(await loadPackView(packId));
+  }
+
   render();
   return {
     element: root,
+    reload: () => void run(reread),
+    reveal: (id, fresh) => {
+      // run() would skip it silently while another action works: say so instead.
+      if (busy) {
+        message.textContent = REVEAL_BUSY;
+        return;
+      }
+      void run(async () => {
+        if (!fresh) await reread();
+        if (!view.stickers.some((s) => s.id === id)) throw new Error(REVEAL_GONE);
+        // Design decision 2026-11-22: the link leaves Reorder mode and replaces the selection.
+        mode = "normal";
+        selection = { ids: [id], thumbnail: false, anchor: id };
+        render();
+        const tile = grid.querySelector<HTMLElement>(`.pm-tile[data-id="${id}"]`);
+        tile?.scrollIntoView({ block: "nearest" });
+        tile?.focus({ preventScroll: true });
+      });
+    },
     destroy() {
       document.removeEventListener("keydown", onKey);
       unlistenDrop?.();

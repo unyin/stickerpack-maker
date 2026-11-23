@@ -26,8 +26,9 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
   - Every two-option confirmation in the app (deletes, Draft/Live, invalid import, creating
     a Library) uses the one shared in-app dialog: the safe choice is the default (focused,
     primary), and Esc and closing choose the safe option. Buttons read action first, safe
-    choice last. Forms that collect input (New pack, Send to pack) are not confirmations:
-    their submit button stays primary.
+    choice last (one exception: the "even WEBP is too large" question, §6 Save). Forms
+    that collect input (New pack, Send to pack) are not confirmations: their submit button
+    stays primary.
   - Disabled controls look disabled (faded) and still show their reason as a tooltip.
   - Every message that stays until dismissed has an **X** close button on its left as well as
     **Dismiss** on its right; both do the same (owner decision 2026-11-22). The red message
@@ -135,15 +136,17 @@ stickers, Missing stickers, and the thumbnail.
   as monochrome text glyphs (owner decision 2026-11-22; SPM-17 makes the style selectable).
 - Actions: **Edit** first asks **Edit / Replace… / Cancel** (Cancel is the safe default):
   Edit opens the flattened image in the Editor, Replace runs the Replace flow below (owner
-  decision 2026-11-21). Opening in the Editor while it has unsaved changes asks first, in the
-  shared dialog: "The editor has unsaved changes. Do you want to discard these or continue
-  editing?" (Discard / Keep editing, Keep editing by default); either way the view then
-  switches to the Editor, which opens the sticker only after Discard. **Replace** (preserves
-  position + emoji; validated drop-in or via Editor, §5 replacement rules below);
-  **Send to pack…**; **Open in explorer** (folder opens with the file selected; the button
-  ends with an "opens in another program" icon, as every Open in explorer button does);
-  **Delete** (confirmation dialog showing preview + emoji, then permanent; Delete key
-  shortcut). No double-click behavior in v1.
+  decision 2026-11-21). A session opened with Edit remembers that sticker: saving it
+  offers to replace the sticker in its slot (§6 Save; owner decision 2026-11-22).
+  Opening in the Editor while it has unsaved changes asks first, in the shared dialog: "The
+  editor has unsaved changes. Do you want to discard these or continue editing?" (Discard /
+  Keep editing, Keep editing by default); either way the view then switches to the Editor,
+  which opens the sticker only after Discard. **Replace** (preserves position + emoji;
+  validated drop-in or via Editor, §5 replacement rules below); **Send to pack…**; **Open in
+  explorer** (folder opens with the file selected; the button ends with an "opens in another
+  program" icon, as every Open in explorer button does); **Delete** (confirmation dialog
+  showing preview + emoji, then permanent; Delete key shortcut). No double-click behavior in
+  v1.
 
 ### Aggregate panel (multiple selection)
 - "N stickers selected" + combined file size. Exactly two actions: **Send to pack…** and
@@ -151,8 +154,11 @@ stickers, Missing stickers, and the thumbnail.
   single selection.
 
 ### Send to pack (single and bulk; the unified Duplicate/Move command)
-- Dialog: searchable target-pack list with Draft/Live badges, current pack excluded, inline
-  **New pack…** (Title → auto Short Name, Draft).
+- Dialog: the pack picker (a searchable pack field with Draft/Live badges, described in §6
+  Save), current pack excluded, with inline **New pack…** (Title → auto Short Name, Draft)
+  beside it (owner decision 2026-11-22). The dialog always opens with focus in the pack
+  field, even when a pack is already chosen, so Enter never sends at once (owner decision
+  2026-11-22).
 - Checkbox **"Delete originals after sending"**, default off. Off = Duplicate; on = Move.
 - Stickers append at the target's end in source-pack order, each with its emoji string
   copied — independent copies (ADR-0002).
@@ -410,9 +416,77 @@ stickers, Missing stickers, and the thumbnail.
 - Saving flattens what is **inside the canvas**; anything outside the canvas is clipped
   (discarded) (owner decision 2026-11-20).
 - Save dialog: pick target pack (create-new inline); choose **PNG or WEBP** per save.
+  Details (SPM-10, 2026-11-22):
+  - **Save…** sits at the right of the Editor toolbar, before Close; **Ctrl+S** does the
+    same. While the canvas misses the constraint set it is disabled, with the reason (the
+    live readout's text and the sizing tool that fixes it) as its tooltip; Ctrl+S then shows
+    that reason in the message line.
+  - The pack is chosen in the same pack picker as Send to pack (owner decision 2026-11-22): a
+    field like the font picker. Clicking or typing opens the list of packs (Title, Short
+    Name, sticker count, Draft/Live badge); typing filters it (Titles starting with the text
+    first, then Titles or Short Names containing it); the arrow keys and Enter or a click
+    pick; Esc or leaving the field keeps the current pack. **New pack…** sits beside the
+    field and creates a Draft pack inline (Title → auto Short Name), which is then chosen.
+    The field starts on the pack open in the Pack Manager, else the last pack saved into
+    this session, else empty. When a pack is already chosen, the dialog opens with focus on
+    **Save**, so Enter saves at once; otherwise in the pack field. The format starts on the
+    session's last save's (PNG the first time); the PNG/WEBP choice is a two-way toggle (its
+    look is for the SPM-15 pass).
+  - **Saving an edited sticker** (owner decision 2026-11-22): a session opened with the Pack
+    Manager's Edit remembers that sticker. Its save dialog starts with two options at the
+    top: **Replace #N in <pack>** (the default; N and the pack as they are now, even after
+    a reorder or rename) and **Save as a new sticker**, which shows the pack picker. A
+    session opened from an image file shows only the pack picker. Ctrl+S then Enter
+    replaces. A replace keeps the sticker's position and Emoji String; the format starts on
+    the sticker's own, and a PNG↔WEBP change changes the file's extension (`002.png` →
+    `002.webp`, ADR-0003, through the crash-safe renames of ADR-0004). The over-cap flow
+    below applies the same way. If the sticker no longer exists (deleted, sent away with
+    Move, or the Library changed), the dialog says so, disables Replace and selects Save as
+    a new sticker: a save never writes to another slot. After a replace the note says
+    "Replaced #N in “<pack>”", the unsaved-changes flag clears and the Pack Manager shows
+    the new picture. After any save the session edits the saved sticker, so the next save
+    offers to replace it, a new sticker included. Thumbnail-mode sessions come with SPM-12.
+  - A save as a new sticker appends it at the pack's end with an order-encoded file name
+    (ADR-0003) and an empty Emoji String (flagged in the Pack Manager, like bulk imports).
+    The Library core checks the file as a sticker once more before it enters the pack.
+  - After a save the dialog closes, the unsaved-changes flag clears, the session stays open,
+    and a neutral note follows: for a new sticker it names the file, its position, the pack
+    and the file size (a replace's note is above). A Pack Manager showing that pack re-reads
+    it when its tab is shown again. The note ends with a **Show in Pack Manager** link (a
+    button styled as a link, named after the sticker; owner decision 2026-11-22): it
+    switches to the Pack Manager, opens that pack, selects the sticker alone (detail
+    panel) and scrolls it into view, leaving Reorder mode if it was on; the Editor session
+    stays as it is. If the sticker no longer exists (deleted, moved, or saved into the
+    Library used before a Library change), the message line says so instead and nothing
+    else happens.
+  - PNG is encoded once at the best lossless compression: it has no quality knob. WEBP is
+    lossless when that fits the cap, otherwise lossy at the highest quality that fits (alpha
+    stays lossless); the quality is found automatically, there is no quality slider.
+  - **Over the size cap** (owner decision 2026-11-21): a PNG over the cap says so (its size
+    and the limit) in the shared dialog, **Save as WEBP** / **Cancel** (Cancel, the default,
+    returns to the save dialog with "Not saved: …"). If even WEBP at its lowest quality is
+    over the cap, nothing is saved: the save dialog closes and the shared dialog says, in
+    the owner's words (owner decision 2026-11-22): "Congratulations, you've somehow managed
+    to make an image so weird that even WEBP at its lowest quality won't save below
+    {limit}. Go back to the editor and try to fix it, or fuck it all and start over. Up to
+    you." ({limit} is the active constraint set's size cap, e.g. 512 KB.) **Maybe I can fix
+    it**, the default, returns to the Editor; **Nah fuck it** (red) closes the session at
+    once, without the unsaved-changes question: the button is the discard choice. Unlike
+    the other two-option dialogs (§2: action first), this one puts **Maybe I can fix it**
+    first (owner decision 2026-11-22).
+  - Dev-only test hook (owner approved 2026-11-22): in a debug build (`bun run tauri dev`),
+    the environment variable `SPM_DEBUG_SAVE_CAP_KB` set to a whole number of KB (at least
+    1) replaces the size cap the Rust save holds the file to, for PNG and the WEBP quality
+    search alike, so the "even WEBP" dialog can be reached by hand; it then names that cap.
+    Other values are ignored with a warning on stderr. Release builds compile it out; the
+    Editor's readout and Save blocking always use the real limits.
 - **Saving is blocked unless constraints are met** — no warn-and-proceed path:
   - Sticker mode: longest side exactly **512 px** and file ≤ **512 KB**.
   - Thumbnail mode: exactly **100×100 px** and file ≤ **128 KB**, PNG/WEBP.
+  - Both halves are checked in Rust on what is actually written: the flattened size, then
+    the encoded bytes (KB = 1024 bytes). Saving a thumbnail (Thumbnail mode's target, the
+    pack's thumbnail slot) comes with Thumbnail mode (SPM-12); the Rust checks already
+    cover the thumbnail constraint set.
 - The live readout shows how far the canvas is off the constraint set. **Fit** fixes it in one
   click in both modes; **Longest side** also does in Sticker mode.
 - In Thumbnail mode **Longest side** is greyed out (visible but disabled, with the reason in
@@ -472,8 +546,7 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 - Bulk emoji-set: rejected as unnecessary — not planned.
 - Editor: every edge of the selection box is grabbable for resizing, not just the corners.
 - Editor: custom canvas resizing (in v1 only Fit and Longest side change the canvas).
-- Drag and drop an image file to open it in the Editor. (v3 idea: drag and drop onto an
-  open session to add it as a layer.)
+- Drag and drop an image file to open it in the Editor.
 - Editor: Crop could also drop a layer that crosses the box edge when its part inside the
   box is fully transparent. In v1 such a layer is kept; only layers entirely outside the box
   are discarded (owner, 2026-11-21: may revisit).
@@ -489,8 +562,25 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
   selection (owner, 2026-11-21).
 - Editor: layer locking, so a locked layer cannot be selected, moved or edited by accident
   (owner, 2026-11-22).
-- v3 idea: in Reorder mode the sticker images wiggle (as on phone home screens), instead of
-  or as well as the green tint (owner, 2026-11-21: animations are a bigger job).
+- Editor save dialog: an Emoji String field, so a new sticker gets its emoji as it is saved
+  (owner, 2026-11-22; in v1 it is saved without emoji and flagged in the Pack Manager).
+- Settings: Editor defaults (the tool settings a session starts with) configurable in the
+  Settings tab. In v1 Editor settings last only until the app closes and always start from
+  the defaults (owner, 2026-11-22).
+
+### v3 parking lot
+- Drag and drop an image file onto an open session to add it as a layer (owner, 2026-11-20).
+- Pack Manager: in Reorder mode the sticker images wiggle (as on phone home screens),
+  instead of or as well as the green tint (owner, 2026-11-21: animations are a bigger job).
+- Editor, warp: hold Alt to pinch (shrink) instead of bulge (owner, 2026-11-22).
+- Editor: speech bubbles, e.g. with Konva's Label and Tag (owner, 2026-11-22).
+- Editor: arrows and shapes (owner, 2026-11-22).
+- Editor: text along a curve, e.g. with Konva's TextPath (owner, 2026-11-22).
+- Editor: colour filters (owner, 2026-11-22).
+
+### v4 parking lot
+- Editor: a "deep fry" tool: colour filters, grain, noise and the like in one go (owner,
+  2026-11-22).
 
 ## 10. Draft work packages (for review — not yet filed as issues)
 

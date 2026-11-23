@@ -14,7 +14,7 @@ use rusqlite::{params, Connection, Transaction};
 use serde::Serialize;
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::files::{self, has_pending_plan, remove_names, stage_copy, sticker_file_name, Step};
+use super::files::{self, has_pending_plan, remove_names, stage_copy, sticker_file_name, FaultPoint, Step};
 use super::packs::open_pack_files;
 use super::schema::{load_pack, load_sticker, load_stickers, Format, Sticker};
 use crate::limits::{EMOJI_MAX, EMOJI_MIN, KB, PACK_MAX_STICKERS, STICKER_MAX_KB, STICKER_SIDE};
@@ -202,6 +202,19 @@ fn apply_new_order(
     deleted: &[Sticker],
     drop_files: &[String],
 ) -> Result<(), String> {
+    apply_new_order_with_fault(conn, dir, pack_id, slots, deleted, drop_files, &|_| Ok(()))
+}
+
+/// `apply_new_order` with the engine's crash-simulation seam (files.rs).
+fn apply_new_order_with_fault(
+    conn: &mut Connection,
+    dir: &Path,
+    pack_id: i64,
+    slots: &[Slot],
+    deleted: &[Sticker],
+    drop_files: &[String],
+    fault: &dyn Fn(FaultPoint) -> Result<(), String>,
+) -> Result<(), String> {
     // Deletes first: they vacate names before placements reuse them.
     let mut steps: Vec<Step> = deleted
         .iter()
@@ -216,7 +229,7 @@ fn apply_new_order(
             SlotFile::Current(name) | SlotFile::Staged(name) => steps.push(Step::rename(name.clone(), to)),
         }
     }
-    files::apply_plan(conn, dir, pack_id, &steps, |tx| write_rows(tx, pack_id, slots, deleted))
+    files::apply_plan_with_fault(conn, dir, pack_id, &steps, |tx| write_rows(tx, pack_id, slots, deleted), fault)
 }
 
 fn write_rows(tx: &Transaction, pack_id: i64, slots: &[Slot], deleted: &[Sticker]) -> Result<(), String> {
@@ -419,6 +432,17 @@ pub fn replace_sticker_file(
     sticker_id: i64,
     source: &Path,
 ) -> Result<Sticker, String> {
+    replace_sticker_file_with_fault(conn, library_dir, sticker_id, source, &|_| Ok(()))
+}
+
+/// `replace_sticker_file` with the engine's crash-simulation seam (tests).
+pub(crate) fn replace_sticker_file_with_fault(
+    conn: &mut Connection,
+    library_dir: &Path,
+    sticker_id: i64,
+    source: &Path,
+    fault: &dyn Fn(FaultPoint) -> Result<(), String>,
+) -> Result<Sticker, String> {
     let format = validate_sticker_file(source).map_err(|e| format!("{}: {e}", source.display()))?;
     let pack_id = load_sticker(conn, sticker_id)?.pack_id;
     let (_, dir) = open_pack_files(conn, library_dir, pack_id)?;
@@ -439,7 +463,7 @@ pub fn replace_sticker_file(
             }
         })
         .collect();
-    if let Err(e) = apply_new_order(conn, &dir, pack_id, &slots, &[], &[old_file]) {
+    if let Err(e) = apply_new_order_with_fault(conn, &dir, pack_id, &slots, &[], &[old_file], fault) {
         discard_staged(conn, &dir, pack_id, std::slice::from_ref(&temp));
         return Err(e);
     }
@@ -1070,6 +1094,37 @@ mod tests {
         replace_sticker_file(&mut lib.conn, lib.dir.path(), s[1].id, &src).unwrap();
         assert_eq!(lib.tags(pack.id), some(&["A", "B3", "C"]));
         lib.assert_consistent(pack.id);
+    }
+
+    #[test]
+    fn a_crash_during_a_format_changing_replace_recovers_to_the_new_file() {
+        // 002.png -> 002.webp (the Editor saving a sticker back as WEBP): a
+        // crash at any phase boundary rolls forward on the next open
+        // (ADR-0004) to the new file under the order-encoded name (ADR-0003).
+        let points = [
+            FaultPoint::AfterCommit,
+            FaultPoint::AfterPhase1,
+            FaultPoint::AfterPhase1Marked,
+            FaultPoint::Phase2Step(0),
+            FaultPoint::Phase2Step(1),
+            FaultPoint::BeforeJournalCleanup,
+        ];
+        for point in points {
+            let mut lib = Lib::new();
+            let pack = lib.pack("p");
+            let s = lib.seed(pack.id, &["A", "B", "C"]);
+            let src = lib.source("new.webp", "B2");
+            let crash = |p: FaultPoint| if p == point { Err("simulated crash".to_string()) } else { Ok(()) };
+            let err = replace_sticker_file_with_fault(&mut lib.conn, lib.dir.path(), s[1].id, &src, &crash).unwrap_err();
+            assert_eq!(err, "simulated crash");
+            let dir = lib.dir.path().join("p");
+            super::super::files::recover(&lib.conn, &dir, pack.id).unwrap();
+            assert_eq!(lib.tags(pack.id), some(&["A", "B2", "C"]), "after a crash at {point:?}");
+            let b = load_sticker(&lib.conn, s[1].id).unwrap();
+            assert_eq!((b.position, b.file_name.as_str(), b.format, b.emoji_string.as_str()), (2, "002.webp", Format::Webp, "B"));
+            assert!(!dir.join("002.png").exists(), "the old file stays after a crash at {point:?}");
+            lib.assert_consistent(pack.id);
+        }
     }
 
     #[test]

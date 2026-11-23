@@ -288,3 +288,33 @@ test("background removal: model status, download with progress, cancel, and the 
   expect(out.width).toBe(2);
   expect(out.height).toBe(1);
 });
+
+test("save sends the canvas, layers, format and target in one ASCII header", async () => {
+  const { newDocument, addTextLayer } = await import("../src/editor/model/document");
+  const image = { width: 2, height: 1, pixels: new Uint8ClampedArray([1, 2, 3, 4, 5, 6, 7, 8]) };
+  const style = { text: "café 😀", fontFamily: "Arial", fontSize: 30, color: "#112233" };
+  const render = await api.renderText(style);
+  const side = limits.sticker.side;
+  let doc = newDocument(image, "base", { width: side, height: 3 });
+  doc = addTextLayer(doc, style, render);
+  await api.saveImage(doc, "webp", { kind: "append", packId: 4 });
+  const call = calls[calls.length - 1];
+  expect(call.cmd).toBe("editor_save_image");
+  expect(Array.from(call.args as unknown as Uint8Array)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  const header = (options[options.length - 1] as { headers: Record<string, string> }).headers["x-save-image"];
+  // A header value carries only visible ASCII; the text survives as JSON escapes.
+  expect(/^[\x20-\x7e]*$/.test(header)).toBe(true);
+  const meta = JSON.parse(header);
+  expect([meta.width, meta.height, meta.format, meta.target]).toEqual([side, 3, "webp", { kind: "append", packId: 4 }]);
+  expect(meta.layers.length).toBe(2);
+  expect(meta.layers[0]).toEqual({ width: 2, height: 1, transform: doc.layers[0].transform });
+  expect(meta.layers[1].text).toEqual(style);
+});
+
+test("asciiJson escapes every non-ASCII character and means the same JSON", () => {
+  const value = { text: "naïve ✓ 👍", n: 1, nested: ["\u007f"] };
+  const json = api.asciiJson(value);
+  expect(/^[\x20-\x7e]*$/.test(json)).toBe(true);
+  expect(JSON.parse(json)).toEqual(value);
+  expect(api.asciiJson({ a: "plain" })).toBe(JSON.stringify({ a: "plain" }));
+});
