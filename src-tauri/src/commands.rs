@@ -465,11 +465,14 @@ mod tests {
             (EmojiStyle::Windows, "windows"),
             (EmojiStyle::Custom, "custom"),
         ] {
-            // Must match the EmojiStyle union in src/emoji-style.ts exactly.
+            // Serialization must match the EmojiStyle union in
+            // src/emoji-style.ts exactly; parse takes the SAME bare value
+            // the IPC command receives (the Windows-test bug, owner
+            // 2026-11-24: a quoted string is not the bare value).
             assert_eq!(serde_json::to_string(&value).unwrap(), format!("\"{text}\""));
-            assert_eq!(EmojiStyle::parse(&format!("\"{text}\"")).unwrap(), value);
+            assert_eq!(EmojiStyle::parse(text).unwrap(), value);
         }
-        assert!(EmojiStyle::parse("\"apple\"").is_err());
+        assert!(EmojiStyle::parse("apple").is_err());
     }
 
     #[test]

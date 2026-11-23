@@ -236,10 +236,27 @@ export function renderSettings(
           { class: "muted" },
           "How emoji are drawn everywhere in the app. Android bundles Noto Color Emoji; Windows uses the system's Segoe UI Emoji; Custom uses a font file of yours, read from where it is — a broken or deleted file falls back to Android.",
         ),
+      ),
+      // The owner, from the SPM-17 test (2026-11-24): credits stand in their
+      // own box with a prominent title, like Library path and Appearance.
+      el(
+        "div",
+        { class: "card" },
+        el("label", { class: "field-label" }, "Credits"),
         el(
           "p",
           { class: "muted" },
-          "Credits: Noto Color Emoji by Google, SIL OFL 1.1. Twemoji graphics by the Twemoji project, CC-BY 4.0 (https://github.com/jdecked/twemoji). Licence texts ship with the app.",
+          "Noto Color Emoji by Google, licensed under the SIL Open Font License 1.1.",
+        ),
+        el(
+          "p",
+          { class: "muted" },
+          "Twemoji graphics by the Twemoji project, licensed CC-BY 4.0 (https://github.com/jdecked/twemoji).",
+        ),
+        el(
+          "p",
+          { class: "muted" },
+          "The full licence texts ship with the app beside the bundled font files.",
         ),
       ),
     ),

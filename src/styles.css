@@ -285,7 +285,12 @@ button:has(> .icon) {
   gap: 6px;
 }
 
-.theme-select {
+/* The Settings dropdowns (Appearance theme, Emoji font). The emoji select
+   reuses the exact look the owner approved for the theme one (owner, from
+   the SPM-17 test, 2026-11-24: "the same design as the Appearance
+   dropdown"). */
+.theme-select,
+.emoji-style-select {
   font: inherit;
   background: var(--panel);
   color: var(--text);

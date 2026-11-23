@@ -25,13 +25,14 @@ pub enum EmojiStyle {
 }
 
 impl EmojiStyle {
-    /// Parse the IPC style value (the command's argument). Unknown values
-    /// are an error, not a silent default: a typo in the UI must not land
-    /// the app on Android. The config uses the typed field, so its load
-    /// path is strict the same way (this module's corrupt-file doctrine).
+    /// Parse the raw IPC style value (the command's `style: String`
+    /// argument, bare — not a JSON document). Unknown values are an error,
+    /// not a silent default: a typo in the UI must not land the app on
+    /// Android. The config uses the typed field, so its load path is
+    /// strict the same way (this module's corrupt-file doctrine).
     /// Mirrors the value set of parseEmojiStyle in src/emoji-style.ts.
     pub fn parse(value: &str) -> Result<Self, String> {
-        serde_json::from_str(value)
+        serde_json::from_value(serde_json::Value::String(value.to_owned()))
             .map_err(|_| format!("unknown emoji style: {value}"))
     }
 }
@@ -131,12 +132,15 @@ mod tests {
 
     #[test]
     fn emoji_style_parse_accepted_and_rejected() {
-        assert_eq!(EmojiStyle::parse("\"android\"").unwrap(), EmojiStyle::Android);
-        assert_eq!(EmojiStyle::parse("\"twemoji\"").unwrap(), EmojiStyle::Twemoji);
-        assert_eq!(EmojiStyle::parse("\"windows\"").unwrap(), EmojiStyle::Windows);
-        assert_eq!(EmojiStyle::parse("\"custom\"").unwrap(), EmojiStyle::Custom);
-        assert!(EmojiStyle::parse("\"apple\"").is_err());
-        assert!(EmojiStyle::parse("android").is_err()); // bare: not valid JSON
+        // Bare values: the IPC argument is a plain string, never a JSON
+        // document (the Windows-test bug, owner 2026-11-24: quoting them
+        // inside parse made every real choice "unknown").
+        assert_eq!(EmojiStyle::parse("android").unwrap(), EmojiStyle::Android);
+        assert_eq!(EmojiStyle::parse("twemoji").unwrap(), EmojiStyle::Twemoji);
+        assert_eq!(EmojiStyle::parse("windows").unwrap(), EmojiStyle::Windows);
+        assert_eq!(EmojiStyle::parse("custom").unwrap(), EmojiStyle::Custom);
+        assert!(EmojiStyle::parse("apple").is_err());
+        assert!(EmojiStyle::parse("\"twemoji\"").is_err()); // a quoted string is not the bare value
     }
 
     #[test]
