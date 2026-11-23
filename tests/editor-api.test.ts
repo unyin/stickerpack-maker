@@ -68,6 +68,12 @@ mock.module("@tauri-apps/api/core", () => ({
     }
     if (cmd === "editor_probe_pasted") return { width: 30, height: 20, exceedsCap: false };
     if (cmd === "editor_apply_effect") return effectFrame([-3, 4.5, 2, 2, 30], frame(1, 1, 6));
+    if (cmd === "editor_background_model_status") return { downloaded: false, sizeBytes: 178648008 };
+    if (cmd === "editor_download_background_model") {
+      (args?.onProgress as { onmessage: (p: unknown) => void }).onmessage({ received: 5, total: 10 });
+      return "done";
+    }
+    if (cmd === "editor_cancel_background_download") return null;
     return frame(2, 1, 7);
   },
   Channel: class {},
@@ -287,4 +293,60 @@ test("an effect on a text layer sends its text and no body bytes", async () => {
   expect(Array.from(calls[calls.length - 1].args as unknown as Uint8Array)).toEqual([]);
   const headers = (options[options.length - 1] as { headers: Record<string, string> }).headers;
   expect(JSON.parse(headers["x-effect"])).toMatchObject({ width: 4, height: 2, text: style, effect: { kind: "glow" } });
+});
+
+test("background removal: model status, download with progress, cancel, and the raw removal request", async () => {
+  calls.length = 0;
+  options.length = 0;
+  expect(await api.backgroundModelStatus()).toEqual({ downloaded: false, sizeBytes: 178648008 });
+  const seen: unknown[] = [];
+  expect(await api.downloadBackgroundModel((p) => seen.push(p))).toBe("done");
+  expect(seen).toEqual([{ received: 5, total: 10 }]);
+  await api.cancelBackgroundDownload();
+  const layer = { width: 2, height: 1, pixels: new Uint8ClampedArray([1, 2, 3, 4, 5, 6, 7, 8]) };
+  const out = await api.removeImageBackground(layer);
+  expect(calls.map((c) => c.cmd)).toEqual([
+    "editor_background_model_status",
+    "editor_download_background_model",
+    "editor_cancel_background_download",
+    "editor_remove_background",
+  ]);
+  expect(calls[0].args).toBeUndefined();
+  // Rust's parameter is on_progress: Tauri maps the camelCase key.
+  expect(Object.keys(calls[1].args ?? {})).toEqual(["onProgress"]);
+  expect(Array.from(calls[3].args as unknown as Uint8Array)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  expect(options[3]).toEqual({ headers: { [api.REMOVE_BACKGROUND_HEADER]: JSON.stringify({ width: 2, height: 1 }) } });
+  expect(api.REMOVE_BACKGROUND_HEADER).toBe("x-remove-background");
+  expect(out.width).toBe(2);
+  expect(out.height).toBe(1);
+});
+
+test("save sends the canvas, layers, format and target in one ASCII header", async () => {
+  const { newDocument, addTextLayer } = await import("../src/editor/model/document");
+  const image = { width: 2, height: 1, pixels: new Uint8ClampedArray([1, 2, 3, 4, 5, 6, 7, 8]) };
+  const style = { text: "café 😀", fontFamily: "Arial", fontSize: 30, color: "#112233" };
+  const render = await api.renderText(style);
+  const side = limits.sticker.side;
+  let doc = newDocument(image, "base", { width: side, height: 3 });
+  doc = addTextLayer(doc, style, render);
+  await api.saveImage(doc, "webp", { kind: "append", packId: 4 });
+  const call = calls[calls.length - 1];
+  expect(call.cmd).toBe("editor_save_image");
+  expect(Array.from(call.args as unknown as Uint8Array)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  const header = (options[options.length - 1] as { headers: Record<string, string> }).headers["x-save-image"];
+  // A header value carries only visible ASCII; the text survives as JSON escapes.
+  expect(/^[\x20-\x7e]*$/.test(header)).toBe(true);
+  const meta = JSON.parse(header);
+  expect([meta.width, meta.height, meta.format, meta.target]).toEqual([side, 3, "webp", { kind: "append", packId: 4 }]);
+  expect(meta.layers.length).toBe(2);
+  expect(meta.layers[0]).toEqual({ width: 2, height: 1, transform: doc.layers[0].transform });
+  expect(meta.layers[1].text).toEqual(style);
+});
+
+test("asciiJson escapes every non-ASCII character and means the same JSON", () => {
+  const value = { text: "naïve ✓ 👍", n: 1, nested: ["\u007f"] };
+  const json = api.asciiJson(value);
+  expect(/^[\x20-\x7e]*$/.test(json)).toBe(true);
+  expect(JSON.parse(json)).toEqual(value);
+  expect(api.asciiJson({ a: "plain" })).toBe(JSON.stringify({ a: "plain" }));
 });

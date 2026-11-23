@@ -1,15 +1,18 @@
 //! Editor pixel work in Rust (ADR-0005): one-shot operations on RGBA
 //! buffers — import decoding, resizing, merge, crop, cut, text rasterising,
-//! outline and glow, and (later tasks) encoding. Tauri-free so it is unit-testable; the
+//! outline and glow, and the save flatten and PNG/WEBP encoding. Tauri-free
+//! so it is unit-testable; the
 //! interactive model, history and live brushes live in the webview.
 
 pub mod crop;
 pub mod cut;
 pub mod effects;
+pub mod encode;
 pub mod import;
 pub mod layers;
 pub mod merge;
 pub mod placement;
+pub mod save;
 #[cfg(test)]
 mod test_font;
 pub mod text;

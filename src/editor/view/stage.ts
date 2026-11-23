@@ -15,6 +15,8 @@ import {
 } from "../model/document";
 import { lassoRegion, rectRegion, type Region } from "../model/region";
 import { effectKindOf } from "../model/effects";
+import { backgroundTarget, restoreBlocker } from "../model/background";
+import { beginStroke, BRUSH_SIZE, finishStroke, strokeTo, type BrushMode, type Stroke } from "../model/brush";
 import type { EditorSession } from "../model/session";
 import { fitView, panView, selectModeFor, zoomAround, type ViewTransform } from "./geometry";
 import { distance, lassoDoubleClick, lassoDrag, lassoPress, lassoPreview, lassoRelease, lassoUndo, type LassoDraft } from "./lasso";
@@ -22,14 +24,19 @@ import { distance, lassoDoubleClick, lassoDrag, lassoPress, lassoPreview, lassoR
 /**
  * What the left button does on the canvas: "move" moves the layer under
  * the pointer (or pans on empty space); "rect" drags the cut selection's
- * rectangle and "lasso" draws it from clicks and drags (SPM-9). Neither
- * selection tool moves layers. In the effect tools "outline" and "glow" the
- * canvas selects nothing (the layer is chosen before the tool, owner
- * decision 2026-11-22) and nothing moves; empty space pans, and the target
- * shows its preview meanwhile. "warp" paints with the brush handed to
- * `onBrush` (SPM-8).
+ * rectangle and "lasso" draws it from clicks and drags (SPM-9); "erase"
+ * and "restore" paint the refine brush on the background tools' target
+ * layer (SPM-7). In the effect tools "outline" and "glow" the canvas
+ * selects nothing (the layer is chosen before the tool, owner decision
+ * 2026-11-22) and nothing moves; empty space pans, and the target shows
+ * its preview meanwhile. "warp" paints with the brush handed to
+ * `onBrush` (SPM-8). None but "move" moves layers.
  */
-export type CanvasTool = "move" | "rect" | "lasso" | "outline" | "glow" | "warp";
+export type CanvasTool = "move" | "rect" | "lasso" | "outline" | "glow" | "warp" | BrushMode;
+
+function isBrushTool(tool: CanvasTool): tool is BrushMode {
+  return tool === "erase" || tool === "restore";
+}
 
 /**
  * The warp brush's side of a press, in document px (SPM-8). `shift` is the
@@ -82,14 +89,34 @@ const canvases = new WeakMap<RgbaImage, HTMLCanvasElement>();
 function canvasFor(image: RgbaImage): HTMLCanvasElement {
   const cached = canvases.get(image);
   if (cached) return cached;
+  const canvas = drawCanvas(image);
+  canvases.set(image, canvas);
+  return canvas;
+}
+
+/** A new canvas showing `image` (uncached: a brush stroke paints into its own). */
+function drawCanvas(image: RgbaImage): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = image.width;
   canvas.height = image.height;
+  context2d(canvas).putImageData(new ImageData(image.pixels, image.width, image.height), 0, 0);
+  return canvas;
+}
+
+function context2d(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const context = canvas.getContext("2d");
   if (!context) throw new Error("this webview cannot draw 2D canvases");
-  context.putImageData(new ImageData(image.pixels, image.width, image.height), 0, 0);
-  canvases.set(image, canvas);
-  return canvas;
+  return context;
+}
+
+/** A copy of the pixels of `image` inside `r`, to redraw just what a brush step changed. */
+function regionData(image: RgbaImage, r: Rect): ImageData {
+  const data = new ImageData(r.width, r.height);
+  for (let row = 0; row < r.height; row++) {
+    const from = ((r.y + row) * image.width + r.x) * 4;
+    data.data.set(image.pixels.subarray(from, from + r.width * 4), row * r.width * 4);
+  }
+  return data;
 }
 
 /** A light checkerboard tile showing transparency on the document area. */
@@ -172,7 +199,7 @@ export class EditorStage {
     listening: false,
   });
   /** The warp brush's outline under the pointer (SPM-8). */
-  private readonly brushRing = new Konva.Circle({ strokeWidth: 1, strokeScaleEnabled: false, listening: false, visible: false });
+  private readonly warpRing = new Konva.Circle({ strokeWidth: 1, strokeScaleEnabled: false, listening: false, visible: false });
   /** The radius or strength readout beside the pointer while a warp press is dragged. */
   private readonly readout = new Konva.Label({ listening: false, visible: false });
   private readonly readoutTag = new Konva.Tag({ cornerRadius: 4, strokeWidth: 1, strokeScaleEnabled: false });
@@ -183,6 +210,9 @@ export class EditorStage {
   private gesture: BrushGesture | null = null;
   private brushRadius = 0;
   private override: LayerOverride | null = null;
+  /** The refine brush's outline at the pointer (SPM-7): a halo under a thin ring, sized in canvas px. */
+  private readonly brushHalo = new Konva.Circle({ radius: BRUSH_SIZE.initial / 2, strokeWidth: 3, strokeScaleEnabled: false, listening: false, visible: false });
+  private readonly brushRing = new Konva.Circle({ radius: BRUSH_SIZE.initial / 2, strokeWidth: 1, strokeScaleEnabled: false, listening: false, visible: false });
   private readonly nodes = new Map<string, Konva.Image>();
   private readonly pending = new Set<string>();
   private readonly resizeObserver: ResizeObserver;
@@ -200,6 +230,11 @@ export class EditorStage {
     if (e.button === 1) e.preventDefault();
   };
   private viewChanged?: (view: ViewTransform) => void;
+  private brushBlocked?: (reason: string) => void;
+  /** The refine brush's diameter in canvas px. */
+  private brushSize: number = BRUSH_SIZE.initial;
+  /** The brush stroke in progress and the canvas it paints live (its layer's node shows it). */
+  private stroke: { readonly stroke: Stroke; readonly canvas: HTMLCanvasElement } | null = null;
   private editText?: (id: string) => void;
   private tool: CanvasTool = "move";
   private interactive = true;
@@ -213,7 +248,9 @@ export class EditorStage {
   private lassoClosed: { at: Point; time: number } | null = null;
   /** Only the left button (or a touch) ends a drag: a middle-button pan mid-drag leaves it be. */
   private readonly onRelease = (e: MouseEvent | TouchEvent): void => {
-    if (!(e instanceof MouseEvent) || e.button === 0) this.releaseRegion();
+    if (e instanceof MouseEvent && e.button !== 0) return;
+    this.releaseRegion();
+    this.releaseBrush();
   };
   /**
    * Whether the view is settled: fitted once, or zoomed/panned by the user.
@@ -241,7 +278,7 @@ export class EditorStage {
       strokeScaleEnabled: false,
       listening: false,
     });
-    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.brushRing, this.readout);
+    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.brushHalo, this.brushRing, this.warpRing, this.readout);
     this.readout.add(this.readoutTag, this.readoutText);
     this.content.add(this.backdrop);
     this.content.add(this.transformer);
@@ -265,10 +302,19 @@ export class EditorStage {
       if (e.target === this.stage && this.tool === "move") this.session.clearSelection();
     });
     this.stage.on("mousedown touchstart", (e) => {
-      if (!(e.evt instanceof MouseEvent) || e.evt.button === 0) this.pressRegion(e.evt.shiftKey);
+      if (e.evt instanceof MouseEvent && e.evt.button !== 0) return;
+      // Shift is read from the event itself (SPM-8: it sets a warp drag's strength).
+      this.pressRegion(e.evt instanceof MouseEvent ? e.evt.shiftKey : false);
+      this.pressBrush();
     });
-    this.stage.on("mousemove touchmove", (e) => this.extendRegion(e.evt.shiftKey));
-    this.stage.on("mouseleave", () => this.placeBrushRing(null));
+    this.stage.on("mousemove touchmove", (e) => {
+      this.extendRegion(e.evt instanceof MouseEvent ? e.evt.shiftKey : false);
+      this.moveBrush();
+    });
+    this.stage.on("mouseleave", () => {
+      this.placeWarpRing(null);
+      this.showBrushAt(null);
+    });
     this.stage.on("dblclick dbltap", () => {
       if (!this.interactive || this.tool !== "lasso" || !this.lasso) return;
       const step = lassoDoubleClick(this.lasso, this.docPx(LASSO_CLOSE_RADIUS));
@@ -314,15 +360,40 @@ export class EditorStage {
     return contentBounds(this.session.doc);
   }
 
-  /** Choose what the left button does on the canvas (SPM-9). */
+  /** Choose what the left button does on the canvas (SPM-9, SPM-7, SPM-8). */
   setTool(tool: CanvasTool): void {
-    if (this.brushing) this.releaseBrush();
+    if (this.brushing) this.releaseWarp();
     this.tool = tool;
     this.rectDrag = null;
     this.lasso = null;
-    if (tool !== "warp") this.placeBrushRing(null);
+    this.stroke = null;
+    this.container.style.cursor = isBrushTool(tool) ? "crosshair" : "";
+    if (!isBrushTool(tool)) this.showBrushAt(null);
+    if (tool !== "warp") this.placeWarpRing(null);
     this.applyListening();
     this.render();
+  }
+
+  /** The refine brush's diameter in canvas px (SPM-7). */
+  setBrushSize(size: number): void {
+    this.brushSize = size;
+    this.brushHalo.radius(size / 2);
+    this.brushRing.radius(size / 2);
+    this.guides.batchDraw();
+  }
+
+  /** Called with the reason when a brush press cannot paint (no image layer, nothing to restore). */
+  onBrushBlocked(listener: (reason: string) => void): void {
+    this.brushBlocked = listener;
+  }
+
+  /**
+   * True while a refine brush stroke is mid-press (SPM-7): its pixels are
+   * painted live but reach the model only at release, so Save is refused
+   * until the stroke ends (owner decision 2026-11-23).
+   */
+  strokeInProgress(): boolean {
+    return this.stroke !== null;
   }
 
   /**
@@ -349,7 +420,7 @@ export class EditorStage {
   /** The warp brush's radius in document px, for the ring under the pointer. */
   setBrushRadius(radius: number): void {
     this.brushRadius = radius;
-    if (!this.gesture) this.brushRing.radius(radius);
+    if (!this.gesture) this.warpRing.radius(radius);
     this.guides.batchDraw();
   }
 
@@ -361,9 +432,9 @@ export class EditorStage {
     this.gesture = gesture;
     const pointer = this.pointer();
     if (gesture) {
-      this.brushRing.radius(gesture.radius);
-      this.brushRing.position(gesture.center);
-      this.brushRing.visible(true);
+      this.warpRing.radius(gesture.radius);
+      this.warpRing.position(gesture.center);
+      this.warpRing.visible(true);
       this.readoutText.text(gesture.readout);
       // Constant size on screen at any zoom, just below-right of the pointer.
       const k = 1 / this.stage.scaleX();
@@ -371,7 +442,7 @@ export class EditorStage {
       if (pointer) this.readout.position({ x: pointer.x + READOUT_OFFSET * k, y: pointer.y + READOUT_OFFSET * k });
     }
     this.readout.visible(gesture !== null);
-    if (!gesture) this.placeBrushRing(pointer);
+    if (!gesture) this.placeWarpRing(pointer);
     this.guides.batchDraw();
   }
 
@@ -468,10 +539,12 @@ export class EditorStage {
     this.transformer.anchorFill(token("--panel"));
     this.regionHalo.stroke(token("--panel"));
     this.regionLine.stroke(token("--accent-ink"));
-    this.brushRing.stroke(token("--accent-ink"));
+    this.warpRing.stroke(token("--accent-ink"));
     this.readoutTag.fill(token("--panel"));
     this.readoutTag.stroke(token("--border"));
     this.readoutText.fill(token("--text"));
+    this.brushHalo.stroke(token("--panel"));
+    this.brushRing.stroke(token("--accent-ink"));
     this.content.batchDraw();
     this.guides.batchDraw();
   }
@@ -506,14 +579,17 @@ export class EditorStage {
   }
 
   private pressRegion(shift: boolean): void {
-    if (this.tool === "move" || hasPreview(this.tool) || !this.interactive) return;
-    const at = this.pointer();
-    if (!at) return;
     if (this.tool === "warp") {
+      if (!this.interactive) return;
+      const at = this.pointer();
+      if (!at) return;
       this.brushing = true;
       this.brush?.press(at, shift);
       return;
     }
+    if ((this.tool !== "rect" && this.tool !== "lasso") || !this.interactive) return;
+    const at = this.pointer();
+    if (!at) return;
     if (this.tool === "rect") this.rectDrag = { start: at, end: at };
     else {
       const radius = this.docPx(LASSO_CLOSE_RADIUS);
@@ -530,7 +606,7 @@ export class EditorStage {
     if (!at) return;
     if (this.tool === "warp") {
       if (this.brushing) this.brush?.move(at, shift);
-      else this.placeBrushRing(at);
+      else this.placeWarpRing(at);
       return;
     }
     if (this.rectDrag) this.rectDrag = { ...this.rectDrag, end: at };
@@ -541,7 +617,7 @@ export class EditorStage {
 
   /** The left button went up: a rectangle drag ends; a lasso closes only when released on its start. */
   private releaseRegion(): void {
-    if (this.brushing) return this.releaseBrush();
+    if (this.brushing) return this.releaseWarp();
     const rect = this.rectDrag;
     if (rect) {
       this.rectDrag = null;
@@ -555,17 +631,18 @@ export class EditorStage {
     else this.drawRegion();
   }
 
-  private releaseBrush(): void {
+  /** The left button went up (or the tool changed): a warp press ends as one step. */
+  private releaseWarp(): void {
     this.brushing = false;
     this.brush?.release();
   }
 
-  /** Show the brush ring at `at` (document px), or hide it. */
-  private placeBrushRing(at: Point | null): void {
+  /** Show the warp brush's ring at `at` (document px), or hide it. */
+  private placeWarpRing(at: Point | null): void {
     if (this.gesture) return; // the ring stays on the press being dragged
-    this.brushRing.radius(this.brushRadius);
-    this.brushRing.visible(at !== null && this.tool === "warp");
-    if (at) this.brushRing.position(at);
+    this.warpRing.radius(this.brushRadius);
+    this.warpRing.visible(at !== null && this.tool === "warp");
+    if (at) this.warpRing.position(at);
     this.guides.batchDraw();
   }
 
@@ -611,6 +688,64 @@ export class EditorStage {
       line.points(flat);
       line.closed(closed);
       line.visible(points.length > 1);
+    }
+    this.guides.batchDraw();
+  }
+
+  // ---- Refine brush (SPM-7): paints live, one undo step per finished stroke ----
+
+  /**
+   * A left press with Erase or Restore starts a stroke on the background
+   * tools' target (the selected image layer, or the base image), or says
+   * why it cannot.
+   */
+  private pressBrush(): void {
+    if (!isBrushTool(this.tool) || !this.interactive) return;
+    const at = this.pointer();
+    if (!at) return;
+    const target = backgroundTarget(this.session.doc, this.session.selection);
+    if ("reason" in target) return this.brushBlocked?.(target.reason);
+    const blocked = this.tool === "restore" ? restoreBlocker(target.layer) : null;
+    if (blocked) return this.brushBlocked?.(blocked);
+    const stroke = beginStroke(target.layer, this.tool, this.brushSize);
+    this.stroke = { stroke, canvas: drawCanvas(stroke.working) };
+    this.render(); // the layer's node now shows the stroke's canvas
+    this.paintBrush(at);
+  }
+
+  private moveBrush(): void {
+    if (!isBrushTool(this.tool)) return;
+    const at = this.pointer();
+    this.showBrushAt(at);
+    if (at && this.stroke) this.paintBrush(at);
+  }
+
+  private paintBrush(at: Point): void {
+    const live = this.stroke;
+    if (!live) return;
+    const dirty = strokeTo(live.stroke, at);
+    if (!dirty) return;
+    context2d(live.canvas).putImageData(regionData(live.stroke.working, dirty), dirty.x, dirty.y);
+    this.content.batchDraw();
+  }
+
+  /** The left button went up: a stroke that changed pixels becomes ONE undo step. */
+  private releaseBrush(): void {
+    const live = this.stroke;
+    if (!live) return;
+    this.stroke = null;
+    // The painted canvas already shows the new pixels: reuse it, no redraw.
+    if (live.stroke.changed) canvases.set(live.stroke.working, live.canvas);
+    this.session.apply((doc) => finishStroke(doc, live.stroke));
+    this.render(); // a stroke that changed nothing shows the layer's own canvas again
+  }
+
+  /** Show the brush outline centred on `at` (document px), or hide it (null). */
+  private showBrushAt(at: Point | null): void {
+    const visible = at !== null && isBrushTool(this.tool);
+    for (const ring of [this.brushHalo, this.brushRing]) {
+      ring.visible(visible);
+      if (at) ring.position(at);
     }
     this.guides.batchDraw();
   }
@@ -666,10 +801,15 @@ export class EditorStage {
       const node = this.nodeFor(layer);
       // skew is reset so the view can never hold skew the model lacks
       // (ADR-0005). Text shows its Rust rendering (SPM-9), so the view draws
+      // (ADR-0005). Text shows its Rust rendering (SPM-9), so the view draws
       // the pixels merge, Crop and the save produce, in the same box. An
-      // override (effect preview, warp press) shows instead, never stored.
+      // override (effect preview, warp press) shows instead, never stored;
+      // a layer under a refine brush stroke shows the stroke's live canvas.
       const o = this.override?.id === layer.id ? this.override : null;
-      const image = o ? (o.image instanceof HTMLCanvasElement ? o.image : canvasFor(o.image)) : canvasFor(layerImage(layer));
+      const painting = !o && this.stroke?.stroke.layerId === layer.id ? this.stroke.canvas : null;
+      const image = o
+        ? (o.image instanceof HTMLCanvasElement ? o.image : canvasFor(o.image))
+        : painting ?? canvasFor(layerImage(layer));
       node.setAttrs({ ...(o ? o.transform : layer.transform), skewX: 0, skewY: 0, image });
       // Only the Move tool moves layers.
       node.draggable(this.tool === "move");

@@ -43,6 +43,17 @@ ab_glyph = "0.2"
 # Outline and fuzzy glow (SPM-8): Euclidean distance transform and box
 # blurs. No default features: no rayon, and `image` stays as configured above.
 imageproc = { version = "0.25", default-features = false }
+# Background removal (SPM-7, ADR-0006): ONNX Runtime runs the segmentation
+# model. `download-binaries` links pyke's prebuilt ONNX Runtime statically
+# (no DLL to ship); pinned exactly because 2.0 is still a release candidate.
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-rustls", "api-31"] }
+# The one-time model download (rustls, bundled roots: no OS TLS dependency)
+# and its SHA-256 check. sha2 0.10 is already in the tree.
+ureq = "3"
+sha2 = "0.10"
+# The save encoder (SPM-10): PNG/WEBP save encoding (editor/encode.rs), via
+# libwebp compiled from vendored C and linked statically (no DLL to ship).
+webp = { version = "0.3", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

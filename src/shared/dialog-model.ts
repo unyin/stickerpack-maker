@@ -14,6 +14,12 @@ export interface ConfirmSpec {
   keepLabel: string;
   /** Style the action as destructive. */
   danger?: boolean;
+  /**
+   * Put the keep button first. The convention is action first, keep last;
+   * the "even WEBP is too large" question is the one exception (owner
+   * decision 2026-11-22: "Maybe I can fix it" first).
+   */
+  keepFirst?: boolean;
 }
 
 export interface ConfirmButton {
@@ -22,10 +28,9 @@ export interface ConfirmButton {
   variant: "primary" | "danger" | "secondary";
 }
 
-/** The two buttons, action first, keep last; the keep button is primary. */
+/** The two buttons, action first, keep last (unless `keepFirst`); the keep button is primary. */
 export function confirmButtons(spec: ConfirmSpec): ConfirmButton[] {
-  return [
-    { label: spec.actionLabel, value: "action", variant: spec.danger ? "danger" : "secondary" },
-    { label: spec.keepLabel, value: "keep", variant: "primary" },
-  ];
+  const action: ConfirmButton = { label: spec.actionLabel, value: "action", variant: spec.danger ? "danger" : "secondary" };
+  const keep: ConfirmButton = { label: spec.keepLabel, value: "keep", variant: "primary" };
+  return spec.keepFirst ? [keep, action] : [action, keep];
 }

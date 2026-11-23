@@ -3,13 +3,18 @@
 // pasting (Ctrl+V) bring in other images; "Close" ends it (warning on unsaved
 // changes). The session survives switching tabs: the view is built once.
 // SPM-9 adds the text tool, the cut selection tools and paste; SPM-8 the
-// effect tools (outline, fuzzy glow, warp/bulge).
+// effect tools (outline, fuzzy glow, warp/bulge); SPM-7 the background
+// removal and its Erase/Restore refine brushes; SPM-10 the save pipeline
+// (Save…, Ctrl+S).
 import "../editor/editor.css";
 import { baseName } from "../api";
 import {
   applyEffect,
+  backgroundModelStatus,
+  cancelBackgroundDownload,
   cropImages,
   cutImage,
+  downloadBackgroundModel,
   IMPORT_MAX_SIDE,
   importImage,
   importPasted,
@@ -18,9 +23,36 @@ import {
   pickImageFile,
   probeImage,
   probePasted,
+  removeImageBackground,
   renderText,
+  saveImage,
+  type DownloadProgress,
   type ImageInfo,
 } from "../editor/api";
+import { backgroundTarget, refineLayerPixels } from "../editor/model/background";
+import { downloadProgressText, megabytes } from "../editor/view/download-text";
+import { BRUSH_SIZE, brushSizeProblem } from "../editor/model/brush";
+import {
+  declinedText,
+  EXHAUSTED_TITLE,
+  exhaustedText,
+  pngTooLargeText,
+  runSave,
+  saveBlocker,
+  saveRefusal,
+  savedText,
+  type SaveFormat,
+  originAfterSave,
+  showStickerLink,
+  stickerGoneText,
+  type SaveTarget,
+  type TooLarge,
+} from "../editor/save";
+import type { StickerOrigin } from "../shared/sticker-origin";
+import { saveDialog } from "../editor/view/save-dialog";
+import { packMemory } from "../pack-manager/model/pack-memory";
+import { markStickerFileChanged } from "../pack-manager/model/changed-files";
+import { loadPackView, type Sticker } from "../pack-manager/api";
 import {
   addRasterLayer,
   addTextLayer,
@@ -123,6 +155,12 @@ function buildEditor(): HTMLElement {
   // The style the next new text gets: the text controls edit it while no
   // text layer is selected.
   let nextStyle: NextStyle = { fontFamily: "", fontSize: DEFAULT_FONT_SIZE, color: DEFAULT_TEXT_COLOR };
+  // The save dialog starts on the last save's format (SPM-10); its pack comes from packMemory.
+  let lastFormat: SaveFormat = "png";
+  // The sticker this session edits when the Pack Manager's Edit opened it, else null (SPM-10).
+  let origin: StickerOrigin | null = null;
+  // Counts Library changes, so a saved note's link knows its sticker is from an old one.
+  let libraryGeneration = 0;
 
   const message = el("p", { class: "message editor-message", role: "alert" });
   const canvasHost = el("div", { class: "editor-canvas" }) as HTMLDivElement;
@@ -165,6 +203,8 @@ function buildEditor(): HTMLElement {
   const cropButton = button("Crop", () => run(cropToBox));
   const resetViewButton = button("Reset view", () => stage?.fit());
   const closeButton = button("Close", () => run(async () => void (await closeSession())));
+  const saveButton = button("Save…", () => run(saveSession), "primary");
+  const saveTitle = "Save the canvas as a sticker in a pack (Ctrl+S)";
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
@@ -241,6 +281,45 @@ function buildEditor(): HTMLElement {
     if (isHexColor(colorInput.value)) restyle({ color: colorInput.value.toLowerCase() });
     colorInput.blur();
   });
+  // Background removal and the refine brush (SPM-7): on the selected image layer, or the base image.
+  const removeBackgroundButton = button("Remove background", () => run(removeBackground));
+  const removeBackgroundTitle =
+    "Make the background of the selected image layer (or the base image) transparent; works offline after a one-time model download";
+  const eraseToolButton = button("Erase", () => setTool("erase"));
+  const restoreToolButton = button("Restore", () => setTool("restore"));
+  eraseToolButton.title = "Paint on the selected image layer (or the base image) to make it transparent";
+  restoreToolButton.title = "Paint on the selected image layer (or the base image) to bring back what was removed or erased";
+  const brushSizeInput = el("input", {
+    class: "editor-side-input",
+    type: "number",
+    min: String(BRUSH_SIZE.min),
+    max: String(BRUSH_SIZE.max),
+    step: "1",
+    value: String(BRUSH_SIZE.initial),
+    "aria-label": "Brush size in pixels",
+  }) as HTMLInputElement;
+  brushSizeInput.title = `Brush size in canvas px (${BRUSH_SIZE.min}–${BRUSH_SIZE.max})`;
+  let brushSize: number = BRUSH_SIZE.initial;
+  brushSizeInput.addEventListener("change", () => {
+    const size = Number(brushSizeInput.value);
+    const problem = brushSizeProblem(size);
+    if (problem) {
+      say(problem);
+      brushSizeInput.value = String(brushSize);
+      return;
+    }
+    say(""); // a valid size replaces an earlier complaint, as any command does
+    brushSize = size;
+    stage?.setBrushSize(size);
+    brushSizeInput.blur();
+  });
+  // The message-line text of a model download in progress, null when none
+  // runs: Save's disabled tooltip and a mid-download Ctrl+S say it (SPEC §6,
+  // §2: a disabled control shows its reason).
+  let downloadNote: string | null = null;
+  // Shown only while the model downloads; stays usable while everything else waits.
+  const cancelDownloadButton = button("Cancel download", () => void cancelBackgroundDownload());
+  cancelDownloadButton.hidden = true;
   const textTitle = "Type a new text layer in the chosen font, size and colour (Enter to finish, Shift+Enter for a new line)";
   const editTextTitle = "Edit the selected text layer's text (or double-click it)";
 
@@ -313,6 +392,15 @@ function buildEditor(): HTMLElement {
     ),
     el(
       "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Background" },
+      removeBackgroundButton,
+      cancelDownloadButton,
+      eraseToolButton,
+      restoreToolButton,
+      el("label", { class: "editor-side" }, "Brush ", brushSizeInput, " px"),
+    ),
+    el(
+      "span",
       { class: "editor-tool-group", role: "group", "aria-label": "Text" },
       textButton,
       editTextButton,
@@ -325,7 +413,8 @@ function buildEditor(): HTMLElement {
     zoomLabel,
     dirtyLabel,
     el("span", { class: "editor-spacer" }),
-    closeButton,
+    // Save and Close stay together when the toolbar wraps.
+    el("span", { class: "editor-session-actions" }, saveButton, closeButton),
   );
 
   const layersPanel = el(
@@ -348,9 +437,38 @@ function buildEditor(): HTMLElement {
    * `run()` clears the line (and its tone) with `say("")` before an action,
    * so errors that `withMessage` writes directly always show in the error tone.
    */
-  function say(text: string, tone: "error" | "note" = "error"): void {
-    message.textContent = text;
+  function say(text: string, tone: "error" | "note" = "error", ...extra: (Node | string)[]): void {
+    message.replaceChildren(text, ...extra);
     message.classList.toggle("is-note", tone === "note");
+  }
+
+  /**
+   * The saved note's link (owner decision 2026-11-22): a link-styled button
+   * that shows the saved sticker in the Pack Manager, leaving this session
+   * as it is. A sticker gone since (deleted, moved) is reported here instead.
+   */
+  function stickerLink(sticker: Sticker, packTitle: string): HTMLElement {
+    const { text, label } = showStickerLink(sticker, packTitle);
+    const link = el("button", { type: "button", class: "editor-link", "aria-label": label, title: label }, text);
+    // Not through run(): that clears the message line, and the note (with its link) should stay.
+    const generation = libraryGeneration;
+    link.addEventListener("click", async () => {
+      if (busy) return;
+      // Its ids belong to the Library it was saved into: never look them up in another.
+      if (generation !== libraryGeneration) {
+        say(stickerGoneText(sticker.position, packTitle, true));
+        return;
+      }
+      let present = false;
+      try {
+        present = (await loadPackView(sticker.packId)).stickers.some((s) => s.id === sticker.id);
+      } catch {
+        // the pack is gone too
+      }
+      if (!present) say(stickerGoneText(sticker.position, packTitle));
+      else editorNav?.showSticker(sticker.packId, sticker.id);
+    });
+    return link;
   }
 
   /** Undo and redo take the neutral note back with them (owner decision 2026-11-22); errors stay. */
@@ -424,10 +542,11 @@ function buildEditor(): HTMLElement {
     return image ? { image, name: baseName(path) } : null;
   }
 
-  async function openImage(path?: string): Promise<void> {
+  async function openImage(path?: string, from: StickerOrigin | null = null): Promise<void> {
     if (session) return; // one session at a time: Close first
     const picked = await pickAndImport(path);
     if (!picked) return;
+    origin = from;
     session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(constraints)));
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
@@ -435,6 +554,8 @@ function buildEditor(): HTMLElement {
     stage.setTool(tool);
     stage.onEditText((id) => editText(id));
     stage.onBrush({ press: beginWarp, move: continueWarp, release: endWarp });
+    stage.setBrushSize(brushSize);
+    stage.onBrushBlocked((reason) => say(reason));
     refresh(); // place the crop box overlay
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
@@ -533,15 +654,91 @@ function buildEditor(): HTMLElement {
     if (!session) return true;
     // An unapplied effect preview alone is not a change (CMT-186): it is dropped.
     if (session.isDirty && !(await confirmDiscard())) return false;
+    endSession();
+    return true;
+  }
+
+  /** End the session at once, unsaved changes included (the caller has asked). */
+  function endSession(): void {
     preview.request(null);
     warp = null;
     basis = null;
+    origin = null;
     textOverlay.close();
     stage?.destroy();
     stage = null;
     session = null;
     tool = "move";
-    return true;
+  }
+
+  // ---- Save (SPM-10) ----
+
+  /**
+   * Save (SPEC §6, hard-blocked): the save dialog picks the pack and the
+   * format; Rust flattens what is inside the canvas, encodes it within the
+   * size cap and appends it to the pack. A PNG over the cap offers WEBP; a
+   * WEBP over the cap even at its lowest quality sends the user back to the
+   * Editor (owner decision 2026-11-21, CMT-144). A save clears the unsaved
+   * changes; the session stays open.
+   */
+  async function saveSession(): Promise<void> {
+    const current = session;
+    if (!current) return;
+    // A mid-press stroke (SPM-7) owns pixels the model does not have yet: the
+    // dialog would save the document without them, and the stroke's release
+    // would commit them under it. Both save entry points refuse here
+    // (owner decision 2026-11-23); the canvas rule follows once no stroke runs.
+    const refusal = saveRefusal(stage?.strokeInProgress() ?? false, current.doc, constraints);
+    if (refusal) return say(refusal);
+    const doc = current.doc;
+    let exhausted: TooLarge | null = null;
+    await saveDialog({
+      constraints,
+      format: lastFormat,
+      origin,
+      submit: async (choice, setFormat) => {
+        const { format } = choice;
+        const target: SaveTarget =
+          choice.kind === "replace"
+            ? { kind: "replace", stickerId: choice.origin.stickerId }
+            : { kind: "append", packId: choice.pack.id };
+        const packTitle = choice.kind === "replace" ? choice.now.packTitle : choice.pack.title;
+        const result = await runSave(format, {
+          save: (f) => saveImage(doc, f, target),
+          offerWebp: async (outcome) => {
+            const ok = await confirmWebp(pngTooLargeText(outcome));
+            if (ok) setFormat("webp");
+            return ok;
+          },
+        });
+        if (result.kind === "declined") return declinedText(result.outcome);
+        if (result.kind === "exhausted") {
+          exhausted = result.outcome;
+          return null; // the save dialog closes; the question below follows
+        }
+        const saved = result.outcome;
+        packMemory.lastSavedPackId = saved.sticker.packId;
+        lastFormat = saved.sticker.format;
+        // The open pack view must not keep showing the old picture of a replaced sticker.
+        if (target.kind === "replace") markStickerFileChanged(saved.sticker.id);
+        // The session now edits the saved sticker: the next save replaces it (design decision 2026-11-22).
+        origin = originAfterSave(saved, packTitle);
+        // Since the SPM-7 merge a brush stroke could commit under this dialog;
+        // the mid-stroke refusal above makes that known path impossible. The
+        // check stays as defence in depth for anything unforeseen.
+        if (current.doc === doc) current.markSaved();
+        say(savedText(saved, packTitle, target), "note", " ", stickerLink(saved.sticker, packTitle));
+        return null;
+      },
+    });
+    // Even WEBP at its lowest quality is too large (owner decision 2026-11-22):
+    // back to the Editor, or give up on this session without the unsaved-changes question.
+    // Its limit is the cap Rust held the save to: the constraint set's (or the debug override's).
+    // (`submit` sets `exhausted` in a callback, which TypeScript's narrowing cannot see.)
+    const tooLarge = exhausted as TooLarge | null;
+    if (tooLarge && (await confirmGiveUp(exhaustedText(tooLarge.maxKilobytes))) && session === current) {
+      endSession();
+    }
   }
 
   // ---- Cut and paste (SPM-9) ----
@@ -712,6 +909,84 @@ function buildEditor(): HTMLElement {
     if (image && stale) say("The layers changed while warping; the bulge was dropped. Try again.");
     if (image && !stale) current.apply((d) => setLayerImage(d, layer.id, image));
     else refresh(); // no new state to redraw from, but the bar's values may have changed
+  }
+
+  // ---- Background removal (SPM-7, ADR-0006) ----
+
+  /**
+   * Remove background: Rust runs the model on the target layer (the selected
+   * image layer, or the base image) and the result is ONE undo step that
+   * keeps the original pixels for the Restore brush. The first use downloads
+   * the model, after asking. Notes show progress in the neutral tone; any
+   * failure replaces them in the error tone.
+   */
+  async function removeBackground(): Promise<void> {
+    const current = session;
+    if (!current || "reason" in backgroundTarget(current.doc, current.selection)) return;
+    try {
+      if (!(await ensureBackgroundModel())) return;
+      say("Removing the background…", "note");
+      await editAsync(
+        current,
+        { doing: "removing the background", done: "changed" },
+        async (doc) => {
+          const target = backgroundTarget(doc, current.selection);
+          if ("reason" in target) throw new Error(target.reason);
+          return { id: target.layer.id, image: await removeImageBackground(target.layer.image) };
+        },
+        ({ id, image }) => {
+          current.apply((d) => refineLayerPixels(d, id, image));
+          say("");
+        },
+      );
+    } catch (err) {
+      // withMessage would keep the neutral note tone set by "Removing the background…", so say errors again in the error tone.
+      say(errorMessage(err));
+    }
+  }
+
+  /**
+   * True when the model is ready: already cached, or downloaded now after
+   * the user agreed. Cancel in the dialog, or Cancel download, leaves it be.
+   */
+  async function ensureBackgroundModel(): Promise<boolean> {
+    const status = await backgroundModelStatus();
+    if (status.downloaded) return true;
+    if (!(await confirmModelDownload(status.sizeBytes))) return false;
+    // One report drives both the message line and the disabled Save's tooltip
+    // (SPEC §6, §2: a disabled control shows its reason). Direct assignments
+    // rather than refresh(): a progress tick is too frequent for a full pass.
+    function reportProgress(p: DownloadProgress): void {
+      downloadNote = downloadProgressText(p);
+      say(downloadNote, "note");
+      saveButton.title = downloadNote;
+    }
+    reportProgress({ received: 0, total: status.sizeBytes });
+    // Progress reports travel apart from the command's reply: one arriving
+    // after it must not bring the button or the progress note back.
+    let active = true;
+    try {
+      // Cancel download appears with Rust's first report, sent once the
+      // download has begun (and its cancel flag is cleared), so a press is never lost.
+      const outcome = await downloadBackgroundModel((p) => {
+        if (!active) return;
+        cancelDownloadButton.hidden = false;
+        reportProgress(p);
+      });
+      if (outcome === "cancelled") {
+        say("The model download was cancelled.", "note");
+        return false;
+      }
+      return true;
+    } finally {
+      active = false;
+      downloadNote = null;
+      cancelDownloadButton.hidden = true;
+      // The model's inference wait is a generic busy action: Save shows its
+      // canvas reason again (or its normal title) until run()'s closing refresh().
+      const saveReason = session ? saveBlocker(session.doc, constraints) : null;
+      saveButton.title = saveReason ?? saveTitle;
+    }
   }
 
   // ---- Text (SPM-9) ----
@@ -937,6 +1212,11 @@ function buildEditor(): HTMLElement {
     readout.classList.toggle("off", !status.ok);
     resetViewButton.disabled = busy;
     closeButton.disabled = busy;
+    const saveReason = saveBlocker(doc, constraints);
+    saveButton.disabled = busy || saveReason !== null;
+    // While the model downloads (the one long busy wait), the disabled Save
+    // says the download's progress instead of its idle title (SPEC §2).
+    saveButton.title = saveReason ?? downloadNote ?? saveTitle;
     undoButton.disabled = busy || !current.canUndo;
     redoButton.disabled = busy || !current.canRedo;
     upButton.disabled = busy || !single || index === doc.layers.length - 1;
@@ -953,6 +1233,8 @@ function buildEditor(): HTMLElement {
       [outlineToolButton, "outline"],
       [glowToolButton, "glow"],
       [warpToolButton, "warp"],
+      [eraseToolButton, "erase"],
+      [restoreToolButton, "restore"],
     ] as const) {
       b.setAttribute("aria-pressed", String(tool === t));
       b.disabled = busy;
@@ -962,6 +1244,12 @@ function buildEditor(): HTMLElement {
     cutButton.title = cutReason ?? cutTitle;
     pasteButton.disabled = busy;
     pasteButton.title = pasteTitle;
+    // Background removal (SPM-7); the brushes say why on a press instead.
+    const bgTarget = backgroundTarget(doc, current.selection);
+    const removeReason = "reason" in bgTarget ? bgTarget.reason : null;
+    removeBackgroundButton.disabled = busy || removeReason !== null;
+    removeBackgroundButton.title = removeReason ?? removeBackgroundTitle;
+    brushSizeInput.disabled = busy;
     // Text tool (SPM-9): the controls show the first selected text layer's
     // style, else the next new text's.
     const texts = current.selectedTexts;
@@ -1023,7 +1311,15 @@ function buildEditor(): HTMLElement {
   // Esc act on the text (SPM-9).
   document.addEventListener("keydown", (e) => {
     const current = session;
-    if (!current || !view.isConnected || busy || textOverlay.isOpen) return;
+    // Ctrl+S never reaches the webview's own "save page", even while busy.
+    if (view.isConnected && isSaveShortcut(e)) e.preventDefault();
+    if (!current || !view.isConnected || textOverlay.isOpen) return;
+    // While the toolbar is busy, Ctrl+S still says why (SPEC §6): the model
+    // download is the one wait long enough to need it; other keys wait too.
+    if (busy) {
+      if (isSaveShortcut(e) && downloadNote) say(downloadNote, "note");
+      return;
+    }
     if (isTextTarget(e.target)) return;
     // A lasso in progress takes Enter, Esc and Backspace first (SPM-9).
     if (stage?.handleLassoKey(e.key)) {
@@ -1038,6 +1334,13 @@ function buildEditor(): HTMLElement {
     else if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) {
       clearNote();
       current.redo();
+    }
+    // Ctrl+S saves; a blocked save says why (SPEC §6: hard-blocked), and a
+    // mid-press brush stroke is refused before the dialog can open.
+    else if (isSaveShortcut(e)) {
+      const reason = saveRefusal(stage?.strokeInProgress() ?? false, current.doc, constraints);
+      if (reason) say(reason);
+      else void run(saveSession);
     }
     // Ctrl+X is the Cut tool, not the clipboard; a blocked cut says why.
     else if (isCutShortcut(e)) {
@@ -1068,12 +1371,17 @@ function buildEditor(): HTMLElement {
   void loadFonts();
 
   // Pack Manager hook (SPM-3), see openFileInEditor below.
-  openFileHook = (path, showEditor) =>
+  openFileHook = (path, showEditor, from) =>
     run(async () => {
       const closed = await closeSession(); // warns on unsaved changes
       showEditor(); // either way: Keep editing shows the open image
-      if (closed) await openImage(path);
+      if (closed) await openImage(path, from ?? null);
     });
+  // The dialog then says why Replace is gone, rather than silently dropping it.
+  forgetOriginHook = () => {
+    if (origin) origin = { ...origin, otherLibrary: true };
+    libraryGeneration++; // a saved note's link now points into the old Library
+  };
 
   refresh();
   return view;
@@ -1085,7 +1393,30 @@ interface WarpInProgress {
   gesture: WarpGesture;
 }
 
-let openFileHook: ((path: string, showEditor: () => void) => Promise<void>) | null = null;
+let openFileHook: ((path: string, showEditor: () => void, origin?: StickerOrigin) => Promise<void>) | null = null;
+let forgetOriginHook: (() => void) | null = null;
+
+/** What the Editor asks of the app shell. */
+export interface EditorNav {
+  /** Switch to the Pack Manager showing this sticker (the saved note's link). */
+  showSticker(packId: number, stickerId: number): void;
+}
+
+let editorNav: EditorNav | null = null;
+
+/** The shell tells the Editor how to reach the other views. */
+export function setEditorNav(nav: EditorNav): void {
+  editorNav = nav;
+}
+
+/**
+ * The Library changed: a session opened with Edit no longer replaces its
+ * sticker, whose id belongs to the old Library; its save dialog says so and
+ * it can still save as a new sticker.
+ */
+export function forgetEditorOrigin(): void {
+  forgetOriginHook?.();
+}
 
 /**
  * Open the image at `path` in the Editor, as Open image would (import cap
@@ -1094,11 +1425,12 @@ let openFileHook: ((path: string, showEditor: () => void) => Promise<void>) | nu
  * session with unsaved changes asks first, while the caller's view is still
  * showing; then `showEditor` switches to the Editor either way (the canvas
  * must be on screen to measure itself); then, unless the user kept editing,
- * the file opens.
+ * the file opens. `origin` is the sticker it is (Edit): saving then offers
+ * to replace it (owner decision 2026-11-22).
  */
-export function openFileInEditor(path: string, showEditor: () => void): Promise<void> {
+export function openFileInEditor(path: string, showEditor: () => void, origin?: StickerOrigin): Promise<void> {
   renderEditor(); // builds the Editor once, which installs the hook
-  return openFileHook ? openFileHook(path, showEditor) : Promise.resolve();
+  return openFileHook ? openFileHook(path, showEditor, origin) : Promise.resolve();
 }
 
 /** The unsaved-changes question, worded for both Close and opening another image. */
@@ -1108,6 +1440,45 @@ function confirmDiscard(): Promise<boolean> {
     [el("p", {}, "The editor has unsaved changes. Do you want to discard these or continue editing?")],
     { actionLabel: "Discard", keepLabel: "Keep editing", danger: true },
   );
+}
+
+/** The model's first Remove background asks before its one-time download (ADR-0006); Cancel is the safe choice. */
+function confirmModelDownload(sizeBytes: number): Promise<boolean> {
+  return confirmChoice(
+    "Download the background removal model?",
+    [
+      el("p", {}, `Background removal needs a one-time download of its model (${megabytes(sizeBytes)}).`),
+      el("p", {}, "After that it works offline. You can cancel the download while it runs."),
+    ],
+    { actionLabel: "Download", keepLabel: "Cancel" },
+  );
+}
+
+/**
+ * Even WEBP is too large (owner decision 2026-11-22, the owner's copy):
+ * "Maybe I can fix it", the default, returns to the Editor; "Nah fuck it"
+ * closes the Editor at once, unsaved changes and all. Resolves true for that.
+ */
+function confirmGiveUp(text: string): Promise<boolean> {
+  return confirmChoice(EXHAUSTED_TITLE, [el("p", {}, text)], {
+    actionLabel: "Nah fuck it",
+    keepLabel: "Maybe I can fix it",
+    danger: true,
+    keepFirst: true, // the owner's order (2026-11-22), unlike the other dialogs
+  });
+}
+
+/** Ctrl+S (Cmd+S): Save. */
+function isSaveShortcut(e: KeyboardEvent): boolean {
+  return (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s";
+}
+
+/** A PNG over the size cap (owner decision 2026-11-21): offer WEBP; Cancel, the safe choice, keeps the dialog. */
+function confirmWebp(body: readonly string[]): Promise<boolean> {
+  return confirmChoice("Too large as PNG", body.map((line) => el("p", {}, line)), {
+    actionLabel: "Save as WEBP",
+    keepLabel: "Cancel",
+  });
 }
 
 /** The import cap question (SPEC §6); Cancel, the safe choice, aborts the import. */

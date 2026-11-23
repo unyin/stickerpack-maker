@@ -1,12 +1,14 @@
 // Typed wrappers around the Editor's Rust commands (src-tauri/src/commands.rs,
-// "Editor" section; pixel work lives in src-tauri/src/editor/, ADR-0005).
-import { invoke } from "@tauri-apps/api/core";
+// "Editor" section, and src-tauri/src/save_commands.rs for editor_save_image;
+// pixel work lives in src-tauri/src/editor/, ADR-0005).
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
 import type { Effect, EffectResult } from "./model/effects";
-import { textStyleOf, type CropInput, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
+import { layerInput, textStyleOf, type CropInput, type Doc, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
 
 import { IMPORT_EXTENSIONS } from "../shared/import-extensions";
+import type { SaveFormat, SaveOutcome, SaveTarget } from "./save";
 
 /** Extensions the Editor imports (shared with the Pack Manager). */
 export { IMPORT_EXTENSIONS } from "../shared/import-extensions";
@@ -76,8 +78,17 @@ export const MERGE_LAYERS_HEADER = "x-merge-layers";
  * Call a command whose request is raw bytes plus one JSON header: the shape
  * every pixel command shares (the body stays raw, never JSON, ADR-0005).
  */
-function invokeRaw(command: string, body: Uint8Array, header: string, meta: unknown): Promise<ArrayBuffer> {
-  return invoke<ArrayBuffer>(command, body, { headers: { [header]: JSON.stringify(meta) } });
+function invokeRaw<T = ArrayBuffer>(command: string, body: Uint8Array, header: string, meta: unknown): Promise<T> {
+  return invoke<T>(command, body, { headers: { [header]: asciiJson(meta) } });
+}
+
+/**
+ * JSON with every non-ASCII character escaped (`\u00e9`), so it is a valid
+ * HTTP header value: a header carries only visible ASCII, and text layers
+ * can hold any character ("café", emoji). The JSON means the same.
+ */
+export function asciiJson(value: unknown): string {
+  return JSON.stringify(value).replace(/[\u007f-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
 }
 
 /** A raster's pixels as the bytes of a request body (only the view, not its whole buffer). */
@@ -256,4 +267,74 @@ export function decodeEffectFrame(frame: ArrayBuffer): EffectResult {
     transform: { x: f(0), y: f(1), scaleX: f(2), scaleY: f(3), rotation: f(4) },
     image: decodeFrame(frame, 20),
   };
+}
+
+// ---- Background removal (SPM-7, ADR-0006) ----
+
+/** Whether the background removal model is cached yet, and its download size (serde camelCase). */
+export interface BackgroundModelStatus {
+  downloaded: boolean;
+  sizeBytes: number;
+}
+
+export function backgroundModelStatus(): Promise<BackgroundModelStatus> {
+  return invoke<BackgroundModelStatus>("editor_background_model_status");
+}
+
+/** A download's progress as Rust reports it (bytes). */
+export interface DownloadProgress {
+  readonly received: number;
+  readonly total: number;
+}
+
+/** How a download ended; mirrors Rust's `ml::DownloadOutcome` (serde camelCase). */
+export type DownloadOutcome = "done" | "cancelled";
+
+/**
+ * Download the model once (Rust checks its size and SHA-256 before keeping
+ * it), reporting progress. Resolves "cancelled" after `cancelBackgroundDownload`.
+ */
+export function downloadBackgroundModel(onProgress: (p: DownloadProgress) => void): Promise<DownloadOutcome> {
+  const channel = new Channel<DownloadProgress>();
+  channel.onmessage = onProgress;
+  return invoke<DownloadOutcome>("editor_download_background_model", { onProgress: channel });
+}
+
+export function cancelBackgroundDownload(): Promise<void> {
+  return invoke<void>("editor_cancel_background_download");
+}
+
+/** Header carrying the layer size of a removal; mirrors REMOVE_BACKGROUND_HEADER. */
+export const REMOVE_BACKGROUND_HEADER = "x-remove-background";
+
+/** The layer with its background made transparent, in Rust (alpha only; colours unchanged). */
+export async function removeImageBackground(image: RgbaImage): Promise<RgbaImage> {
+  const meta = { width: image.width, height: image.height };
+  const frame = await invokeRaw("editor_remove_background", bytesOf(image), REMOVE_BACKGROUND_HEADER, meta);
+  const out = decodeFrame(frame);
+  if (out.width !== image.width || out.height !== image.height) {
+    throw new Error("background removal returned an image of another size");
+  }
+  return out;
+}
+
+/** Header carrying the save request (canvas, layers, format, target); mirrors SAVE_HEADER. */
+export const SAVE_HEADER = "x-save-image";
+
+/**
+ * Save the document (SPEC §6, SPM-10): Rust flattens what is inside the
+ * canvas, encodes it as `format` within the size cap and writes it to
+ * `target` through the Library core. Layers go as for merge (raster pixels
+ * as the raw body, text as text). A canvas that misses the sticker
+ * constraint set is refused (rejects); over the cap resolves `tooLarge`.
+ */
+export function saveImage(doc: Doc, format: SaveFormat, target: SaveTarget): Promise<SaveOutcome> {
+  const { body, meta } = encodeLayers(doc.layers.map(layerInput));
+  return invokeRaw<SaveOutcome>("editor_save_image", body, SAVE_HEADER, {
+    width: doc.width,
+    height: doc.height,
+    layers: meta,
+    format,
+    target,
+  });
 }

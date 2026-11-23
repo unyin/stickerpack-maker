@@ -5,9 +5,13 @@ import { layerImage, layerIndex, textLayersOf, type Doc, type TextLayer } from "
 import { DEFAULT_HISTORY_BUDGET, History } from "./history";
 import type { Region } from "./region";
 
-/** Pixel buffers of a document (text renderings too), for the history's memory budget. */
+/** Pixel buffers of a document (text renderings and restore sources too), for the history's memory budget. */
 function buffersOf(doc: Doc): ArrayBufferLike[] {
-  return doc.layers.map((l) => layerImage(l).pixels.buffer);
+  return doc.layers.flatMap((l) => {
+    const buffers = [layerImage(l).pixels.buffer];
+    if (l.kind === "raster" && l.restoreSource) buffers.push(l.restoreSource.pixels.buffer);
+    return buffers;
+  });
 }
 
 export type SelectMode = "replace" | "toggle";
