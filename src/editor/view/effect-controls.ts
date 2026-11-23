@@ -125,6 +125,15 @@ export class EffectControls {
     this.target.classList.toggle("is-blocked", blocker !== null);
   }
 
+  /**
+   * Hide the bar although an effect tool is (nominally) still the tool: the
+   * bar is a sibling of the toolbar, so with no session nothing else hides
+   * it. Its DOM is this class's own (SPM-8: closing a session).
+   */
+  hide(): void {
+    this.element.hidden = true;
+  }
+
   private group(label: string, ...controls: HTMLElement[]): HTMLElement {
     return el("span", { class: "editor-effect-group" }, el("strong", {}, label), ...controls);
   }

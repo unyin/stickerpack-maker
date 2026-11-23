@@ -669,6 +669,10 @@ function buildEditor(): HTMLElement {
     stage = null;
     session = null;
     tool = "move";
+    // The no-session UI shows at once: the effect bar hides and no tool
+    // button stays pressed (SPM-8). run()'s closing refresh covers the
+    // button-and-close paths, but ending a session must not depend on it.
+    refresh();
   }
 
   // ---- Save (SPM-10) ----
@@ -1164,8 +1168,25 @@ function buildEditor(): HTMLElement {
     workspace.hidden = current === null;
     toolbar.hidden = current === null;
     openButton.disabled = busy;
+    // The canvas tool buttons follow `tool` with or without a session, so
+    // after Close no button stays pressed on the hidden toolbar (SPM-8);
+    // the bar hides too, as its DOM is EffectControls' own.
+    for (const [b, t] of [
+      [moveToolButton, "move"],
+      [rectToolButton, "rect"],
+      [lassoToolButton, "lasso"],
+      [outlineToolButton, "outline"],
+      [glowToolButton, "glow"],
+      [warpToolButton, "warp"],
+      [eraseToolButton, "erase"],
+      [restoreToolButton, "restore"],
+    ] as const) {
+      b.setAttribute("aria-pressed", String(tool === t));
+      b.disabled = busy;
+    }
     if (!current) {
       layersList.replaceChildren();
+      effectControls.hide();
       return;
     }
     // A discard (another target picked, undo/redo, any edit) ends the Outline/Glow tool.
@@ -1226,20 +1247,6 @@ function buildEditor(): HTMLElement {
     mergeButton.title = blocker ?? "Merge the selected layers into one";
     deleteButton.disabled = busy || deleteReason !== null;
     deleteButton.title = deleteReason ?? "Delete the selected layers (Delete key)";
-    // Cut selection tools and paste (SPM-9).
-    for (const [b, t] of [
-      [moveToolButton, "move"],
-      [rectToolButton, "rect"],
-      [lassoToolButton, "lasso"],
-      [outlineToolButton, "outline"],
-      [glowToolButton, "glow"],
-      [warpToolButton, "warp"],
-      [eraseToolButton, "erase"],
-      [restoreToolButton, "restore"],
-    ] as const) {
-      b.setAttribute("aria-pressed", String(tool === t));
-      b.disabled = busy;
-    }
     const cutReason = cutBlocker(doc, current.selection, current.region);
     cutButton.disabled = busy || cutReason !== null;
     cutButton.title = cutReason ?? cutTitle;
