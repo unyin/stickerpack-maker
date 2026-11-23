@@ -705,6 +705,12 @@
   height: 200px;
 }
 
+/* The thumbnail picker's dimensions (owner re-test 2026-11-23): the muted
+   tone of the position beside them - quieter than the full text colour. */
+.pm-card-dims {
+  color: var(--muted);
+}
+
 .pm-emoji {
   font-family: var(--font-emoji);
   font-size: 16px;

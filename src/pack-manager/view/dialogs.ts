@@ -10,6 +10,7 @@ import {
   listPacks,
   sendToPack,
   suggestShortName,
+  type FileInfo,
   type Pack,
   type PackSummary,
   type PackView,
@@ -18,7 +19,6 @@ import {
 } from "../api";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import {
-  dimensionsText,
   fileNameOf,
   GO_LIVE_CONFIRMATION,
   matchPacks,
@@ -257,9 +257,19 @@ export function thumbnailSourceDialog(hasThumbnail: boolean, canCopySticker: boo
 }
 
 /**
+ * The picker card's dimensions (owner re-test 2026-11-23): the plain numbers,
+ * no unit - "512×512" - or the em dash when the file cannot be read. The panel
+ * meta rows keep dimensionsText's " px" ending; the card is denser.
+ */
+function pickerDimensions(file: FileInfo | null): string {
+  if (!file) return "—";
+  return file.width !== null && file.height !== null ? `${file.width}×${file.height}` : "unreadable";
+}
+
+/**
  * One sticker as the thumbnail picker shows it (owner re-test 2026-11-23):
- * its preview, position and dimensions only - no emoji; the sticker's own
- * detail panel is where its Emoji String belongs.
+ * its preview, position number and dimensions (the plain numbers, no unit),
+ * no emoji; the sticker's own detail panel is where its Emoji String belongs.
  */
 function choiceCard(sticker: StickerView, previews: Previews): HTMLElement {
   const image = sticker.missing
@@ -269,7 +279,7 @@ function choiceCard(sticker: StickerView, previews: Previews): HTMLElement {
     "figure",
     { class: "pm-confirm-card" },
     image,
-    el("figcaption", {}, el("span", { class: "pm-pos" }, `#${sticker.position}`), " ", dimensionsText(sticker.file)),
+    el("figcaption", {}, el("span", { class: "pm-pos" }, `#${sticker.position}`), " ", el("span", { class: "pm-card-dims" }, pickerDimensions(sticker.file))),
   );
 }
 
