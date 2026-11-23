@@ -93,7 +93,7 @@ export function saveBlocker(canvas: Size, set: ConstraintSet): string | null {
  * under it. The stroke ends first.
  */
 export const SAVE_MID_STROKE =
-  "Save is blocked: an Erase, Restore or Warp stroke is still in progress. Finish the stroke first, then save.";
+  "Save is blocked: an Erase, Restore or Warp operation is still in progress. Finish the operation first, then save.";
 
 /**
  * Why this save attempt is refused before the save dialog opens, or null

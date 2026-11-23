@@ -45,7 +45,7 @@ test("a save attempted mid-brush-stroke is refused and never reaches the dialog;
   const canvas = { width: S, height: S };
   expect(saveRefusal(true, canvas, STICKER)).toBe(SAVE_MID_STROKE);
   expect(SAVE_MID_STROKE).toStartWith("Save is blocked:");
-  expect(SAVE_MID_STROKE).toContain("stroke");
+  expect(SAVE_MID_STROKE).toContain("operation");
   expect(SAVE_MID_STROKE).toContain("first");
   // After the release only the canvas rule decides again, and it passes.
   expect(saveRefusal(false, canvas, STICKER)).toBeNull();
@@ -59,6 +59,7 @@ test("a save attempted mid-warp-drag is refused and never reaches the dialog; af
   const canvas = { width: S, height: S };
   expect(saveRefusal(true, canvas, STICKER)).toBe(SAVE_MID_STROKE);
   expect(SAVE_MID_STROKE).toContain("Warp");
+  expect(SAVE_MID_STROKE).not.toContain("stroke");
   // After the release only the canvas rule decides again, and it passes.
   expect(saveRefusal(false, canvas, STICKER)).toBeNull();
 });

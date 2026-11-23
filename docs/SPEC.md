@@ -351,9 +351,9 @@ stickers, Missing stickers, and the thumbnail.
   pointer's distance from it, live, with the ring following; holding **Shift** during the
   drag sets the **strength** instead, which follows the pointer's vertical movement — up
   increases, down decreases (owner decision 2026-11-23) — relative to its value when
-  Shift went down (about 1% per 2 screen px, 1–100%), with the radius frozen; letting go
-  of Shift goes back to
-  the radius, continuing from its frozen value, so nothing jumps. Shift is read from each
+  Shift went down (about 1% per 2 screen px, 1–100%), with the radius frozen; letting
+  go of Shift goes back to the radius, continuing from its frozen value, so nothing
+  jumps. Shift is read from each
   pointer event (held, not tapped), and may already be down at the press. A readout
   beside the pointer shows "Radius N px" or "Strength N%". A drag's final radius and
   strength become the bar's values. The layer keeps its size and transform (one piece);
@@ -471,8 +471,8 @@ stickers, Missing stickers, and the thumbnail.
     same. While the canvas misses the constraint set it is disabled, with the reason (the
     live readout's text and the sizing tool that fixes it) as its tooltip; Ctrl+S then shows
     that reason in the message line. A save attempted while an Erase, Restore or Warp
-    stroke (above) is mid-press is refused with its reason in the message line instead —
-    the stroke's pixels reach the document only when it ends — and while the model
+    operation (above) is mid-press is refused with its reason in the message line instead —
+    the operation's pixels reach the document only when it ends — and while the model
     download runs, the disabled Save… shows the download's progress as its tooltip, with
     Ctrl+S putting that reason in the message line (owner decision 2026-11-23).
   - The pack is chosen in the same pack picker as Send to pack (owner decision 2026-11-22): a
