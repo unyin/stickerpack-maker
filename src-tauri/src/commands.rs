@@ -166,7 +166,7 @@ fn custom_emoji_font_problem(path: &str) -> Option<String> {
     }
     match fs::metadata(&p) {
         Ok(m) if m.len() > CUSTOM_EMOJI_FONT_MAX_BYTES => Some(format!(
-            "font file is {} MB; the limit is {} MB",
+            "font file {path} is {} MB; the limit is {} MB",
             m.len() / (1024 * 1024),
             CUSTOM_EMOJI_FONT_MAX_BYTES / (1024 * 1024)
         )),
