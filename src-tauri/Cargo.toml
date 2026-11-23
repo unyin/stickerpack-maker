@@ -48,6 +48,8 @@ ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "
 # and its SHA-256 check. sha2 0.10 is already in the tree.
 ureq = "3"
 sha2 = "0.10"
+# The save encoder (SPM-10): PNG/WEBP save encoding (editor/encode.rs), via
+# libwebp compiled from vendored C and linked statically (no DLL to ship).
 webp = { version = "0.3", default-features = false }
 
 [dev-dependencies]

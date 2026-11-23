@@ -328,6 +328,15 @@ export class EditorStage {
   }
 
   /**
+   * True while a refine brush stroke is mid-press (SPM-7): its pixels are
+   * painted live but reach the model only at release, so Save is refused
+   * until the stroke ends (owner decision 2026-11-23).
+   */
+  strokeInProgress(): boolean {
+    return this.stroke !== null;
+  }
+
+  /**
    * A key for the lasso in progress (SPM-9): Enter closes it, Escape cancels
    * it, Backspace removes its last segment (a waypoint or a whole freehand
    * stroke). True when the key was used, so the Editor's own shortcuts (Esc

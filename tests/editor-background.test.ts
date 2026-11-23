@@ -203,6 +203,18 @@ test("painting off the layer changes nothing", () => {
   expect(finishStroke(doc, stroke)).toBe(doc);
 });
 
+test("mid-stroke pixels are only in the stroke's working image until release", () => {
+  // Why Save is refused mid-stroke (saveRefusal, SPM-7): between beginStroke
+  // and finishStroke the painted pixels are nowhere in the document, so a
+  // save would miss them; the release commits them as one step.
+  const doc = docWith(solid(40, 40, [1, 1, 1, 255]));
+  const stroke = beginStroke(raster(doc), "erase", 10);
+  strokeTo(stroke, { x: 20, y: 20 });
+  expect(alphaAt(raster(doc).image, 20, 20)).toBe(255); // not in the model yet
+  const released = finishStroke(doc, stroke);
+  expect(alphaAt(raster(released).image, 20, 20)).toBe(0); // the release commits it
+});
+
 test("restore paints the restore source back and needs one", () => {
   const original = solid(20, 20, [9, 8, 7, 255]);
   const removed = solid(20, 20, [9, 8, 7, 0]);

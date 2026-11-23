@@ -11,11 +11,13 @@ import {
   pngTooLargeText,
   replaceLabel,
   resolveOrigin,
+  saveRefusal,
   showStickerLink,
   stickerGoneText,
   runSave,
   saveBlocker,
   savedText,
+  SAVE_MID_STROKE,
   type SaveFormat,
   type SaveOutcome,
   type TooLarge,
@@ -33,6 +35,20 @@ test("Sticker mode saves only with the longest side exactly the sticker side", (
   expect(over).toContain("88 px over");
   expect(over).toContain(`Fit to ${S}×${S} or Longest side ${S}`);
   expect(saveBlocker({ width: S - 1, height: S - 1 }, STICKER)).toContain("1 px under");
+});
+
+test("a save attempted mid-brush-stroke is refused and never reaches the dialog; after the stroke ends it proceeds", () => {
+  // The seam both save entry points (Save…, Ctrl+S) go through (SPM-7): a
+  // mid-press stroke's pixels are painted live but not in the model yet, so
+  // even a canvas that passes the rule is refused before the dialog could
+  // open on a snapshot without them.
+  const canvas = { width: S, height: S };
+  expect(saveRefusal(true, canvas, STICKER)).toBe(SAVE_MID_STROKE);
+  expect(SAVE_MID_STROKE).toStartWith("Save is blocked:");
+  expect(SAVE_MID_STROKE).toContain("stroke");
+  expect(SAVE_MID_STROKE).toContain("first");
+  // After the release only the canvas rule decides again, and it passes.
+  expect(saveRefusal(false, canvas, STICKER)).toBeNull();
 });
 
 test("Thumbnail mode saves only exactly square, and only Fit is offered as the fix", () => {

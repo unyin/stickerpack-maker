@@ -2,7 +2,9 @@
 // session, "Open image" starts one; while open, "Add image as layer" and
 // pasting (Ctrl+V) bring in other images; "Close" ends it (warning on unsaved
 // changes). The session survives switching tabs: the view is built once.
-// SPM-9 adds the text tool, the cut selection tools and paste.
+// SPM-9 adds the text tool, the cut selection tools and paste; SPM-7 the
+// background removal and its Erase/Restore refine brushes; SPM-10 the save
+// pipeline (Save…, Ctrl+S).
 import "../editor/editor.css";
 import { baseName } from "../api";
 import {
@@ -24,6 +26,7 @@ import {
   renderText,
   saveImage,
   type BackgroundModelId,
+  type DownloadProgress,
   type ImageInfo,
 } from "../editor/api";
 import { backgroundTarget, refineLayerPixels } from "../editor/model/background";
@@ -36,6 +39,7 @@ import {
   pngTooLargeText,
   runSave,
   saveBlocker,
+  saveRefusal,
   savedText,
   type SaveFormat,
   originAfterSave,
@@ -281,6 +285,10 @@ function buildEditor(): HTMLElement {
   // The model Remove background uses. Remembered only while the app runs:
   // Editor settings never persist across restarts (owner, 2026-11-22).
   let backgroundModel: BackgroundModelId = BACKGROUND_MODELS[0].id;
+  // The message-line text of a model download in progress, null when none
+  // runs: Save's disabled tooltip and a mid-download Ctrl+S say it (SPEC §6,
+  // §2: a disabled control shows its reason).
+  let downloadNote: string | null = null;
   const modelSelect = el(
     "select",
     { class: "editor-model-select", "aria-label": "Background removal model" },
@@ -647,7 +655,13 @@ function buildEditor(): HTMLElement {
    */
   async function saveSession(): Promise<void> {
     const current = session;
-    if (!current || saveBlocker(current.doc, constraints)) return;
+    if (!current) return;
+    // A mid-press stroke (SPM-7) owns pixels the model does not have yet: the
+    // dialog would save the document without them, and the stroke's release
+    // would commit them under it. Both save entry points refuse here
+    // (owner decision 2026-11-23); the canvas rule follows once no stroke runs.
+    const refusal = saveRefusal(stage?.strokeInProgress() ?? false, current.doc, constraints);
+    if (refusal) return say(refusal);
     const doc = current.doc;
     let exhausted: TooLarge | null = null;
     await saveDialog({
@@ -681,7 +695,9 @@ function buildEditor(): HTMLElement {
         if (target.kind === "replace") markStickerFileChanged(saved.sticker.id);
         // The session now edits the saved sticker: the next save replaces it (design decision 2026-11-22).
         origin = originAfterSave(saved, packTitle);
-        // The session cannot change while the dialog is open; check anyway.
+        // Since the SPM-7 merge a brush stroke could commit under this dialog;
+        // the mid-stroke refusal above makes that known path impossible. The
+        // check stays as defence in depth for anything unforeseen.
         if (current.doc === doc) current.markSaved();
         say(savedText(saved, packTitle, target), "note", " ", stickerLink(saved.sticker, packTitle));
         return null;
@@ -813,7 +829,15 @@ function buildEditor(): HTMLElement {
     const status = await backgroundModelStatus(model);
     if (status.downloaded) return true;
     if (!(await confirmModelDownload(modelLabel(model), status.sizeBytes))) return false;
-    say(downloadProgressText({ received: 0, total: status.sizeBytes }), "note");
+    // One report drives both the message line and the disabled Save's tooltip
+    // (SPEC §6, §2: a disabled control shows its reason). Direct assignments
+    // rather than refresh(): a progress tick is too frequent for a full pass.
+    function reportProgress(p: DownloadProgress): void {
+      downloadNote = downloadProgressText(p);
+      say(downloadNote, "note");
+      saveButton.title = downloadNote;
+    }
+    reportProgress({ received: 0, total: status.sizeBytes });
     // Progress reports travel apart from the command's reply: one arriving
     // after it must not bring the button or the progress note back.
     let active = true;
@@ -823,7 +847,7 @@ function buildEditor(): HTMLElement {
       const outcome = await downloadBackgroundModel(model, (p) => {
         if (!active) return;
         cancelDownloadButton.hidden = false;
-        say(downloadProgressText(p), "note");
+        reportProgress(p);
       });
       if (outcome === "cancelled") {
         say("The model download was cancelled.", "note");
@@ -832,7 +856,12 @@ function buildEditor(): HTMLElement {
       return true;
     } finally {
       active = false;
+      downloadNote = null;
       cancelDownloadButton.hidden = true;
+      // The model's inference wait is a generic busy action: Save shows its
+      // canvas reason again (or its normal title) until run()'s closing refresh().
+      const saveReason = session ? saveBlocker(session.doc, constraints) : null;
+      saveButton.title = saveReason ?? saveTitle;
     }
   }
 
@@ -1052,7 +1081,9 @@ function buildEditor(): HTMLElement {
     closeButton.disabled = busy;
     const saveReason = saveBlocker(doc, constraints);
     saveButton.disabled = busy || saveReason !== null;
-    saveButton.title = saveReason ?? saveTitle;
+    // While the model downloads (the one long busy wait), the disabled Save
+    // says the download's progress instead of its idle title (SPEC §2).
+    saveButton.title = saveReason ?? downloadNote ?? saveTitle;
     undoButton.disabled = busy || !current.canUndo;
     redoButton.disabled = busy || !current.canRedo;
     upButton.disabled = busy || !single || index === doc.layers.length - 1;
@@ -1131,7 +1162,13 @@ function buildEditor(): HTMLElement {
     const current = session;
     // Ctrl+S never reaches the webview's own "save page", even while busy.
     if (view.isConnected && isSaveShortcut(e)) e.preventDefault();
-    if (!current || !view.isConnected || busy || textOverlay.isOpen) return;
+    if (!current || !view.isConnected || textOverlay.isOpen) return;
+    // While the toolbar is busy, Ctrl+S still says why (SPEC §6): the model
+    // download is the one wait long enough to need it; other keys wait too.
+    if (busy) {
+      if (isSaveShortcut(e) && downloadNote) say(downloadNote, "note");
+      return;
+    }
     if (isTextTarget(e.target)) return;
     // A lasso in progress takes Enter, Esc and Backspace first (SPM-9).
     if (stage?.handleLassoKey(e.key)) {
@@ -1147,9 +1184,10 @@ function buildEditor(): HTMLElement {
       clearNote();
       current.redo();
     }
-    // Ctrl+S saves; a blocked save says why (SPEC §6: hard-blocked).
+    // Ctrl+S saves; a blocked save says why (SPEC §6: hard-blocked), and a
+    // mid-press brush stroke is refused before the dialog can open.
     else if (isSaveShortcut(e)) {
-      const reason = saveBlocker(current.doc, constraints);
+      const reason = saveRefusal(stage?.strokeInProgress() ?? false, current.doc, constraints);
       if (reason) say(reason);
       else void run(saveSession);
     }

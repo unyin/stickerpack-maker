@@ -1,5 +1,6 @@
 // Typed wrappers around the Editor's Rust commands (src-tauri/src/commands.rs,
-// "Editor" section; pixel work lives in src-tauri/src/editor/, ADR-0005).
+// "Editor" section, and src-tauri/src/save_commands.rs for editor_save_image;
+// pixel work lives in src-tauri/src/editor/, ADR-0005).
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
