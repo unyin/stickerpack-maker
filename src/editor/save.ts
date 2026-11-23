@@ -27,13 +27,16 @@ export interface OriginNow {
   readonly format: SaveFormat;
 }
 
+/** The origin sticker's lookup: where it is now, or why it cannot be replaced. */
+export type OriginLookup = OriginNow | { readonly gone: string };
+
 /**
  * Find the origin sticker in its pack as it is now (`view` null: the pack
  * could not be read, e.g. deleted). It may have moved within its pack
  * (Reorder): that is still the same sticker. Gone (deleted, moved to another
  * pack, another Library): why it cannot be replaced.
  */
-export function resolveOrigin(origin: StickerOrigin, view: PackView | null): OriginNow | { readonly gone: string } {
+export function resolveOrigin(origin: StickerOrigin, view: PackView | null): OriginLookup {
   if (origin.otherLibrary) {
     return {
       gone: `Sticker #${origin.position} of “${origin.packTitle}” belongs to the Library used before, so it cannot be replaced. Save it as a new sticker instead.`,
@@ -46,6 +49,18 @@ export function resolveOrigin(origin: StickerOrigin, view: PackView | null): Ori
     };
   }
   return { position: sticker.position, packTitle: view.pack.title, format: sticker.format };
+}
+
+/**
+ * Whether closing the session asks about its gone origin sticker (owner
+ * decision 2026-11-23): a CLEAN session whose origin no longer exists in
+ * the Library warns before closing throws the last copy of the image away.
+ * `now` is the same lookup the save dialog's Replace option uses
+ * (originNow), so the two can never disagree. A dirty session never gets
+ * here: its own unsaved-changes warning has already decided.
+ */
+export function originGoneCloseWarning(origin: StickerOrigin | null, now: OriginLookup): boolean {
+  return origin !== null && "gone" in now;
 }
 
 /** The replace option's label: "Replace #4 in “Cats”". */
@@ -86,20 +101,22 @@ export function saveBlocker(canvas: Size, set: ConstraintSet): string | null {
 
 /**
  * Why a save is refused before the save dialog opens (owner decision
- * 2026-11-23): a refine brush stroke mid-press (SPM-7) owns pixels that are
- * painted live but not in the model yet, so the dialog would snapshot the
- * document without them — and the stroke's release would commit them under
- * it. The stroke ends first.
+ * 2026-11-23): a pixel-changing operation is still in progress — a refine
+ * stroke (Erase/Restore, SPM-7) or a warp gesture (Warp, SPM-8) — and its
+ * pixels are painted live but not in the model yet, so the dialog would
+ * snapshot the document without them — and the operation's release would
+ * commit them under it. The operation ends first.
  */
 export const SAVE_MID_STROKE =
-  "Save is blocked: an Erase or Restore stroke is still being painted. Finish the stroke first, then save.";
+  "Save is blocked: an Erase, Restore or Warp operation is still in progress. Finish the operation first, then save.";
 
 /**
  * Why this save attempt is refused before the save dialog opens, or null
- * when the dialog may open: a mid-press stroke (SPM-7) refuses even a canvas
- * that passes the rule; otherwise the canvas rule (SPEC §6: hard-blocked)
- * decides. Both of the Editor's save entry points — the Save… button and
- * Ctrl+S — go through here, so a stroke in progress never reaches the dialog.
+ * when the dialog may open: a mid-press stroke (Erase/Restore, SPM-7; Warp,
+ * SPM-8) refuses even a canvas that passes the rule; otherwise the canvas
+ * rule (SPEC §6: hard-blocked) decides. Both of the Editor's save entry
+ * points — the Save… button and Ctrl+S — go through here, so a stroke in
+ * progress never reaches the dialog.
  */
 export function saveRefusal(midStroke: boolean, canvas: Size, set: ConstraintSet): string | null {
   return midStroke ? SAVE_MID_STROKE : saveBlocker(canvas, set);

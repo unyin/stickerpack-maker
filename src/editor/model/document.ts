@@ -685,6 +685,17 @@ export function localToDoc(t: Transform, u: number, v: number): Point {
   return { x: t.x + sx * Math.cos(rad) - sy * Math.sin(rad), y: t.y + sx * Math.sin(rad) + sy * Math.cos(rad) };
 }
 
+/** The inverse of `localToDoc`: which of a layer's own pixel coordinates lies under document point `p`. */
+export function docToLocal(t: Transform, p: Point): Point {
+  const rad = (t.rotation * Math.PI) / 180;
+  const dx = p.x - t.x;
+  const dy = p.y - t.y;
+  return {
+    x: (dx * Math.cos(rad) + dy * Math.sin(rad)) / t.scaleX,
+    y: (-dx * Math.sin(rad) + dy * Math.cos(rad)) / t.scaleY,
+  };
+}
+
 /** What a cut produces (src-tauri/src/editor/cut.rs). */
 export interface CutResult {
   /** The source's pixels with the selected ones cleared; the source's size. */

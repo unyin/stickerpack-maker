@@ -243,6 +243,16 @@ button.secondary:disabled:hover {
   stroke-linejoin: round;
 }
 
+/* The one filled icon (SPM-8, owner 2026-11-23): the eyedropper is thin
+   double-outline line art traced from the native colour picker's own glyph,
+   which the set's stroke rendering cannot carry; it fills in currentColor and
+   keeps its two hollows via evenodd. */
+.icon.icon-eyedropper {
+  fill: currentColor;
+  stroke: none;
+  fill-rule: evenodd;
+}
+
 /* A gap between an icon and its label, on either side. (:only-child cannot
    do this: it ignores the text node.) */
 button:has(> .icon) {

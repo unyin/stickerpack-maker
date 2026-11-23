@@ -78,6 +78,7 @@ pub fn run() {
             commands::editor_list_fonts,
             commands::editor_render_text,
             commands::editor_cut_layer,
+            commands::editor_apply_effect,
             commands::editor_background_model_status,
             commands::editor_download_background_model,
             commands::editor_cancel_background_download,

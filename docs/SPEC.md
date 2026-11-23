@@ -341,6 +341,23 @@ stickers, Missing stickers, and the thumbnail.
     anchoring the opposite corner; holding **Shift** while dragging the rotation handle
     snaps the rotation to 15° steps.
 - **Enlarge selected parts**: local warp/bulge (strength + radius), paints on the selected layer.
+  Details (SPM-8; owner decision 2026-11-21: a destructive brush): the **Warp** tool paints
+  on the selected image layer, or the base image (the bottom layer) when nothing is
+  selected; text layers are not warped (merge them into an image first), and with several
+  layers selected it says to select one. Each press places ONE bulge, which magnifies the
+  pixels around the press point in place (meme style), within its radius (owner decision
+  2026-11-22): a click uses the bar's strength and radius (radius in on-screen document
+  px); a press-drag keeps the bulge at the press point and sets its **radius** to the
+  pointer's distance from it, live, with the ring following; holding **Shift** during the
+  drag sets the **strength** instead, which follows the pointer's vertical movement — up
+  increases, down decreases (owner decision 2026-11-23) — relative to its value when
+  Shift went down (about 1% per 2 screen px, 1–100%), with the radius frozen; letting
+  go of Shift goes back to the radius, continuing from its frozen value, so nothing
+  jumps. Shift is read from each
+  pointer event (held, not tapped), and may already be down at the press. A readout
+  beside the pointer shows "Radius N px" or "Strength N%". A drag's final radius and
+  strength become the bar's values. The layer keeps its size and transform (one piece);
+  each press is one undo step on release. (Shrinking/pinch is parked for v3.)
 - **Background removal**: one-click offline ONNX auto removal + manual refine brush. Details
   (SPM-7, ADR-0006; owner decisions 2026-11-22):
   - **Remove background** works on the selected image layer, or the base image when nothing
@@ -370,7 +387,52 @@ stickers, Missing stickers, and the thumbnail.
     loses it when Cut, a Crop across it, a merge or an effect replaces its pixels. Restore
     then says so on a press, and to undo that step first (owner decision 2026-11-22).
 - **Outline** and **fuzzy glow**: target the selected layer, or the base image when nothing
-  is selected.
+  is selected. Details (SPM-8):
+  - One-shot (owner decision 2026-11-22): while the **Outline** or **Glow** tool is active,
+    a live preview shows the effect with the current settings (outline: colour, width;
+    glow: colour, radius, softness, opacity); **Apply** bakes it into the layer's pixels as
+    ONE undo step and returns to the Move tool; changing settings is not an undo step.
+    Normal blending only (owner decision 2026-11-21). The preview is drawn by Rust with
+    Apply's own code, so the preview is the result (ADR-0008).
+  - The bar's sliders take more than dragging (owner decision 2026-11-23): scrolling the
+    mousewheel over one steps its value by 1 within its range (hover is enough, up
+    increases, nothing else scrolls), and the value shown beside each slider is an
+    editable field — a typed whole number commits on Enter or blur, clamped into the
+    range; invalid or empty reverts, and Esc reverts and blurs. The Warp bar's sliders
+    work the same way.
+  - Every colour picker in the Editor (outline, glow and text) has an eyedropper beside
+    it (owner decision 2026-11-23; canvas-only per CMT-296: the browser EyeDropper API
+    ships in WebView2 but its sampler does not work in the embedded runtime): clicking it
+    starts a pick on the canvas — a crosshair cursor with a magnifier loupe following the
+    pointer, showing the zoomed pixels and the #rrggbb under it — and a click samples the
+    composited pixel as shown (every layer and a visible effect preview included; the
+    guides, rings and the loupe excluded) and applies it exactly as typing it into the
+    picker would, so the tool and its preview stay, recoloured. Wheel zoom and middle-drag
+    pan keep working during the pick; a fully transparent spot refuses, saying so in the
+    message line, and the pick stays for another try; Esc, switching tools or ending the
+    session cancels the pick.
+  - The unapplied preview (owner decision 2026-11-22) exists only until Apply: switching
+    tool (or **Cancel**), picking another layer as the target (in the Layers list;
+    re-picking the layer that is already the target, such as the base image while
+    nothing was selected, keeps the tool and its preview, and while several layers are
+    selected there is no target yet, so choosing one makes it the target; owner decision
+    2026-11-22),
+    undo/redo, any other edit, and closing the Editor all discard it, and it never enters
+    the undo history. An **Esc** that clears a layer selection is a discard too, whatever
+    layer was selected — the base image included — while Esc with nothing selected
+    changes nothing, and re-picking the already-target layer is not a discard (owner
+    decision 2026-11-23). Every discard also returns to the Move tool (owner decision
+    2026-11-22). An unapplied preview alone does not make the document dirty, so closing
+    warns only about applied, unsaved changes. Settings keep their latest values until the
+    app closes (never saved; each app start uses the defaults).
+  - The effect grows the layer: an outline or glow reaching past the layer's edge makes
+    the layer larger (its top-left moves out), not clipped; the save still clips to the
+    canvas. Sizes are in on-screen document px, so a scaled layer looks the same.
+  - The layer is chosen before the tool (owner decision 2026-11-22): in Outline and Glow
+    a click on the canvas selects nothing and nothing moves (empty space still pans).
+    With several layers selected the tool says to select one (merge them first to treat
+    them as one). A text layer gets the effect too: Apply rasterises it in Rust and it
+    becomes an image layer with the same name and place; a neutral note says so.
 - **Text**: own layer, movable/resizable until save (system fonts, size, color). Details
   (owner confirmed 2026-11-21, SPM-9):
   - **Add text** opens a text box centred on the canvas; double-click a text layer (or
@@ -419,11 +481,11 @@ stickers, Missing stickers, and the thumbnail.
   - **Save…** sits at the right of the Editor toolbar, before Close; **Ctrl+S** does the
     same. While the canvas misses the constraint set it is disabled, with the reason (the
     live readout's text and the sizing tool that fixes it) as its tooltip; Ctrl+S then shows
-    that reason in the message line. A save attempted while an Erase/Restore stroke (above)
-    is mid-press is refused with its reason in the message line instead — the stroke's
-    pixels reach the document only when it ends — and while the model download runs, the
-    disabled Save… shows the download's progress as its tooltip, with Ctrl+S putting that
-    reason in the message line (owner decision 2026-11-23).
+    that reason in the message line. A save attempted while an Erase, Restore or Warp
+    operation (above) is mid-press is refused with its reason in the message line instead —
+    the operation's pixels reach the document only when it ends — and while the model
+    download runs, the disabled Save… shows the download's progress as its tooltip, with
+    Ctrl+S putting that reason in the message line (owner decision 2026-11-23).
   - The pack is chosen in the same pack picker as Send to pack (owner decision 2026-11-22): a
     field like the font picker. Clicking or typing opens the list of packs (Title, Short
     Name, sticker count, Draft/Live badge); typing filters it (Titles starting with the text
@@ -496,7 +558,13 @@ stickers, Missing stickers, and the thumbnail.
   its tooltip: a thumbnail must be exactly 100×100, so use Fit), so the toolbar looks the same
   in both modes (owner decision 2026-11-20).
 - Closing the editor with unsaved changes warns first. Unfinished, non-conforming work
-  cannot be parked — there is deliberately no scratch/draft save location.
+  cannot be parked — there is deliberately no scratch/draft save location. Closing a CLEAN
+  session whose origin sticker no longer exists (deleted, sent away with Move, or the
+  Library changed) also asks first — "Sticker no longer exists", **Close anyway** /
+  **Keep editing** (Keep editing the default), because closing would discard the only
+  remaining copy (owner decision 2026-11-23); the save dialog's Replace option decides
+  with the same existence check, opening another image from the Pack Manager asks the
+  same, and a session without an origin (a plain file) never warns.
 - Thumbnail mode is the same editor with a canvas that starts at 100×100 (instead of
   512×512) and the thumbnail constraint set. Sizing tools 1 and 2 take their side from the
   active constraint set: in Thumbnail mode they are **Fit to 100×100** and **Longest side
@@ -576,6 +644,8 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 - Pack Manager: in Reorder mode the sticker images wiggle (as on phone home screens),
   instead of or as well as the green tint (owner, 2026-11-21: animations are a bigger job).
 - Editor, warp: hold Alt to pinch (shrink) instead of bulge (owner, 2026-11-22).
+- Editor: a screen-wide colour sampler for the eyedropper, beyond the canvas. Needs Rust
+  screen capture: capture, DPI, multi-monitor, an overlay window (owner, 2026-11-23).
 - Editor: speech bubbles, e.g. with Konva's Label and Tag (owner, 2026-11-22).
 - Editor: arrows and shapes (owner, 2026-11-22).
 - Editor: text along a curve, e.g. with Konva's TextPath (owner, 2026-11-22).

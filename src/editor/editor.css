@@ -236,6 +236,82 @@
   border-radius: 6px;
 }
 
+/* The effect tools' options bar (SPM-8): under the toolbar while Outline,
+   Glow or Warp is active. */
+.editor-effect-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  /* Every tool's bar has the height of the one with buttons, so switching
+     between Outline, Glow and Warp does not shift the canvas. */
+  min-height: 52px;
+  box-sizing: border-box;
+}
+
+.editor-effect-bar[hidden],
+.editor-effect-group[hidden],
+.editor-effect-bar button[hidden] {
+  display: none;
+}
+
+.editor-effect-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.editor-effect-group input[type="range"] {
+  width: 110px;
+}
+
+/* Fixed width, so the bar does not jump while a slider's value changes. */
+.editor-effect-value {
+  display: inline-block;
+  min-width: 52px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A slider's typed value (owner decision 2026-11-23): small and tabular,
+   with the unit still beside it. */
+.editor-effect-entry {
+  min-width: 0;
+  width: 44px;
+  padding: 2px 4px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-effect-target {
+  font-size: 14px;
+}
+
+/* A colour picker and the eyedropper beside it (owner decision 2026-11-23). */
+.editor-effect-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The icon-only eyedropper button: compact, matching the side inputs. */
+.editor-eyedropper {
+  padding: 4px 6px;
+}
+
+.editor-effect-target.is-blocked {
+  color: var(--danger-text);
+}
+
 /* The save dialog (SPM-10): PNG / WEBP side by side. */
 .editor-save-format {
   display: flex;

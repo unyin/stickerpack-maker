@@ -8,6 +8,7 @@ import {
   declinedText,
   exhaustedText,
   originAfterSave,
+  originGoneCloseWarning,
   pngTooLargeText,
   replaceLabel,
   resolveOrigin,
@@ -45,8 +46,21 @@ test("a save attempted mid-brush-stroke is refused and never reaches the dialog;
   const canvas = { width: S, height: S };
   expect(saveRefusal(true, canvas, STICKER)).toBe(SAVE_MID_STROKE);
   expect(SAVE_MID_STROKE).toStartWith("Save is blocked:");
-  expect(SAVE_MID_STROKE).toContain("stroke");
+  expect(SAVE_MID_STROKE).toContain("operation");
   expect(SAVE_MID_STROKE).toContain("first");
+  // After the release only the canvas rule decides again, and it passes.
+  expect(saveRefusal(false, canvas, STICKER)).toBeNull();
+});
+
+test("a save attempted mid-warp-drag is refused and never reaches the dialog; after the release it proceeds", () => {
+  // The same seam as a brush stroke, now covering SPM-8: a warp press lives
+  // in the stage's brushing flag, its bulge previewed live but committed to
+  // the model only at release, so even a canvas that passes the rule is
+  // refused before the dialog could open on a snapshot without it.
+  const canvas = { width: S, height: S };
+  expect(saveRefusal(true, canvas, STICKER)).toBe(SAVE_MID_STROKE);
+  expect(SAVE_MID_STROKE).toContain("Warp");
+  expect(SAVE_MID_STROKE).not.toContain("stroke");
   // After the release only the canvas rule decides again, and it passes.
   expect(saveRefusal(false, canvas, STICKER)).toBeNull();
 });
@@ -170,6 +184,21 @@ test("after a save the session edits the saved sticker, and a replace says so", 
 test("after a Library change the origin sticker is reported, not looked up", () => {
   const gone = resolveOrigin({ ...origin, otherLibrary: true }, viewWith([{ id: 9, position: 4, format: "png" }]));
   expect("gone" in gone && gone.gone).toContain("belongs to the Library used before");
+});
+
+test("only a clean session with a gone origin warns on close (owner decision 2026-11-23)", () => {
+  // The same existence notion as the save dialog's Replace option: gone
+  // (deleted or moved), another Library, or present.
+  const deleted = resolveOrigin(origin, viewWith([]));
+  expect(originGoneCloseWarning(origin, deleted)).toBe(true);
+  const otherLibrary = resolveOrigin({ ...origin, otherLibrary: true }, viewWith([{ id: 9, position: 4, format: "png" }]));
+  expect(originGoneCloseWarning(origin, otherLibrary)).toBe(true);
+  const present = resolveOrigin(origin, viewWith([{ id: 9, position: 2, format: "png" }]));
+  expect(originGoneCloseWarning(origin, present)).toBe(false);
+  // No origin (a plain file, never saved into a slot): never warns.
+  expect(originGoneCloseWarning(null, deleted)).toBe(false);
+  // A dirty session never reaches the check: its own warning decides.
+  expect(originGoneCloseWarning(null, present)).toBe(false);
 });
 
 test("the saved note's link names the sticker; a gone sticker is reported", () => {

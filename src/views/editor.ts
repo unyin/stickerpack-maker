@@ -2,12 +2,14 @@
 // session, "Open image" starts one; while open, "Add image as layer" and
 // pasting (Ctrl+V) bring in other images; "Close" ends it (warning on unsaved
 // changes). The session survives switching tabs: the view is built once.
-// SPM-9 adds the text tool, the cut selection tools and paste; SPM-7 the
-// background removal and its Erase/Restore refine brushes; SPM-10 the save
-// pipeline (Save…, Ctrl+S).
+// SPM-9 adds the text tool, the cut selection tools and paste; SPM-8 the
+// effect tools (outline, fuzzy glow, warp/bulge); SPM-7 the background
+// removal and its Erase/Restore refine brushes; SPM-10 the save pipeline
+// (Save…, Ctrl+S).
 import "../editor/editor.css";
 import { baseName } from "../api";
 import {
+  applyEffect,
   backgroundModelStatus,
   cancelBackgroundDownload,
   cropImages,
@@ -34,6 +36,7 @@ import {
   declinedText,
   EXHAUSTED_TITLE,
   exhaustedText,
+  originGoneCloseWarning,
   pngTooLargeText,
   runSave,
   saveBlocker,
@@ -47,7 +50,7 @@ import {
   type TooLarge,
 } from "../editor/save";
 import type { StickerOrigin } from "../shared/sticker-origin";
-import { saveDialog } from "../editor/view/save-dialog";
+import { originNow, saveDialog } from "../editor/view/save-dialog";
 import { packMemory } from "../pack-manager/model/pack-memory";
 import { markStickerFileChanged } from "../pack-manager/model/changed-files";
 import { loadPackView, type Sticker } from "../pack-manager/api";
@@ -73,10 +76,12 @@ import {
   planCrop,
   scaleLongestSide,
   restyledTexts,
+  setLayerImage,
   setTextStyles,
   textStyleOf,
   type CropAction,
   type Doc,
+  type Point,
   type Rect,
   type TextStyle,
 } from "../editor/model/document";
@@ -93,6 +98,7 @@ import {
   type NextStyle,
 } from "../editor/model/text";
 import { EditorSession } from "../editor/model/session";
+import { applyEffectResult, effectBasis, effectKindOf, escDiscardsEffect, nextEffectBasis, effectTarget, effectTextNotice, warpTarget, type EffectBasis, type EffectResult } from "../editor/model/effects";
 import {
   cropBlocker,
   cropTextNotice,
@@ -111,9 +117,15 @@ import {
   type SizeTool,
   type ViewTransform,
 } from "../editor/view/geometry";
-import { EditorStage, type CanvasTool } from "../editor/view/stage";
+import { EditorStage } from "../editor/view/stage";
+import type { CanvasTool } from "../editor/model/tools";
 import { TextEditOverlay } from "../editor/view/text-edit";
 import { FontPicker } from "../editor/view/font-picker";
+import { EffectControls } from "../editor/view/effect-controls";
+import { eyedropperButton } from "../editor/view/eyedropper";
+import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
+import { WarpPress } from "../editor/view/warp-brush";
+import { moveWarpGesture, startWarpGesture, warpReadout, type WarpGesture } from "../editor/model/warp";
 import { confirmChoice } from "../dialog";
 import { el, errorMessage, withMessage } from "../ui";
 
@@ -211,6 +223,31 @@ function buildEditor(): HTMLElement {
   lassoToolButton.title =
     "Click to place points, drag to draw freehand; click the start point, double-click or press Enter to close (Backspace removes the last point or stroke, Esc cancels)";
   const cutTitle = "Move the selected pixels into a new floating layer at the same spot";
+  // Effect tools (SPM-8): each targets the selected layer, else the base image.
+  const outlineToolButton = button("Outline", () => setTool("outline"));
+  const glowToolButton = button("Glow", () => setTool("glow"));
+  const warpToolButton = button("Warp", () => setTool("warp"));
+  outlineToolButton.title = "Outline the selected layer (or the base image): preview, then Apply";
+  glowToolButton.title = "Give the selected layer (or the base image) a fuzzy glow: preview, then Apply";
+  warpToolButton.title = "Enlarge parts of the selected layer (or the base image) with a bulge brush";
+  const effectControls = new EffectControls({
+    change: () => refresh(),
+    pick: (apply) => stage?.beginColorPick(apply),
+    apply: () => void run(applyEffectTool),
+    cancel: () => setTool("move"),
+  });
+  // The live outline/glow preview, drawn by Rust with Apply's own code (ADR-0008).
+  const preview = new EffectPreview<EffectResult>(
+    (req) => applyEffect(layerInput(req.doc.layers[layerIndex(req.doc, req.layerId)]), req.effect),
+    (req, result) => stage?.setOverride(req && result ? { id: req.layerId, ...result } : null),
+    (err) => say(errorMessage(err)),
+  );
+  // The warp press in progress, if any.
+  let warp: WarpInProgress | null = null;
+  // What the Outline/Glow tool was chosen on: the document and its target.
+  // A change of either discards the preview AND returns to Move (owner
+  // decisions 2026-11-22, CMT-243 and after).
+  let basis: EffectBasis | null = null;
   const pasteTitle = "Paste an image from the clipboard as a new layer (Ctrl+V)";
   // Text tool (SPM-9): the controls style the selected text layers, or the next new text.
   const textButton = button("Add text", () => editText(null));
@@ -229,6 +266,18 @@ function buildEditor(): HTMLElement {
     "aria-label": "Font size in pixels",
   }) as HTMLInputElement;
   const colorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": "Text colour" }) as HTMLInputElement;
+  // The text controls' busy/text-reason disable loop; the eyedropper beside
+  // the text colour picker enrolls itself (owner decision 2026-11-23) and
+  // starts a canvas pick whose sample follows the picker's own path.
+  const textControls: { disabled: boolean }[] = [fontPicker, fontSizeInput, colorInput];
+  const textEyedropper = eyedropperButton(
+    () =>
+      stage?.beginColorPick((hex) => {
+        colorInput.value = hex;
+        restyle({ color: hex });
+      }),
+    textControls,
+  );
   // After a committed change the control gives up focus, so the editor's
   // shortcuts (Ctrl+Z, Delete, Esc, Ctrl+V) work at once. Typing in the size
   // input is not hijacked: it commits only on Enter or when focus leaves.
@@ -352,6 +401,13 @@ function buildEditor(): HTMLElement {
     ),
     el(
       "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Effects" },
+      outlineToolButton,
+      glowToolButton,
+      warpToolButton,
+    ),
+    el(
+      "span",
       { class: "editor-tool-group", role: "group", "aria-label": "Background" },
       removeBackgroundButton,
       cancelDownloadButton,
@@ -367,6 +423,7 @@ function buildEditor(): HTMLElement {
       fontPicker.element,
       el("label", { class: "editor-side" }, fontSizeInput, " px"),
       colorInput,
+      textEyedropper,
     ),
     readout,
     resetViewButton,
@@ -389,7 +446,7 @@ function buildEditor(): HTMLElement {
   const workspace = el("div", { class: "editor-workspace" }, canvasHost, layersPanel);
   // The wheel over the typing overlay zooms the canvas like anywhere else (owner re-test 2026-11-22).
   const textOverlay = new TextEditOverlay(canvasHost, (e) => stage?.zoomAtClient(e.clientX, e.clientY, e.deltaY));
-  const view = el("section", { class: "view editor" }, toolbar, message, empty, workspace);
+  const view = el("section", { class: "view editor" }, toolbar, effectControls.element, message, empty, workspace);
 
   /**
    * Show a line in the message area: an error or blocked-action reason in
@@ -513,8 +570,10 @@ function buildEditor(): HTMLElement {
     stage.setCropGuidesVisible(showBox);
     stage.setTool(tool);
     stage.onEditText((id) => editText(id));
+    stage.onBrush({ press: beginWarp, move: continueWarp, release: endWarp });
     stage.setBrushSize(brushSize);
     stage.onBrushBlocked((reason) => say(reason));
+    stage.onPickBlocked((reason) => say(reason));
     refresh(); // place the crop box overlay
     // Subscribe AFTER the stage: on every change the canvas redraws first,
     // so refresh() measures current content (Fit's enabled state).
@@ -605,25 +664,43 @@ function buildEditor(): HTMLElement {
   }
 
   /**
-   * End the session, asking first when it has unsaved changes (Close, and
-   * opening another image from the Pack Manager). Resolves false when the
-   * user keeps editing, so the session stays.
+   * End the session, asking first when it has unsaved changes, or when a
+   * clean session's origin sticker is gone (Close, and opening another
+   * image from the Pack Manager). Resolves false when the user keeps
+   * editing, so the session stays.
    */
   async function closeSession(): Promise<boolean> {
     if (!session) return true;
+    // An unapplied effect preview alone is not a change (CMT-186): it is dropped.
     if (session.isDirty && !(await confirmDiscard())) return false;
+    // A CLEAN session whose origin sticker is gone (deleted, sent away with
+    // Move, or the Library changed) asks before closing throws its last
+    // copy away (owner decision 2026-11-23). The save dialog's own lookup
+    // decides, so Replace-gone and this warning can never disagree; a dirty
+    // session never reaches here (its warning has decided), and one without
+    // an origin (a plain file, never saved into a slot) never warns.
+    if (!session.isDirty && origin && originGoneCloseWarning(origin, await originNow(origin))) {
+      if (!(await confirmCloseOriginGone())) return false;
+    }
     endSession();
     return true;
   }
 
   /** End the session at once, unsaved changes included (the caller has asked). */
   function endSession(): void {
+    preview.request(null);
+    warp = null;
+    basis = null;
     origin = null;
     textOverlay.close();
     stage?.destroy();
     stage = null;
     session = null;
     tool = "move";
+    // The no-session UI shows at once: the effect bar hides and no tool
+    // button stays pressed (SPM-8). run()'s closing refresh covers the
+    // button-and-close paths, but ending a session must not depend on it.
+    refresh();
   }
 
   // ---- Save (SPM-10) ----
@@ -639,10 +716,11 @@ function buildEditor(): HTMLElement {
   async function saveSession(): Promise<void> {
     const current = session;
     if (!current) return;
-    // A mid-press stroke (SPM-7) owns pixels the model does not have yet: the
-    // dialog would save the document without them, and the stroke's release
-    // would commit them under it. Both save entry points refuse here
-    // (owner decision 2026-11-23); the canvas rule follows once no stroke runs.
+    // A mid-press stroke — Erase/Restore (SPM-7) or Warp (SPM-8) — owns pixels
+    // the model does not have yet: the dialog would save the document without
+    // them, and the stroke's release would commit them under it. Both save
+    // entry points refuse here (owner decision 2026-11-23); the canvas rule
+    // follows once no stroke runs.
     const refusal = saveRefusal(stage?.strokeInProgress() ?? false, current.doc, constraints);
     if (refusal) return say(refusal);
     const doc = current.doc;
@@ -678,8 +756,8 @@ function buildEditor(): HTMLElement {
         if (target.kind === "replace") markStickerFileChanged(saved.sticker.id);
         // The session now edits the saved sticker: the next save replaces it (design decision 2026-11-22).
         origin = originAfterSave(saved, packTitle);
-        // Since the SPM-7 merge a brush stroke could commit under this dialog;
-        // the mid-stroke refusal above makes that known path impossible. The
+        // An Erase, Restore or Warp press could commit under this dialog; the
+        // mid-stroke refusal above makes that known path impossible. The
         // check stays as defence in depth for anything unforeseen.
         if (current.doc === doc) current.markSaved();
         say(savedText(saved, packTitle, target), "note", " ", stickerLink(saved.sticker, packTitle));
@@ -700,6 +778,7 @@ function buildEditor(): HTMLElement {
 
   function setTool(next: CanvasTool): void {
     tool = next;
+    basis = session && effectKindOf(next) ? effectBasis(session.doc, session.selection) : null;
     stage?.setTool(next);
     refresh();
   }
@@ -767,6 +846,102 @@ function buildEditor(): HTMLElement {
       return;
     }
     await pasteImage(new Uint8Array(await blob.arrayBuffer()));
+  }
+
+  // ---- Effects (SPM-8) ----
+
+  /**
+   * What the preview should show now: the active effect tool's settings on
+   * its target layer in the current document, or nothing. Called on every
+   * refresh, so switching tool or layer, undo/redo and any edit discard an
+   * unapplied preview and draw a fresh one if the tool is still active
+   * (CMT-185, CMT-186); it never enters the document or its history.
+   */
+  function previewRequest(): PreviewRequest | null {
+    const kind = effectKindOf(tool);
+    if (!session || !kind) return null;
+    const target = effectTarget(session.doc, session.selection);
+    return "id" in target ? { doc: session.doc, layerId: target.id, effect: effectControls.effect(kind) } : null;
+  }
+
+  /**
+   * Apply (CMT-183): bake the previewed effect into the layer's pixels as
+   * ONE undo step: the very result the preview shows (or, when the settings
+   * just changed, the one being drawn). The Move tool comes back, as after Cut.
+   */
+  async function applyEffectTool(): Promise<void> {
+    const current = session;
+    const kind = effectKindOf(tool);
+    const req = previewRequest();
+    if (!current || !kind || !req) return;
+    const layer = req.doc.layers[layerIndex(req.doc, req.layerId)];
+    await editAsync(
+      current,
+      { doing: `drawing the ${kind}`, done: "applied" },
+      () => preview.result(req),
+      (result) => {
+        setTool("move"); // drops the preview first: the baked pixels replace it
+        current.apply((d) => applyEffectResult(d, req.layerId, result));
+        const notice = effectTextNotice(layer, kind);
+        if (notice) say(notice, "note");
+      },
+    );
+  }
+
+  /**
+   * A warp press starts (SPM-8, CMT-243): ONE bulge at the press point,
+   * painted live into a copy of the target layer. Nothing is painted until
+   * it is clear what the press is: a drag grows the bulge from the pointer's
+   * distance (so it never jumps from the bar's size), a click gets the bar's
+   * values on release.
+   */
+  function beginWarp(at: Point, shift: boolean): void {
+    const current = session;
+    if (!current || !stage || busy || warp) return;
+    const target = warpTarget(current.doc, current.selection);
+    if ("blocker" in target) {
+      say(target.blocker);
+      return;
+    }
+    const layer = current.doc.layers[layerIndex(current.doc, target.id)];
+    if (layer.kind !== "raster") return; // narrows the type: warpTarget already refused text
+    say("");
+    warp = { press: new WarpPress(layer), gesture: startWarpGesture(at, effectControls.warp, shift) };
+    stage.setOverride({ id: layer.id, image: warp.press.canvas, transform: layer.transform });
+  }
+
+  /** The pointer moved during a warp press: a drag sets the radius, or with Shift the strength. */
+  function continueWarp(at: Point, shift: boolean): void {
+    if (!warp || !stage) return;
+    const before = warp.gesture;
+    const g = moveWarpGesture(before, at, shift, stage.view().scale);
+    warp.gesture = g;
+    if (!g.dragged) return;
+    stage.setBrushGesture({ center: g.center, radius: g.radius, readout: warpReadout(g) });
+    if (!before.dragged || g.radius !== before.radius || g.strength !== before.strength) {
+      warp.press.place(g.center, g.radius, g.strength);
+      stage.redraw();
+    }
+  }
+
+  /** A warp press ends: its pixels become the layer's as ONE undo step (CMT-148). */
+  function endWarp(): void {
+    const finished = warp;
+    warp = null;
+    const current = session;
+    if (!finished || !current) return;
+    stage?.setOverride(null);
+    stage?.setBrushGesture(null);
+    const { press, gesture: g } = finished;
+    if (g.dragged) effectControls.setWarp({ radius: g.radius, strength: g.strength }); // for the next click
+    else press.place(g.center, g.radius, g.strength); // a click: the bar's values
+    const image = press.finish();
+    const layer = press.layer;
+    // The target layer changed mid-press (e.g. Ctrl+Z): the bulge was painted on old pixels, so it is dropped.
+    const stale = current.doc.layers.find((l) => l.id === layer.id) !== layer;
+    if (image && stale) say("The layers changed while warping; the bulge was dropped. Try again.");
+    if (image && !stale) current.apply((d) => setLayerImage(d, layer.id, image));
+    else refresh(); // no new state to redraw from, but the bar's values may have changed
   }
 
   // ---- Background removal (SPM-7, ADR-0006) ----
@@ -1021,9 +1196,35 @@ function buildEditor(): HTMLElement {
     workspace.hidden = current === null;
     toolbar.hidden = current === null;
     openButton.disabled = busy;
+    // The canvas tool buttons follow `tool` with or without a session, so
+    // after Close no button stays pressed on the hidden toolbar (SPM-8);
+    // the bar hides too, as its DOM is EffectControls' own.
+    for (const [b, t] of [
+      [moveToolButton, "move"],
+      [rectToolButton, "rect"],
+      [lassoToolButton, "lasso"],
+      [outlineToolButton, "outline"],
+      [glowToolButton, "glow"],
+      [warpToolButton, "warp"],
+      [eraseToolButton, "erase"],
+      [restoreToolButton, "restore"],
+    ] as const) {
+      b.setAttribute("aria-pressed", String(tool === t));
+      b.disabled = busy;
+    }
     if (!current) {
       layersList.replaceChildren();
+      effectControls.hide();
       return;
+    }
+    // A discard (another target picked, undo/redo, any edit) ends the Outline/Glow tool.
+    if (basis) {
+      const next = nextEffectBasis(basis, current.doc, current.selection);
+      if (next === "discard") {
+        setTool("move"); // refreshes again, with the Move tool
+        return;
+      }
+      basis = next;
     }
     renderLayers(current);
     const doc = current.doc;
@@ -1074,17 +1275,6 @@ function buildEditor(): HTMLElement {
     mergeButton.title = blocker ?? "Merge the selected layers into one";
     deleteButton.disabled = busy || deleteReason !== null;
     deleteButton.title = deleteReason ?? "Delete the selected layers (Delete key)";
-    // Cut selection tools and paste (SPM-9).
-    for (const [b, t] of [
-      [moveToolButton, "move"],
-      [rectToolButton, "rect"],
-      [lassoToolButton, "lasso"],
-      [eraseToolButton, "erase"],
-      [restoreToolButton, "restore"],
-    ] as const) {
-      b.setAttribute("aria-pressed", String(tool === t));
-      b.disabled = busy;
-    }
     const cutReason = cutBlocker(doc, current.selection, current.region);
     cutButton.disabled = busy || cutReason !== null;
     cutButton.title = cutReason ?? cutTitle;
@@ -1112,7 +1302,7 @@ function buildEditor(): HTMLElement {
     fontPicker.value = shown.fontFamily;
     if (document.activeElement !== fontSizeInput) fontSizeInput.value = String(shown.fontSize);
     colorInput.value = shown.color;
-    for (const control of [fontPicker, fontSizeInput, colorInput]) control.disabled = busy || textReason !== null;
+    for (const control of textControls) control.disabled = busy || textReason !== null;
     const target = texts.length > 0 ? "the selected text" : "the next text";
     fontPicker.title = textReason ?? `Font of ${target}`;
     fontSizeInput.title = textReason ?? `Font size of ${target} in px (${TEXT_FONT_SIZE.min}–${TEXT_FONT_SIZE.max})`;
@@ -1125,6 +1315,22 @@ function buildEditor(): HTMLElement {
       editText: editReason,
     });
     dirtyLabel.hidden = !current.isDirty;
+    // Effect tools (SPM-8): the bar, the brush ring and the live preview follow the current state.
+    const effectOn = tool === "warp" ? warpTarget(doc, current.selection) : effectTarget(doc, current.selection);
+    effectControls.update({
+      tool,
+      busy,
+      targetName: "id" in effectOn ? layerLabel(doc, effectOn.id, current.selection) : null,
+      blocker: "blocker" in effectOn ? effectOn.blocker : null,
+    });
+    stage?.setBrushRadius(effectControls.warp.radius);
+    preview.request(previewRequest());
+  }
+
+  /** A target layer's name, saying when it is the base image by default. */
+  function layerLabel(doc: Doc, id: string, selection: readonly string[]): string {
+    const name = doc.layers[layerIndex(doc, id)].name;
+    return selection.length === 0 ? `${name} (base image)` : name;
   }
 
   /**
@@ -1151,8 +1357,10 @@ function buildEditor(): HTMLElement {
       return;
     }
     if (isTextTarget(e.target)) return;
-    // A lasso in progress takes Enter, Esc and Backspace first (SPM-9).
-    if (stage?.handleLassoKey(e.key)) {
+    // A colour pick in progress takes Esc first (SPM-8, CMT-296), then a
+    // lasso in progress takes Enter, Esc and Backspace (SPM-9) - the most
+    // recent mode cancels first - and only then the Editor's own Esc runs.
+    if (stage?.handlePickKey(e.key) || stage?.handleLassoKey(e.key)) {
       e.preventDefault();
       return;
     }
@@ -1178,8 +1386,19 @@ function buildEditor(): HTMLElement {
       if (reason) say(reason);
       else void run(cutSelection);
     }
-    // Esc drops the cut selection first, then the layer selection.
-    else if (e.key === "Escape") escapeTarget(current.region) === "region" ? current.setRegion(null) : current.clearSelection();
+    // Esc drops the cut selection first, then the layer selection. In
+    // Outline and Glow an Esc that deselects is a discard (CMT-243, restored
+    // by the owner 2026-11-23): back to Move whatever layer was selected,
+    // the base image included — nextEffectBasis's re-pick shortcut must not
+    // swallow it. Esc with nothing selected does nothing (the tool and its
+    // preview stay), and Warp/Erase/Restore keep today's Esc.
+    else if (e.key === "Escape") {
+      if (escapeTarget(current.region) === "region") current.setRegion(null);
+      else if (escDiscardsEffect(tool, current.selection)) {
+        setTool("move"); // first, so the clearSelection's refresh finds no basis to re-decide
+        current.clearSelection();
+      } else current.clearSelection();
+    }
     else if (e.key === "Delete") deleteSelected();
     else return;
     e.preventDefault();
@@ -1203,7 +1422,9 @@ function buildEditor(): HTMLElement {
   // Pack Manager hook (SPM-3), see openFileInEditor below.
   openFileHook = (path, showEditor, from) =>
     run(async () => {
-      const closed = await closeSession(); // warns on unsaved changes
+      // Both questions go through closeSession: unsaved changes first, and
+      // the gone-origin one for a clean session (owner decision 2026-11-23).
+      const closed = await closeSession();
       showEditor(); // either way: Keep editing shows the open image
       if (closed) await openImage(path, from ?? null);
     });
@@ -1215,6 +1436,12 @@ function buildEditor(): HTMLElement {
 
   refresh();
   return view;
+}
+
+/** A warp press being painted: its pixels and its gesture. */
+interface WarpInProgress {
+  readonly press: WarpPress;
+  gesture: WarpGesture;
 }
 
 let openFileHook: ((path: string, showEditor: () => void, origin?: StickerOrigin) => Promise<void>) | null = null;
@@ -1246,11 +1473,12 @@ export function forgetEditorOrigin(): void {
  * Open the image at `path` in the Editor, as Open image would (import cap
  * dialog included): the Pack Manager's Edit and "open in editor" (SPM-3).
  * One session at a time. In order (owner decision 2026-11-21): an open
- * session with unsaved changes asks first, while the caller's view is still
- * showing; then `showEditor` switches to the Editor either way (the canvas
- * must be on screen to measure itself); then, unless the user kept editing,
- * the file opens. `origin` is the sticker it is (Edit): saving then offers
- * to replace it (owner decision 2026-11-22).
+ * session asks first, while the caller's view is still showing — unsaved
+ * changes, or the gone-origin question for a clean one (owner decision
+ * 2026-11-23); then `showEditor` switches to the Editor either way (the
+ * canvas must be on screen to measure itself); then, unless the user kept
+ * editing, the file opens. `origin` is the sticker it is (Edit): saving then
+ * offers to replace it (owner decision 2026-11-22).
  */
 export function openFileInEditor(path: string, showEditor: () => void, origin?: StickerOrigin): Promise<void> {
   renderEditor(); // builds the Editor once, which installs the hook
@@ -1263,6 +1491,19 @@ function confirmDiscard(): Promise<boolean> {
     "Unsaved changes",
     [el("p", {}, "The editor has unsaved changes. Do you want to discard these or continue editing?")],
     { actionLabel: "Discard", keepLabel: "Keep editing", danger: true },
+  );
+}
+
+/**
+ * The clean-session close question when the origin sticker is gone (owner
+ * decision 2026-11-23, CMT-291; the copy is owner-vetoable at the re-test
+ * and lives here, in one place): closing discards this copy of the image.
+ */
+function confirmCloseOriginGone(): Promise<boolean> {
+  return confirmChoice(
+    "Sticker no longer exists",
+    [el("p", {}, "The sticker this session was editing is no longer in the Library. Closing the editor discards this copy of the image.")],
+    { actionLabel: "Close anyway", keepLabel: "Keep editing", danger: true },
   );
 }
 
