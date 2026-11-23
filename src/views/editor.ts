@@ -76,10 +76,8 @@ import {
   IDENTITY,
   layerInput,
   layerIndex,
-  resizeLongestSide,
-  resizeShortestSide,
   resizeSideProblem,
-  type ResizeSide,
+  resizeToSide,
   mergeLayers,
   moveLayer,
   newDocument,
@@ -94,6 +92,7 @@ import {
   type Doc,
   type Point,
   type Rect,
+  type ResizeSide,
   type TextStyle,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
@@ -121,9 +120,9 @@ import {
   fontChoices,
   layerHint as layerHintText,
   mergeBlocker,
+  selectedLayerSize,
   selectModeFor,
   sizeToolBlocker,
-  selectedLayerSize,
   textBlocker,
   textOverlayPlacement,
   type SizeTool,
@@ -1311,9 +1310,7 @@ function buildEditor(): HTMLElement {
       say(problem);
       return;
     }
-    resizeWholeImage((doc, content) =>
-      freeSide === "shortest" ? resizeShortestSide(doc, content, side) : resizeLongestSide(doc, content, side),
-    );
+    resizeWholeImage((doc, content) => resizeToSide(doc, content, side, freeSide));
   }
 
   /** Delete the selected layers as one undoable step (SPEC §6); one layer always stays. */

@@ -18,11 +18,10 @@ import {
   moveLayer,
   newDocument,
   nextLayerId,
-  planCrop,
   placedBounds,
-  resizeLongestSide,
-  resizeShortestSide,
+  planCrop,
   resizeSideProblem,
+  resizeToSide,
   scaleLongestSide,
   setLayerImage,
   setTransform,
@@ -120,7 +119,7 @@ test("only Fit and Longest side change the canvas size", () => {
   doc = deleteLayers(doc, [text]);
   // Add, move, restack, merge, delete and free resize all keep the canvas.
   const S = STICKER.side;
-  doc = resizeLongestSide(doc, contentBounds(doc), 100);
+  doc = resizeToSide(doc, contentBounds(doc), 100);
   expect([doc.width, doc.height]).toEqual([S, S]);
   // Fit sets the square; Longest side sets the scaled image's size (800x300).
   const fitted = fitToBox(doc, contentBounds(doc), S);
@@ -493,8 +492,8 @@ test("applying any sizing tool twice is a no-op (no undo step)", () => {
     (d: Doc) => fitToBox(d, contentBounds(d), 512),
     (d: Doc) => fillToBox(d, contentBounds(d), 512),
     (d: Doc) => scaleLongestSide(d, contentBounds(d), 512),
-    (d: Doc) => resizeLongestSide(d, contentBounds(d), 333),
-    (d: Doc) => resizeShortestSide(d, contentBounds(d), 333),
+    (d: Doc) => resizeToSide(d, contentBounds(d), 333),
+    (d: Doc) => resizeToSide(d, contentBounds(d), 333, "shortest"),
   ];
   for (const tool of tools) {
     const once = tool(snug(300, 200, "base"));
@@ -513,7 +512,7 @@ test("resizeSideProblem accepts whole numbers from 1 to the import cap only", ()
   const shortest = `The shortest side must be a whole number of pixels from 1 to ${IMPORT_MAX_SIDE}.`;
   expect(resizeSideProblem(600, "shortest")).toBeNull();
   for (const bad of [0, IMPORT_MAX_SIDE + 1, 1.5, NaN, -3]) expect(resizeSideProblem(bad, "shortest")).toBe(shortest);
-  expect(() => resizeShortestSide(doc, contentBounds(doc), 0)).toThrow(shortest);
+  expect(() => resizeToSide(doc, contentBounds(doc), 0, "shortest")).toThrow(shortest);
 });
 
 test("contentBounds measures text layers by their rendered box under their transform", () => {
@@ -526,42 +525,42 @@ test("contentBounds measures text layers by their rendered box under their trans
 test("free resize scales the whole image to the entered longest side and keeps the canvas", () => {
   // A 200x400 image centred on the 512x512 canvas (156, 56).
   const tall = newDocument(image(200, 400), "tall", { width: 512, height: 512 });
-  const grown = resizeLongestSide(tall, contentBounds(tall), 1000);
+  const grown = resizeToSide(tall, contentBounds(tall), 1000);
   expect([grown.width, grown.height]).toEqual([512, 512]);
   expect(grown.layers[0].transform.scaleX).toBeCloseTo(2.5);
   // The group keeps its centre (256, 256), top-left on whole pixels.
   expect(contentBounds(grown)).toEqual({ x: 6, y: -244, width: 500, height: 1000 });
-  const shrunk = resizeLongestSide(tall, contentBounds(tall), 100);
+  const shrunk = resizeToSide(tall, contentBounds(tall), 100);
   expect([shrunk.width, shrunk.height]).toEqual([512, 512]);
   expect(contentBounds(shrunk)).toEqual({ x: 231, y: 206, width: 50, height: 100 });
   // Several layers scale together as one group.
   let two = addRasterLayer(tall, image(100, 100), "dot", { ...IDENTITY, x: 0, y: 0 });
-  two = resizeLongestSide(two, contentBounds(two), 228);
+  two = resizeToSide(two, contentBounds(two), 228);
   expect(two.layers.map((l) => l.transform.scaleX)).toEqual([0.5, 0.5]);
   expect(Math.max(contentBounds(two).width, contentBounds(two).height)).toBeCloseTo(228);
   // Already that size: no change, so no undo step.
-  expect(resizeLongestSide(tall, contentBounds(tall), 400)).toBe(tall);
+  expect(resizeToSide(tall, contentBounds(tall), 400)).toBe(tall);
   for (const bad of [0, 1.5, IMPORT_MAX_SIDE + 1]) {
-    expect(() => resizeLongestSide(tall, contentBounds(tall), bad)).toThrow();
+    expect(() => resizeToSide(tall, contentBounds(tall), bad)).toThrow();
   }
 });
 
 test("free resize with the shortest-side choice scales to that side, keeping canvas and centre", () => {
   // A 200x400 image centred on the 512x512 canvas: its shortest side is the width.
   const tall = newDocument(image(200, 400), "tall", { width: 512, height: 512 });
-  const grown = resizeShortestSide(tall, contentBounds(tall), 1000);
+  const grown = resizeToSide(tall, contentBounds(tall), 1000, "shortest");
   expect([grown.width, grown.height]).toEqual([512, 512]);
   const g = contentBounds(grown);
   expect(Math.min(g.width, g.height)).toBeCloseTo(1000);
   expect(g.x + g.width / 2).toBeCloseTo(256);
   expect(g.y + g.height / 2).toBeCloseTo(256);
-  const shrunk = resizeShortestSide(tall, contentBounds(tall), 100);
+  const shrunk = resizeToSide(tall, contentBounds(tall), 100, "shortest");
   expect([shrunk.width, shrunk.height]).toEqual([512, 512]);
   expect(contentBounds(shrunk)).toEqual({ x: 206, y: 156, width: 100, height: 200 });
   // Already that size: no change, so no undo step.
-  expect(resizeShortestSide(tall, contentBounds(tall), 200)).toBe(tall);
+  expect(resizeToSide(tall, contentBounds(tall), 200, "shortest")).toBe(tall);
   for (const bad of [0, 1.5, IMPORT_MAX_SIDE + 1]) {
-    expect(() => resizeShortestSide(tall, contentBounds(tall), bad)).toThrow();
+    expect(() => resizeToSide(tall, contentBounds(tall), bad, "shortest")).toThrow();
   }
 });
 

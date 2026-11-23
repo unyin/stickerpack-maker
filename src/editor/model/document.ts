@@ -336,11 +336,11 @@ const PIXEL_SNAP = 1e-3;
 /** Which side of the whole image a free resize sets (SPEC §6, CMT-152). */
 export type ResizeSide = "longest" | "shortest";
 
-/** Why `value` is not a valid free-resize `kind` side, or null when it is (SPEC §6). */
-export function resizeSideProblem(value: number, kind: ResizeSide = "longest"): string | null {
+/** Why `value` is not a valid free resize of `side`, or null when it is (SPEC §6, CMT-152). */
+export function resizeSideProblem(value: number, side: ResizeSide = "longest"): string | null {
   return Number.isInteger(value) && value >= 1 && value <= IMPORT_MAX_SIDE
     ? null
-    : `The ${kind} side must be a whole number of pixels from 1 to ${IMPORT_MAX_SIDE}.`;
+    : `The ${side} side must be a whole number of pixels from 1 to ${IMPORT_MAX_SIDE}.`;
 }
 
 /**
@@ -439,32 +439,16 @@ export function scaleLongestSide(doc: Doc, content: Rect, side: number): Doc {
 }
 
 /**
- * Sizing tool 3, free resize (SPEC §6): scale the whole image as one group
- * so its longest side is `side` px; the canvas size does not change. The
- * group keeps its centre, with its top-left rounded to whole pixels. Already
- * that size: the document is returned as is (no undo step).
+ * Sizing tool 3, free resize (SPEC §6, with the side-kind choice, CMT-152):
+ * scale the whole image as one group so its `kind` side is `side` px. The
+ * canvas size does not change. The group keeps its centre, with its top-left
+ * rounded to whole pixels. Already that size: the document is returned as
+ * is (no undo step).
  */
-export function resizeLongestSide(doc: Doc, content: Rect, side: number): Doc {
-  const problem = resizeSideProblem(side);
+export function resizeToSide(doc: Doc, content: Rect, side: number, kind: ResizeSide = "longest"): Doc {
+  const problem = resizeSideProblem(side, kind);
   if (problem) throw new Error(problem);
-  const factor = side / longestSideOf(content);
-  if (Math.abs(factor - 1) < EPSILON) return doc;
-  const x = Math.round(content.x + (content.width - content.width * factor) / 2);
-  const y = Math.round(content.y + (content.height - content.height * factor) / 2);
-  return scaleGroupTo(doc, content, factor, x, y);
-}
-
-/**
- * Sizing tool 3, free resize with the shortest-side choice (CMT-152): like
- * `resizeLongestSide`, but the entered `side` px is the whole image's
- * SHORTEST side. The canvas size does not change; the group keeps its
- * centre, with its top-left rounded to whole pixels. Already that size:
- * the document is returned as is (no undo step).
- */
-export function resizeShortestSide(doc: Doc, content: Rect, side: number): Doc {
-  const problem = resizeSideProblem(side, "shortest");
-  if (problem) throw new Error(problem);
-  const factor = side / shortestSideOf(content);
+  const factor = side / (kind === "shortest" ? shortestSideOf(content) : longestSideOf(content));
   if (Math.abs(factor - 1) < EPSILON) return doc;
   const x = Math.round(content.x + (content.width - content.width * factor) / 2);
   const y = Math.round(content.y + (content.height - content.height * factor) / 2);

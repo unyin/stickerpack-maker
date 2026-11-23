@@ -9,13 +9,13 @@ import {
   localToDoc,
   NOTHING_IN_BOX,
   pixelBounds,
-  resizeLongestSide,
-  resizeShortestSide,
   resizeSideProblem,
+  resizeToSide,
   scaleLongestSide,
   textLayersOf,
   type CropAction,
   type Doc,
+  type Layer,
   type Point,
   type Rect,
   type ResizeSide,
@@ -92,14 +92,19 @@ export function mergeBlocker(selection: readonly string[]): string | null {
   return null;
 }
 
+/** The one selected layer, or null while no or several layers are selected. */
+function selectedLayer(doc: Doc, selection: readonly string[]): Layer | null {
+  if (selection.length !== 1) return null;
+  return doc.layers.find((l) => l.id === selection[0]) ?? null;
+}
+
 /**
  * Why Cut is disabled, or null when it can run (SPM-9): it needs a
  * selection drawn on the canvas and exactly one selected image layer that
  * the selection touches. Text is cut only after merging it into an image.
  */
 export function cutBlocker(doc: Doc, selection: readonly string[], region: Region | null): string | null {
-  if (selection.length !== 1) return "Select the one image layer to cut from.";
-  const layer = doc.layers.find((l) => l.id === selection[0]);
+  const layer = selectedLayer(doc, selection);
   if (!layer) return "Select the one image layer to cut from.";
   if (layer.kind === "text") return "Text layers can't be cut: merge the text into an image layer first.";
   if (!region) return "Draw a selection on the canvas with Rectangle or Lasso first.";
@@ -195,7 +200,7 @@ export function sizeToolBlocker(
     return fillToBox(doc, content, target) === doc ? `The image already covers ${target}×${target}.` : null;
   }
   if (tool === "free") {
-    const next = freeKind === "shortest" ? resizeShortestSide(doc, content, entered) : resizeLongestSide(doc, content, entered);
+    const next = resizeToSide(doc, content, entered, freeKind);
     return next === doc ? `The image's ${freeKind} side is already ${entered} px.` : null;
   }
   return scaleLongestSide(doc, content, target) === doc ? `The image's longest side is already ${target} px.` : null;
@@ -331,8 +336,7 @@ export function layerHint(
  * is shown (null) with no layer or several layers selected.
  */
 export function selectedLayerSize(doc: Doc, selection: readonly string[]): string | null {
-  if (selection.length !== 1) return null;
-  const layer = doc.layers.find((l) => l.id === selection[0]);
+  const layer = selectedLayer(doc, selection);
   if (!layer) return null;
   const b = pixelBounds(layerBounds(layer));
   return `${b.width}×${b.height} px`;

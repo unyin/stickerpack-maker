@@ -3,7 +3,16 @@
 import { expect, test } from "bun:test";
 import { IMPORT_MAX_SIDE, type RgbaImage } from "../src/editor/model/image";
 import { startCanvas, STICKER, THUMBNAIL } from "../src/editor/model/constraints";
-import { addRasterLayer, addTextLayer, fillToBox, fitToBox, newDocument, scaleLongestSide, setTransform, IDENTITY } from "../src/editor/model/document";
+import {
+  addRasterLayer,
+  addTextLayer,
+  fillToBox,
+  fitToBox,
+  IDENTITY,
+  newDocument,
+  scaleLongestSide,
+  setTransform,
+} from "../src/editor/model/document";
 import {
   deleteBlocker,
   fitView,

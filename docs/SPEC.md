@@ -583,10 +583,9 @@ stickers, Missing stickers, and the thumbnail.
   same, and a session without an origin (a plain file) never warns.
 - Thumbnail mode is the same editor with a canvas that starts at 100×100 (instead of
   512×512) and the thumbnail constraint set. Sizing tools 1, 2 and 4 take their side from
-  the active constraint set: in Thumbnail mode they are **Fit to 100×100**, **Fill 100×100**
-  and **Longest side
-  100** (greyed out, see above) (owner decision 2026-11-20); free resize is the same in both
-  modes.
+  the active constraint set: in Thumbnail mode they are **Fit to 100×100**, **Fill 100×100** and
+  **Longest side 100** (greyed out, see above) (owner decision 2026-11-20); free resize is the
+  same in both modes.
 
 ## 7. Constraints quick reference
 
