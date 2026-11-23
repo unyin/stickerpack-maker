@@ -394,6 +394,12 @@ stickers, Missing stickers, and the thumbnail.
     ONE undo step and returns to the Move tool; changing settings is not an undo step.
     Normal blending only (owner decision 2026-11-21). The preview is drawn by Rust with
     Apply's own code, so the preview is the result (ADR-0008).
+  - The bar's sliders take more than dragging (owner decision 2026-11-23): scrolling the
+    mousewheel over one steps its value by 1 within its range (hover is enough, up
+    increases, nothing else scrolls), and the value shown beside each slider is an
+    editable field — a typed whole number commits on Enter or blur, clamped into the
+    range; invalid or empty reverts, and Esc reverts and blurs. The Warp bar's sliders
+    work the same way.
   - The unapplied preview (owner decision 2026-11-22) exists only until Apply: switching
     tool (or **Cancel**), picking another layer as the target (in the Layers list;
     re-picking the layer that is already the target, such as the base image while

@@ -18,6 +18,7 @@ import {
   type OutlineSettings,
   type Range,
   effectKindOf,
+  typedSliderValue,
 } from "../model/effects";
 import { WARP_DEFAULTS, WARP_RADIUS, WARP_STRENGTH, type WarpSettings } from "../model/warp";
 import { isHexColor } from "../model/text";
@@ -153,7 +154,15 @@ export class EffectControls {
     return input;
   }
 
-  /** A whole-number slider with its value shown beside it. */
+  /**
+   * A whole-number slider with its value in an editable field beside it
+   * (owner decision 2026-11-23): dragging, the mousewheel over it (hover
+   * suffices, one step per wheel event, up increases) and typing all set
+   * the same value. A typed number commits on Enter or blur, clamped into
+   * the range; invalid or empty reverts; Esc reverts and blurs. After a
+   * commit the field gives up focus, so the Editor's shortcuts work at
+   * once (as the text controls do).
+   */
   private slider(label: string, range: Range, unit: string, get: () => number, set: (v: number) => void): HTMLElement {
     const input = el("input", {
       type: "range",
@@ -162,21 +171,62 @@ export class EffectControls {
       step: "1",
       "aria-label": label,
     }) as HTMLInputElement;
-    const shown = el("span", { class: "editor-effect-value" });
+    const field = el("input", {
+      class: "editor-effect-value editor-effect-entry",
+      type: "text",
+      inputmode: "numeric",
+      "aria-label": `${label} value`,
+    }) as HTMLInputElement;
     const sync = (): void => {
-      input.value = String(get());
-      shown.textContent = `${get()} ${unit}`;
+      const value = get();
+      input.value = String(value);
+      // Never clobber what is being typed (as the font size field does).
+      if (document.activeElement !== field) field.value = String(value);
+    };
+    const commit = (): void => {
+      const value = typedSliderValue(field.value, range);
+      if (value === null || value === get()) {
+        sync(); // invalid, empty or unchanged: back to the setting's value
+        return;
+      }
+      set(value);
+      sync();
+      this.handlers.change();
     };
     sync();
     this.syncs.push(sync);
     input.addEventListener("input", () => {
       const value = Number(input.value);
       set(value);
-      shown.textContent = `${value} ${unit}`;
+      field.value = String(value);
       this.handlers.change();
     });
     input.addEventListener("change", () => input.blur());
-    this.inputs.push(input);
-    return el("label", { class: "editor-side" }, `${label} `, input, shown);
+    field.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        commit();
+        field.blur(); // the field gives up focus, so shortcuts work at once
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        sync(); // revert without committing
+        field.blur();
+      }
+    });
+    field.addEventListener("change", () => commit());
+    this.inputs.push(input, field);
+    // The wheel rides on the whole row: a disabled slider (busy) shows the
+    // same hover, but does nothing (SPEC section 2).
+    const row = el("label", { class: "editor-side" }, `${label} `, input, field, ` ${unit}`);
+    row.addEventListener("wheel", (e) => {
+      if (input.disabled) return;
+      e.preventDefault(); // the value steps instead of anything scrolling
+      const next = Math.max(range.min, Math.min(range.max, get() + (e.deltaY < 0 ? 1 : -1)));
+      if (next === get()) return;
+      set(next);
+      sync();
+      this.handlers.change();
+    });
+    return row;
   }
 }

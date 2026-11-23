@@ -22,9 +22,12 @@ import {
   effectTarget,
   effectTextNotice,
   GLOW_DEFAULTS,
+  GLOW_SOFTNESS,
   glowEffect,
   OUTLINE_DEFAULTS,
+  OUTLINE_WIDTH,
   outlineEffect,
+  typedSliderValue,
   warpTarget,
   type Effect,
   type EffectBasis,
@@ -116,6 +119,20 @@ test("an Esc that deselects ends an Outline/Glow tool; Esc with nothing selected
 });
 
 // ---- Settings on the wire ----
+
+test("a typed slider entry clamps into its range; anything not a whole number reverts", () => {
+  // The field's commit rule (owner decision 2026-11-23): a whole number
+  // lands as dragging the slider there would; empty or junk text reverts.
+  expect(typedSliderValue("55", OUTLINE_WIDTH)).toBe(55);
+  expect(typedSliderValue(" 55 ", OUTLINE_WIDTH)).toBe(55);
+  expect(typedSliderValue("9999", OUTLINE_WIDTH)).toBe(OUTLINE_WIDTH.max);
+  expect(typedSliderValue("0", OUTLINE_WIDTH)).toBe(OUTLINE_WIDTH.min);
+  expect(typedSliderValue("-5", GLOW_SOFTNESS)).toBe(GLOW_SOFTNESS.min);
+  expect(typedSliderValue("", OUTLINE_WIDTH)).toBeNull();
+  expect(typedSliderValue("abc", OUTLINE_WIDTH)).toBeNull();
+  expect(typedSliderValue("3.5", OUTLINE_WIDTH)).toBeNull();
+  expect(typedSliderValue("12px", OUTLINE_WIDTH)).toBeNull();
+});
 
 test("settings become the wire effect: percentages as fractions", () => {
   expect(outlineEffect({ color: "#ffffff", width: 8 })).toEqual({ kind: "outline", color: "#ffffff", width: 8 });

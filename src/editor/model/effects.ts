@@ -43,6 +43,18 @@ export const GLOW_RADIUS: Range = { min: 1, max: 200, initial: 24 };
 export const GLOW_SOFTNESS: Range = { min: 0, max: 100, initial: 70 };
 export const GLOW_OPACITY: Range = { min: 1, max: 100, initial: 80 };
 
+/**
+ * A value typed into a slider's field (owner decision 2026-11-23): a whole
+ * number clamped into `range`, or null when the text is not one (empty,
+ * fractional, not a number) so the field reverts. A committed value lands
+ * exactly as dragging the slider there would.
+ */
+export function typedSliderValue(text: string, range: Range): number | null {
+  const trimmed = text.trim();
+  if (!/^[+-]?\d+$/.test(trimmed)) return null;
+  return Math.max(range.min, Math.min(range.max, Number(trimmed)));
+}
+
 /** A white sticker-style outline. */
 export const OUTLINE_DEFAULTS: OutlineSettings = { color: "#ffffff", width: OUTLINE_WIDTH.initial };
 /** A warm yellow glow, visible on the light and the dark checkerboard. */
