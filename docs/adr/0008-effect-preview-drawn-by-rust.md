@@ -1,5 +1,10 @@
 # Effect previews are drawn by Rust, with Apply's own code
 
+Status: **Accepted** — owner approval 2026-11-23, after the Windows test of the feature
+(the SPM-8 owner test of outline, fuzzy glow and warp on the merged branch state 21404a3:
+the previews' look and speed passed, including the 2000 px responsiveness check, and the
+preview-equals-result property held through Apply and the discards).
+
 Outline and fuzzy glow are one-shot pixel work in Rust (ADR-0005), applied once and baked into
 the layer's pixels (owner decision 2026-11-22). The owner also wants a **live preview** while the
 settings are adjusted, before **Apply** (SPEC §6). ADR-0005 says live interaction normally avoids
