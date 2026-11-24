@@ -13,7 +13,7 @@ import {
   type Rect,
   type Transform,
 } from "../model/document";
-import { lassoRegion, rectRegion, type Region } from "../model/region";
+import { lassoRegion, rectRegion, type Region, type WandRegion } from "../model/region";
 import { effectKindOf } from "../model/effects";
 import { backgroundTarget, restoreBlocker } from "../model/background";
 import { beginStroke, BRUSH_SIZE, finishStroke, strokeTo, type BrushMode, type Stroke } from "../model/brush";
@@ -33,6 +33,16 @@ function isBrushTool(tool: CanvasTool): tool is BrushMode {
 export interface BrushHandler {
   press(at: Point, shift: boolean): void;
   move(at: Point, shift: boolean): void;
+  release(): void;
+}
+
+/**
+ * The wand tool's side of a press, in document px (SPM-22): `mods` is the
+ * pointer event's own Shift and Alt, as the lasso reads its Shift.
+ */
+export interface WandHandler {
+  press(at: Point, mods: { shift: boolean; alt: boolean }): void;
+  move(at: Point): void;
   release(): void;
 }
 
@@ -206,6 +216,11 @@ export class EditorStage {
     strokeScaleEnabled: false,
     listening: false,
   });
+  /** The wand region's outlines (SPM-22): one halo-and-dash pair per contour. */
+  private readonly wandOutlines = new Konva.Group({ listening: false });
+  private wandOutlinePairs: { halo: Konva.Line; line: Konva.Line }[] = [];
+  /** The wand region whose outlines are drawn, to rebuild them only on a change. */
+  private wandRegionDrawn: WandRegion | null = null;
   /** The warp brush's outline under the pointer (SPM-8). */
   private readonly warpRing = new Konva.Circle({ strokeWidth: 1, strokeScaleEnabled: false, listening: false, visible: false });
   /** The radius or strength readout beside the pointer while a warp press is dragged. */
@@ -229,6 +244,7 @@ export class EditorStage {
   /** The press the pick consumed, so its click selects nothing (the flag is cleared by the click). */
   private pickConsumedClick = false;
   private brush?: BrushHandler;
+  private wand?: WandHandler;
   private brushing = false;
   /** The warp press being dragged, which the ring follows instead of the pointer. */
   private gesture: BrushGesture | null = null;
@@ -302,7 +318,7 @@ export class EditorStage {
       strokeScaleEnabled: false,
       listening: false,
     });
-    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.brushHalo, this.brushRing, this.warpRing, this.readout.label, this.loupe);
+    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.wandOutlines, this.brushHalo, this.brushRing, this.warpRing, this.readout.label, this.loupe);
     this.loupeCanvas.width = LOUPE_SIDE;
     this.loupeCanvas.height = LOUPE_SIDE;
     // The loupe group hides the whole magnifier until a pick; its hex bubble
@@ -340,13 +356,17 @@ export class EditorStage {
       // A colour pick owns the left button in every tool (SPM-8, CMT-296).
       if (this.pick) return this.pressPick();
       this.pickConsumedClick = false; // a fresh press: its own click is not the pick's
-      // Shift is read from the event itself (SPM-8: it sets a warp drag's strength).
-      this.pressRegion(e.evt instanceof MouseEvent ? e.evt.shiftKey : false);
+      // Modifiers are read from the event itself (SPM-8: Shift sets a warp
+      // drag's strength; SPM-22: Shift adds a wand click's region, Alt
+      // subtracts it).
+      const mods = e.evt instanceof MouseEvent ? { shift: e.evt.shiftKey, alt: e.evt.altKey } : { shift: false, alt: false };
+      this.pressRegion(mods);
       this.pressBrush();
     });
     this.stage.on("mousemove touchmove", (e) => {
       if (this.pick) return this.scheduleLoupe();
-      this.extendRegion(e.evt instanceof MouseEvent ? e.evt.shiftKey : false);
+      const mods = e.evt instanceof MouseEvent ? { shift: e.evt.shiftKey, alt: e.evt.altKey } : { shift: false, alt: false };
+      this.extendRegion(mods);
       this.moveBrush();
     });
     this.stage.on("mouseleave", () => {
@@ -403,6 +423,7 @@ export class EditorStage {
   setTool(tool: CanvasTool): void {
     this.endPick(); // a pick never outlives the state it started in
     if (this.brushing) this.releaseWarp();
+    if (this.tool === "wand" && tool !== "wand") this.wand?.release(); // a wand press never outlives its tool
     this.tool = tool;
     this.rectDrag = null;
     this.lasso = null;
@@ -414,9 +435,9 @@ export class EditorStage {
     this.render();
   }
 
-  /** The canvas cursor of the current tool: a crosshair for the refine brushes, else the default. */
+  /** The canvas cursor of the current tool: a crosshair for the refine brushes and the wand, else the default. */
   private applyCursor(): void {
-    this.container.style.cursor = isBrushTool(this.tool) ? "crosshair" : "";
+    this.container.style.cursor = isBrushTool(this.tool) || this.tool === "wand" ? "crosshair" : "";
   }
 
   /** The refine brush's diameter in canvas px (SPM-7). */
@@ -478,6 +499,25 @@ export class EditorStage {
   /** Paint with `handler` while the warp tool is active (SPM-8). */
   onBrush(handler: BrushHandler): void {
     this.brush = handler;
+  }
+
+  /** The wand tool's side of a press (SPM-22), like the warp brush's. */
+  onWand(handler: WandHandler): void {
+    this.wand = handler;
+  }
+
+  /**
+   * Show a note beside the pointer while a wand drag sets its tolerance,
+   * or hide it (null): the warp readout's own tag.
+   */
+  setWandReadout(text: string | null): void {
+    const pointer = this.pointer();
+    if (text) {
+      this.readout.text.text(text);
+      if (pointer) this.placeTag(this.readout.label, pointer);
+    }
+    this.readout.label.visible(text !== null);
+    this.guides.batchDraw();
   }
 
   /** The warp brush's radius in document px, for the ring under the pointer. */
@@ -615,6 +655,10 @@ export class EditorStage {
     this.transformer.anchorFill(token("--panel"));
     this.regionHalo.stroke(token("--panel"));
     this.regionLine.stroke(token("--accent-ink"));
+    for (const { halo, line } of this.wandOutlinePairs) {
+      halo.stroke(token("--panel"));
+      line.stroke(token("--accent-ink"));
+    }
     this.warpRing.stroke(token("--accent-ink"));
     this.themeTag(this.readout);
     this.loupeShot.stroke(token("--accent-ink"));
@@ -665,13 +709,19 @@ export class EditorStage {
     return screenPx / this.stage.scaleX();
   }
 
-  private pressRegion(shift: boolean): void {
+  private pressRegion(mods: { shift: boolean; alt: boolean }): void {
     if (this.tool === "warp") {
       if (!this.interactive) return;
       const at = this.pointer();
       if (!at) return;
       this.brushing = true;
-      this.brush?.press(at, shift);
+      this.brush?.press(at, mods.shift);
+      return;
+    }
+    if (this.tool === "wand") {
+      if (!this.interactive) return;
+      const at = this.pointer();
+      if (at) this.wand?.press(at, mods);
       return;
     }
     if ((this.tool !== "rect" && this.tool !== "lasso") || !this.interactive) return;
@@ -688,12 +738,16 @@ export class EditorStage {
     this.drawRegion();
   }
 
-  private extendRegion(shift: boolean): void {
+  private extendRegion(mods: { shift: boolean; alt: boolean }): void {
     const at = this.pointer();
     if (!at) return;
     if (this.tool === "warp") {
-      if (this.brushing) this.brush?.move(at, shift);
+      if (this.brushing) this.brush?.move(at, mods.shift);
       else this.placeWarpRing(at);
+      return;
+    }
+    if (this.tool === "wand") {
+      this.wand?.move(at);
       return;
     }
     if (this.rectDrag) this.rectDrag = { ...this.rectDrag, end: at };
@@ -702,9 +756,10 @@ export class EditorStage {
     this.drawRegion(); // between lasso presses this moves the rubber band
   }
 
-  /** The left button went up: a rectangle drag ends; a lasso closes only when released on its start. */
+  /** The left button went up: a wand press ends; a rectangle drag ends; a lasso closes only when released on its start. */
   private releaseRegion(): void {
     if (this.brushing) return this.releaseWarp();
+    if (this.tool === "wand") return this.wand?.release();
     const rect = this.rectDrag;
     if (rect) {
       this.rectDrag = null;
@@ -761,7 +816,27 @@ export class EditorStage {
 
   /** Draw the selection being drawn, else the session's region. */
   private drawRegion(): void {
-    let points: readonly Point[] = this.session.region?.points ?? [];
+    const region = this.session.region;
+    // A draft (a rectangle drag, an open lasso) always outranks the stored
+    // region: it is what the release will replace the region with.
+    const drafting = this.rectDrag !== null || this.lasso !== null;
+    // The wand region's outlines (SPM-22): a pair per contour of its mask.
+    if (region?.kind === "wand" && !drafting) {
+      this.regionHalo.visible(false);
+      this.regionLine.visible(false);
+      if (this.wandRegionDrawn !== region) {
+        this.drawWandOutlines(region.outlines);
+        this.wandRegionDrawn = region;
+      }
+      this.guides.batchDraw();
+      return;
+    }
+    this.wandRegionDrawn = null;
+    this.clearWandOutlines();
+    // A wand region under a draft is already spent (the release replaces
+    // it), so the draft draws alone, like over a Rectangle/Lasso region.
+    const polygon = region && region.kind !== "wand" ? region : undefined;
+    let points: readonly Point[] = polygon?.points ?? [];
     let closed = true;
     if (this.rectDrag) {
       const { start, end } = this.rectDrag;
@@ -777,6 +852,46 @@ export class EditorStage {
       line.visible(points.length > 1);
     }
     this.guides.batchDraw();
+  }
+
+  /**
+   * Draw the wand region's outlines: one halo-under-dash pair per contour,
+   * the SPM-9 selection's own look on a blob's shape.
+   */
+  private drawWandOutlines(outlines: readonly (readonly Point[])[]): void {
+    this.wandOutlines.destroyChildren();
+    this.wandOutlinePairs = outlines.flatMap((points) => {
+      if (points.length < 3) return [];
+      const flat = points.flatMap((p) => [p.x, p.y]);
+      const halo = new Konva.Line({
+        points: flat,
+        closed: true,
+        strokeWidth: 3,
+        strokeScaleEnabled: false,
+        listening: false,
+        stroke: token("--panel"),
+      });
+      const line = new Konva.Line({
+        points: flat,
+        closed: true,
+        strokeWidth: 1,
+        dash: [4, 4],
+        strokeScaleEnabled: false,
+        listening: false,
+        stroke: token("--accent-ink"),
+      });
+      this.wandOutlines.add(halo, line);
+      return [{ halo, line }];
+    });
+    this.wandOutlines.visible(this.wandOutlinePairs.length > 0);
+  }
+
+  /** Drop the wand region's outline pairs (no wand region to draw). */
+  private clearWandOutlines(): void {
+    if (this.wandOutlinePairs.length === 0) return;
+    this.wandOutlines.destroyChildren();
+    this.wandOutlinePairs = [];
+    this.wandOutlines.visible(false);
   }
 
   // ---- Refine brush (SPM-7): paints live, one undo step per finished stroke ----

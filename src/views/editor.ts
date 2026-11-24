@@ -6,7 +6,7 @@
 // effect tools (outline, fuzzy glow, warp/bulge); SPM-7 the background
 // removal and its Erase/Restore refine brushes; SPM-10 the save pipeline
 // (Save…, Ctrl+S); SPM-12 the Thumbnail mode sessions the Pack Manager's
-// thumbnail slot opens.
+// thumbnail slot opens; SPM-22 the magic-wand selection.
 import "../editor/editor.css";
 import { baseName } from "../api";
 import {
@@ -16,9 +16,12 @@ import {
   cropImages,
   cutImage,
   downloadBackgroundModel,
+  eraseMask,
+  eraseRegion,
   IMPORT_MAX_SIDE,
   importImage,
   importPasted,
+  liftMask,
   listFonts,
   mergeImages,
   pickImageFile,
@@ -27,10 +30,28 @@ import {
   removeImageBackground,
   renderText,
   saveImage,
+  wandSelect,
   type DownloadProgress,
   type ImageInfo,
 } from "../editor/api";
 import { backgroundTarget, refineLayerPixels } from "../editor/model/background";
+import {
+  anyCovered,
+  combineMasks,
+  moveWandGesture,
+  NOTHING_TO_SELECT_OUTSIDE,
+  NOTHING_TO_SELECT_TRANSPARENT,
+  refillStepOf,
+  startWandGesture,
+  TOLERANCE,
+  toleranceProblem,
+  traceOutlines,
+  wandModeFor,
+  wandReadout,
+  type WandGesture,
+  type WandMask,
+  type WandMode,
+} from "../editor/model/wand";
 import { downloadProgressText, megabytes } from "../editor/view/download-text";
 import { BRUSH_SIZE, brushSizeProblem } from "../editor/model/brush";
 import {
@@ -72,6 +93,7 @@ import {
   cropLayers,
   cutLayer,
   deleteLayers,
+  docToLocal,
   fillToBox,
   fitToBox,
   IDENTITY,
@@ -102,6 +124,7 @@ import {
   type Transform,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
+import type { Region } from "../editor/model/region";
 import { readoutStatus, startCanvas, STICKER, THUMBNAIL, TEXT_FONT_SIZE, TEXT_OUTLINE_WIDTH, type ConstraintSet } from "../editor/model/constraints";
 import {
   DEFAULT_FONT_SIZE,
@@ -123,6 +146,7 @@ import {
   cutBlocker,
   deleteBlocker,
   editTextBlocker,
+  eraseBlocker,
   escapeTarget,
   isCutShortcut,
   fontChoices,
@@ -256,17 +280,20 @@ function buildEditor(): HTMLElement {
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
-  const deleteButton = button("Delete", () => deleteSelected());
+  const deleteButton = button("Delete", () => deletePressed());
   // Cut selection tools and paste (SPM-9).
   const moveToolButton = button("Move", () => setTool("move"));
   const rectToolButton = button("Rectangle", () => setTool("rect"));
   const lassoToolButton = button("Lasso", () => setTool("lasso"));
+  const wandToolButton = button("Wand", () => setTool("wand"));
   const cutButton = button("Cut", () => run(cutSelection));
   const pasteButton = button("Paste", () => run(pasteFromButton));
   moveToolButton.title = "Drag layers to move them, or empty space to pan";
   rectToolButton.title = "Drag on the canvas to select a rectangle to cut";
   lassoToolButton.title =
     "Click to place points, drag to draw freehand; click the start point, double-click or press Enter to close (Backspace removes the last point or stroke, Esc cancels)";
+  wandToolButton.title =
+    "Click to select the colour-similar pixels of the selected image layer (or the base image); drag to set the tolerance; Shift adds a region, Alt removes one";
   const cutTitle = "Move the selected pixels into a new floating layer at the same spot";
   // Effect tools (SPM-8): each targets the selected layer, else the base image.
   const outlineToolButton = button("Outline", () => setTool("outline"));
@@ -446,6 +473,41 @@ function buildEditor(): HTMLElement {
     stage?.setBrushSize(size);
     brushSizeInput.blur();
   });
+  // The wand tool's tolerance (SPM-22): how far each colour channel may
+  // drift from the clicked sample, as a percent of full range.
+  let tolerance: number = TOLERANCE.initial;
+  const toleranceInput = el("input", {
+    class: "editor-side-input",
+    type: "number",
+    min: String(TOLERANCE.min),
+    max: String(TOLERANCE.max),
+    step: "1",
+    value: String(TOLERANCE.initial),
+    "aria-label": "Wand tolerance in percent",
+  }) as HTMLInputElement;
+  toleranceInput.title = `How far each colour channel may drift from the clicked sample, in percent (${TOLERANCE.min}–${TOLERANCE.max})`;
+  toleranceInput.addEventListener("change", () => {
+    const value = Number(toleranceInput.value);
+    const problem = toleranceProblem(value);
+    if (problem) {
+      say(problem);
+      toleranceInput.value = String(tolerance);
+      return;
+    }
+    say(""); // a valid tolerance replaces an earlier complaint, as any command does
+    tolerance = value;
+    toleranceInput.blur();
+  });
+  // The wand's 1-px feather, on by default (owner decision 2026-11-24): a
+  // checkbox beside the tolerance; it applies from the next fill on.
+  let feathered = true;
+  const featherInput = el("input", { type: "checkbox", "aria-label": "Wand feathering" }) as HTMLInputElement;
+  featherInput.checked = true;
+  featherInput.title = "Soften the wand selection's edge by half a pixel; uncheck it for hard edges";
+  featherInput.addEventListener("change", () => {
+    feathered = featherInput.checked;
+    featherInput.blur();
+  });
   // The message-line text of a model download in progress, null when none
   // runs: Save's disabled tooltip and a mid-download Ctrl+S say it (SPEC §6,
   // §2: a disabled control shows its reason).
@@ -507,8 +569,11 @@ function buildEditor(): HTMLElement {
       moveToolButton,
       rectToolButton,
       lassoToolButton,
+      wandToolButton,
       cutButton,
       pasteButton,
+      el("label", { class: "editor-side" }, "Tolerance ", toleranceInput, " %"),
+      el("label", { class: "editor-side" }, featherInput, " Feather"),
     ),
     el(
       "span",
@@ -722,6 +787,7 @@ function buildEditor(): HTMLElement {
     stage.setTool(tool);
     stage.onEditText((id) => editText(id));
     stage.onBrush({ press: beginWarp, move: continueWarp, release: endWarp });
+    stage.onWand({ press: beginWand, move: continueWand, release: endWand });
     stage.setBrushSize(brushSize);
     stage.onBrushBlocked((reason) => say(reason));
     stage.onPickBlocked((reason) => say(reason));
@@ -1025,11 +1091,17 @@ function buildEditor(): HTMLElement {
     refresh();
   }
 
+  /** The layer a drawn selection acts on: the wand's own target, else the one selected layer. */
+  function regionTargetId(region: Region, selection: readonly string[]): string {
+    return region.kind === "wand" ? region.targetId : selection[0];
+  }
+
   /**
-   * Cut (SPM-9): the selected pixels of the selected image layer move into
-   * a new floating layer at the same spot, as ONE undo step; the pixel work
-   * is Rust's. The selection is used up, and the Move tool comes back so the
-   * cutout can be dragged and resized at once.
+   * Cut (SPM-9, the wand since SPM-22): the selected pixels of the cut
+   * selection's layer move into a new floating layer at the same spot, as
+   * ONE undo step; the pixel work is Rust's. The selection is used up, and
+   * the Move tool comes back so the cutout can be dragged and resized at
+   * once.
    */
   async function cutSelection(): Promise<void> {
     const current = session;
@@ -1039,8 +1111,16 @@ function buildEditor(): HTMLElement {
       current,
       { doing: "cutting", done: "cut" },
       async (doc) => {
-        const source = doc.layers[layerIndex(doc, current.selection[0])];
-        return source.kind === "raster" ? { source, cut: await cutImage(source.image, source.transform, region.points) } : null;
+        // A wand selection lifts from the layer it was clicked on; a
+        // Rectangle/Lasso from the one selected image layer.
+        const id = regionTargetId(region, current.selection);
+        const source = doc.layers[layerIndex(doc, id)];
+        if (source.kind !== "raster") return null;
+        const cut =
+          region.kind === "wand"
+            ? await liftMask(source.image, source.transform, region.mask)
+            : await cutImage(source.image, source.transform, region.points);
+        return { source, cut };
       },
       ({ source, cut }, doc) => {
         const id = nextLayerId(doc);
@@ -1220,6 +1300,117 @@ function buildEditor(): HTMLElement {
     if (image && stale) say("The layers changed while warping; the bulge was dropped. Try again.");
     if (image && !stale) current.apply((d) => setLayerImage(d, layer.id, image));
     else refresh(); // no new state to redraw from, but the bar's values may have changed
+  }
+
+  // ---- Magic wand (SPM-22): a click selects colour-similar pixels ----
+
+  /** The wand press in progress, if any: what it selects from, and its drag. */
+  let wand: WandPress | null = null;
+
+  /**
+   * A wand press begins (owner decisions 2026-11-24): the target follows
+   * the effects tools (the selected image layer, else the base image) and
+   * becomes the layer selection, so Cut and Delete act on what the click
+   * selected. A plain click replaces the selection; on the same layer
+   * Shift adds the clicked region and Alt subtracts it. A click on another
+   * layer starts fresh, whatever the modifiers.
+   */
+  function beginWand(at: Point, mods: { shift: boolean; alt: boolean }): void {
+    const current = session;
+    if (!current || !stage || busy || wand) return;
+    const target = backgroundTarget(current.doc, current.selection);
+    if ("reason" in target) {
+      say(target.reason);
+      return;
+    }
+    const layer = target.layer;
+    const local = docToLocal(layer.transform, at);
+    if (local.x < 0 || local.y < 0 || local.x >= layer.image.width || local.y >= layer.image.height) {
+      say(NOTHING_TO_SELECT_OUTSIDE);
+      return;
+    }
+    const base = ((local.y | 0) * layer.image.width + (local.x | 0)) * 4;
+    if (layer.image.pixels[base + 3] === 0) {
+      say(NOTHING_TO_SELECT_TRANSPARENT);
+      return;
+    }
+    const region = current.region?.kind === "wand" && current.region.targetId === layer.id ? current.region : null;
+    const mode: WandMode = region ? wandModeFor(mods.shift, mods.alt) : "replace";
+    if (current.selection.length !== 1 || current.selection[0] !== layer.id) current.select(layer.id);
+    say("");
+    wand = {
+      layerId: layer.id,
+      image: layer.image,
+      transform: layer.transform,
+      mode,
+      base: region?.mask ?? null,
+      gesture: startWandGesture(at, tolerance),
+      filled: tolerance,
+      fills: 0,
+    };
+    void fillWand(wand, tolerance);
+  }
+
+  /** The pointer moved during a wand press: a drag sets the tolerance, and the layer re-fills per step. */
+  function continueWand(at: Point): void {
+    const press = wand;
+    if (!press || !stage) return;
+    const before = press.gesture;
+    const g = moveWandGesture(before, at, stage.view().scale);
+    press.gesture = g;
+    if (!g.dragged) return;
+    stage.setWandReadout(wandReadout(g));
+    // Each re-fill round-trips the layer's pixels, so a drag pays a handful
+    // of fills (one per step), not one per integer of tolerance.
+    if (g.tolerance !== before.tolerance && refillStepOf(g.tolerance) !== refillStepOf(before.tolerance)) {
+      void fillWand(press, g.tolerance);
+    }
+  }
+
+  /** A wand press ends: the drag's tolerance becomes the bar's value. */
+  function endWand(): void {
+    const finished = wand;
+    wand = null;
+    stage?.setWandReadout(null);
+    if (!finished) return;
+    const g = finished.gesture;
+    if (!g.dragged) return;
+    tolerance = g.tolerance;
+    if (document.activeElement !== toleranceInput) toleranceInput.value = String(g.tolerance);
+    if (g.tolerance !== finished.filled) void fillWand(finished, g.tolerance);
+  }
+
+  /**
+   * Fill from the press's clicked spot at `tolerance` and commit what its
+   * mode leaves. The last fill wins (a drag may request several), and a
+   * fill whose target's pixels changed underneath is dropped.
+   */
+  async function fillWand(press: WandPress, atTolerance: number): Promise<void> {
+    const id = ++press.fills;
+    try {
+      const mask = await wandSelect(press.image, press.transform, press.gesture.seed, atTolerance, feathered);
+      if (press.fills !== id) return; // a newer fill superseded this one
+      press.filled = atTolerance;
+      const current = session;
+      const layer = current?.doc.layers.find((l) => l.id === press.layerId);
+      if (!current || !layer || layer.kind !== "raster" || layer.image !== press.image) {
+        say("The layers changed while selecting; nothing was selected. Try again.");
+        return;
+      }
+      const combined = press.mode === "replace" ? mask : combineMasks(press.base, mask, press.mode);
+      if (!anyCovered(combined)) {
+        current.setRegion(null); // a subtract that emptied the selection
+        return;
+      }
+      current.setRegion({
+        kind: "wand",
+        targetId: press.layerId,
+        mask: combined,
+        outlines: traceOutlines(combined, press.transform),
+      });
+    } catch (error) {
+      say(errorMessage(error));
+    }
   }
 
   // ---- Background removal (SPM-7, ADR-0006) ----
@@ -1444,12 +1635,66 @@ function buildEditor(): HTMLElement {
     resizeWholeImage((doc, content) => resizeToSide(doc, content, side, freeSide));
   }
 
+  /** Why Delete cannot run right now: with a region drawn it erases, else it deletes layers. */
+  function deleteReasonOf(current: EditorSession): string | null {
+    return current.region
+      ? eraseBlocker(current.doc, current.selection, current.region)
+      : deleteBlocker(current.doc, current.selection);
+  }
+
   /** Delete the selected layers as one undoable step (SPEC §6); one layer always stays. */
   function deleteSelected(): void {
     const current = session;
     if (!current || busy || deleteBlocker(current.doc, current.selection)) return;
     const chosen = [...current.selection];
     current.apply((doc) => deleteLayers(doc, chosen));
+  }
+
+  /**
+   * Delete (owner decision 2026-11-24): with a selection drawn it erases
+   * the selection's pixels from the layer it belongs to, as ONE undo step
+   * that keeps the layer's restore source (Restore brings them back); with
+   * none drawn it deletes the selected layers.
+   */
+  function deletePressed(): void {
+    const current = session;
+    if (!current) return;
+    if (!current.region) return deleteSelected();
+    const reason = deleteReasonOf(current);
+    if (reason) {
+      say(reason);
+      return;
+    }
+    void run(eraseSelection);
+  }
+
+  /**
+   * Erase the drawn selection's pixels in Rust (SPM-22): the wand's
+   * feathered mask from its own target, a Rectangle/Lasso's whole pixels
+   * from the one selected image layer. One undo step; the layer's restore
+   * source is kept, so Restore brings the pixels back.
+   */
+  async function eraseSelection(): Promise<void> {
+    const current = session;
+    if (!current) return;
+    const region = current.region;
+    if (!region) return;
+    await editAsync(
+      current,
+      { doing: "erasing", done: "erased" },
+      async (doc) => {
+        const source = doc.layers[layerIndex(doc, regionTargetId(region, current.selection))];
+        if (source.kind !== "raster") return null;
+        return region.kind === "wand"
+          ? eraseMask(source.image, source.transform, region.mask)
+          : eraseRegion(source.image, source.transform, region.points);
+      },
+      (hole) => {
+        const id = regionTargetId(region, current.selection);
+        current.apply((d) => refineLayerPixels(d, id, hole));
+        current.setRegion(null);
+      },
+    );
   }
 
   function moveSelected(step: number): void {
@@ -1503,6 +1748,7 @@ function buildEditor(): HTMLElement {
       [moveToolButton, "move"],
       [rectToolButton, "rect"],
       [lassoToolButton, "lasso"],
+      [wandToolButton, "wand"],
       [outlineToolButton, "outline"],
       [glowToolButton, "glow"],
       [warpToolButton, "warp"],
@@ -1548,7 +1794,9 @@ function buildEditor(): HTMLElement {
     const single = current.selection.length === 1 ? current.selection[0] : null;
     const index = single ? layerIndex(doc, single) : -1;
     const blocker = mergeBlocker(current.selection);
-    const deleteReason = deleteBlocker(doc, current.selection);
+    // With a selection drawn Delete erases its pixels; with none it deletes
+    // the selected layers (owner decision 2026-11-24).
+    const deleteReason = deleteReasonOf(current);
     addButton.disabled = busy;
     // Each sizing tool is disabled when it would change nothing or, for Longest
     // side, when the set needs a square canvas (SPEC §6).
@@ -1593,7 +1841,9 @@ function buildEditor(): HTMLElement {
     mergeButton.disabled = busy || blocker !== null;
     mergeButton.title = blocker ?? "Merge the selected layers into one";
     deleteButton.disabled = busy || deleteReason !== null;
-    deleteButton.title = deleteReason ?? "Delete the selected layers (Delete key)";
+    deleteButton.title =
+      deleteReason ??
+      (current.region ? "Erase the selection's pixels (Delete key)" : "Delete the selected layers (Delete key)");
     const cutReason = cutBlocker(doc, current.selection, current.region);
     cutButton.disabled = busy || cutReason !== null;
     cutButton.title = cutReason ?? cutTitle;
@@ -1605,6 +1855,8 @@ function buildEditor(): HTMLElement {
     removeBackgroundButton.disabled = busy || removeReason !== null;
     removeBackgroundButton.title = removeReason ?? removeBackgroundTitle;
     brushSizeInput.disabled = busy;
+    toleranceInput.disabled = busy;
+    featherInput.disabled = busy;
     // Text tool (SPM-9): the controls show the first selected text layer's
     // style, else the next new text's.
     const texts = current.selectedTexts;
@@ -1727,7 +1979,7 @@ function buildEditor(): HTMLElement {
         current.clearSelection();
       } else current.clearSelection();
     }
-    else if (e.key === "Delete") deleteSelected();
+    else if (e.key === "Delete") deletePressed();
     else return;
     e.preventDefault();
   });
@@ -1779,6 +2031,23 @@ function buildEditor(): HTMLElement {
 interface WarpInProgress {
   readonly press: WarpPress;
   gesture: WarpGesture;
+}
+
+/** A wand press being filled (SPM-22): what it selects from, and its drag. */
+interface WandPress {
+  readonly layerId: string;
+  /** The target's pixels when the press began; every fill runs on this snapshot. */
+  readonly image: RgbaImage;
+  readonly transform: Transform;
+  /** How the click combines with the selection already on the canvas. */
+  readonly mode: WandMode;
+  /** The selection's mask the press combines with (null for a replacing click). */
+  readonly base: WandMask | null;
+  gesture: WandGesture;
+  /** The tolerance of the last committed fill. */
+  filled: number;
+  /** Counts fills; the latest wins when a drag outruns the IPC. */
+  fills: number;
 }
 
 let openFileHook: ((path: string, showEditor: () => void, origin?: StickerOrigin) => Promise<void>) | null = null;

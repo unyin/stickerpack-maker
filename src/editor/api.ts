@@ -6,6 +6,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
 import type { Effect, EffectResult } from "./model/effects";
 import { layerInput, textStyleOf, type CropInput, type Doc, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
+import type { WandMask } from "./model/wand";
 
 import { IMPORT_EXTENSIONS } from "../shared/import-extensions";
 import type { SaveFormat, SaveOutcome, SaveTarget } from "./save";
@@ -227,6 +228,94 @@ export function decodeCutFrame(frame: ArrayBuffer, width: number, height: number
   const hole: RgbaImage = { width, height, pixels: new Uint8ClampedArray(frame, 0, holeBytes) };
   const placed = decodePlacedFrame(frame.slice(holeBytes));
   return { hole, cutout: placed.image, x: placed.x, y: placed.y };
+}
+
+// ---- Magic-wand selection (SPM-22) ----
+
+/** Header carrying a wand request's layer size and transform, the clicked spot and the tolerance; mirrors WAND_HEADER. */
+export const WAND_HEADER = "x-wand-select";
+
+/**
+ * Select the colour-similar contiguous region around a click (SPM-22):
+ * Rust flood-fills the layer and returns its coverage mask — 255 inside,
+ * 128 on the 1-px feather ring, or hard edges throughout with `feathered`
+ * false (the Feather checkbox, on by default; owner decision
+ * 2026-11-24) — cropped to the selected bounds and in the layer's own
+ * pixel grid. A fully transparent or out-of-layer click is refused.
+ */
+export async function wandSelect(
+  image: RgbaImage,
+  transform: Transform,
+  seed: Point,
+  tolerance: number,
+  feathered: boolean,
+): Promise<WandMask> {
+  const meta = { width: image.width, height: image.height, transform, seed: [seed.x, seed.y], tolerance, feather: feathered };
+  const frame = await invokeRaw("editor_wand_select", bytesOf(image), WAND_HEADER, meta);
+  return decodeWandFrame(frame);
+}
+
+/** Parse `WandMask::to_frame`: i32 LE x, i32 LE y, u32 LE width, u32 LE height, then the coverage bytes. */
+export function decodeWandFrame(frame: ArrayBuffer): WandMask {
+  if (frame.byteLength < 16) throw new Error("wand mask frame is truncated");
+  const header = new DataView(frame, 0, 16);
+  const mask = {
+    x: header.getInt32(0, true),
+    y: header.getInt32(4, true),
+    width: header.getUint32(8, true),
+    height: header.getUint32(12, true),
+  };
+  const expected = mask.width * mask.height;
+  if (frame.byteLength !== 16 + expected) {
+    throw new Error(
+      `wand mask frame has ${frame.byteLength - 16} coverage bytes, expected ${expected} for ${mask.width}x${mask.height}`,
+    );
+  }
+  return { ...mask, coverage: new Uint8Array(frame, 16) };
+}
+
+/** Header carrying a mask cut's layer size and transform, the mask's place and the mode; mirrors CUT_MASK_HEADER. */
+export const CUT_MASK_HEADER = "x-cut-mask";
+
+/** The layer's bytes followed by the mask's coverage, as one raw body. */
+function bytesWithMask(image: RgbaImage, mask: WandMask): Uint8Array {
+  const body = new Uint8Array(image.pixels.length + mask.coverage.length);
+  body.set(bytesOf(image), 0);
+  body.set(mask.coverage, image.pixels.length);
+  return body;
+}
+
+/** The mask's place as the cut/erase request carries it. */
+function maskPlace(mask: WandMask): Record<string, number> {
+  return { x: mask.x, y: mask.y, width: mask.width, height: mask.height };
+}
+
+/**
+ * Cut a wand selection out of a raster layer in Rust (SPM-22): the layer
+ * with a feathered hole, and the covered pixels as a new floating cutout.
+ */
+export async function liftMask(image: RgbaImage, transform: Transform, mask: WandMask): Promise<CutResult> {
+  const meta = { width: image.width, height: image.height, transform, mask: maskPlace(mask) };
+  const frame = await invokeRaw("editor_cut_mask", bytesWithMask(image, mask), CUT_MASK_HEADER, meta);
+  return decodeCutFrame(frame, image.width, image.height);
+}
+
+/** Erase a wand selection's pixels from a raster layer in Rust (SPM-22): each covered pixel keeps the mask's uncovered share of its alpha. */
+export async function eraseMask(image: RgbaImage, transform: Transform, mask: WandMask): Promise<RgbaImage> {
+  const meta = { width: image.width, height: image.height, transform, mask: maskPlace(mask), mode: "erase" };
+  const frame = await invokeRaw("editor_cut_mask", bytesWithMask(image, mask), CUT_MASK_HEADER, meta);
+  return decodeFrame(frame);
+}
+
+/**
+ * Erase a Rectangle/Lasso selection from a raster layer in Rust (SPM-22,
+ * owner decision 2026-11-24: Delete with a selection drawn erases it):
+ * whole pixels, exactly what Cut's hole leaves.
+ */
+export async function eraseRegion(image: RgbaImage, transform: Transform, polygon: readonly Point[]): Promise<RgbaImage> {
+  const meta = { width: image.width, height: image.height, transform, polygon: polygon.map((p) => [p.x, p.y]), mode: "erase" };
+  const frame = await invokeRaw("editor_cut_layer", bytesOf(image), CUT_LAYER_HEADER, meta);
+  return decodeFrame(frame);
 }
 
 /** Header saying whether a pasted image over the import cap may be scaled; mirrors SCALE_TO_FIT_HEADER. */

@@ -98,20 +98,42 @@ function selectedLayer(doc: Doc, selection: readonly string[]): Layer | null {
   return doc.layers.find((l) => l.id === selection[0]) ?? null;
 }
 
+/** Whether two boxes share no pixel. */
+function apart(a: Rect, b: Rect): boolean {
+  return a.x >= b.x + b.width || b.x >= a.x + a.width || a.y >= b.y + b.height || b.y >= a.y + a.height;
+}
+
 /**
- * Why Cut is disabled, or null when it can run (SPM-9): it needs a
- * selection drawn on the canvas and exactly one selected image layer that
- * the selection touches. Text is cut only after merging it into an image.
+ * Why Cut is disabled, or null when it can run (SPM-9, the wand since
+ * SPM-22): it needs a selection drawn on the canvas and exactly one
+ * selected image layer the selection belongs to. Text is cut only after
+ * merging it into an image. A wand selection belongs to the layer it was
+ * clicked on, so Cut lifts from that one.
  */
 export function cutBlocker(doc: Doc, selection: readonly string[], region: Region | null): string | null {
   const layer = selectedLayer(doc, selection);
   if (!layer) return "Select the one image layer to cut from.";
   if (layer.kind === "text") return "Text layers can't be cut: merge the text into an image layer first.";
-  if (!region) return "Draw a selection on the canvas with Rectangle or Lasso first.";
-  const a = regionBounds(region);
-  const b = layerBounds(layer);
-  const apart = a.x >= b.x + b.width || b.x >= a.x + a.width || a.y >= b.y + b.height || b.y >= a.y + a.height;
-  return apart ? "The selection does not touch the selected layer." : null;
+  if (!region) return "Draw a selection on the canvas with Rectangle, Lasso or Wand first.";
+  if (region.kind === "wand") {
+    return layer.id === region.targetId ? null : "The selection does not touch the selected layer.";
+  }
+  return apart(regionBounds(region), layerBounds(layer)) ? "The selection does not touch the selected layer." : null;
+}
+
+/**
+ * Why Delete cannot erase the drawn selection, or null when it can (owner
+ * decision 2026-11-24): the wand's from its own target, a
+ * Rectangle/Lasso's from the one selected image layer the selection
+ * touches, as Cut does. With no selection drawn, Delete deletes layers
+ * instead (`deleteBlocker`).
+ */
+export function eraseBlocker(doc: Doc, selection: readonly string[], region: Region): string | null {
+  if (region.kind === "wand") return null; // its target exists while the region does
+  const layer = selectedLayer(doc, selection);
+  if (!layer) return "Select the one image layer to erase from.";
+  if (layer.kind === "text") return "Text layers have no pixels to erase: merge the text into an image layer first.";
+  return apart(regionBounds(region), layerBounds(layer)) ? "The selection does not touch the selected layer." : null;
 }
 
 /** Where the text-editing overlay goes on screen, in CSS px of the canvas host. */

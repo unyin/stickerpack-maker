@@ -1,15 +1,30 @@
-// The cut selection (SPM-9): a rectangle or a lasso drawn on the canvas, a
-// closed polygon in document pixels. Like the layer selection it lives in
-// the session and is not an undo step (ADR-0005). No Konva, no DOM.
+// The selection drawn on the canvas (SPM-9; the wand since SPM-22): what
+// Cut lifts and Delete erases. Like the layer selection it lives in the
+// session and is not an undo step (ADR-0005); a wand region is additionally
+// bound to its target layer's pixels, so the session drops it on any
+// document change. No Konva, no DOM.
 import type { Point, Rect } from "./document";
+import type { WandMask } from "./wand";
 
-export type RegionKind = "rect" | "lasso";
-
-export interface Region {
-  readonly kind: RegionKind;
+/** A rectangle or lasso selection: a closed polygon in document pixels (SPM-9). */
+export interface PolygonRegion {
+  readonly kind: "rect" | "lasso";
   /** The closed polygon's corners, in document pixels. */
   readonly points: readonly Point[];
 }
+
+/** A magic-wand selection (SPM-22): the coverage mask its clicks build. */
+export interface WandRegion {
+  readonly kind: "wand";
+  /** The layer the mask belongs to, in its own pixel grid. */
+  readonly targetId: string;
+  readonly mask: WandMask;
+  /** The mask's outlines in document pixels, for the dashed selection line. */
+  readonly outlines: readonly (readonly Point[])[];
+}
+
+/** The selection drawn on the canvas, or none. */
+export type Region = PolygonRegion | WandRegion;
 
 /** Twice the polygon's signed area (shoelace). */
 function doubleArea(points: readonly Point[]): number {
@@ -48,11 +63,17 @@ export function lassoRegion(points: readonly Point[]): Region | null {
   return { kind: "lasso", points: kept };
 }
 
-/** The region's bounding box. */
+/** The region's bounding box in document pixels (a wand's: the box of its outlines). */
 export function regionBounds(region: Region): Rect {
-  const xs = region.points.map((p) => p.x);
-  const ys = region.points.map((p) => p.y);
-  const x = Math.min(...xs);
-  const y = Math.min(...ys);
-  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+  let x = Infinity;
+  let y = Infinity;
+  let right = -Infinity;
+  let bottom = -Infinity;
+  for (const p of region.kind === "wand" ? region.outlines.flat() : region.points) {
+    x = Math.min(x, p.x);
+    y = Math.min(y, p.y);
+    right = Math.max(right, p.x);
+    bottom = Math.max(bottom, p.y);
+  }
+  return { x, y, width: right - x, height: bottom - y };
 }

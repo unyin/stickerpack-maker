@@ -70,6 +70,7 @@ export class EditorSession {
     const next = operation(this.doc);
     if (next === this.doc) return;
     this.history.commit(next);
+    this.dropWandRegion();
     this.pruneSelection();
     this.notify();
   }
@@ -77,6 +78,7 @@ export class EditorSession {
   undo(): void {
     if (!this.history.canUndo) return;
     this.history.undo();
+    this.dropWandRegion();
     this.pruneSelection();
     this.notify();
   }
@@ -84,6 +86,7 @@ export class EditorSession {
   redo(): void {
     if (!this.history.canRedo) return;
     this.history.redo();
+    this.dropWandRegion();
     this.pruneSelection();
     this.notify();
   }
@@ -117,6 +120,15 @@ export class EditorSession {
   private pruneSelection(): void {
     const ids = new Set(this.doc.layers.map((l) => l.id));
     this.selected = this.selected.filter((id) => ids.has(id));
+  }
+
+  /**
+   * A wand region is bound to its target layer's pixels (its mask lives in
+   * that grid), so any document change drops it; rect and lasso regions
+   * are plain geometry and survive (SPM-22).
+   */
+  private dropWandRegion(): void {
+    if (this.selectedRegion?.kind === "wand") this.selectedRegion = null;
   }
 
   private notify(): void {
