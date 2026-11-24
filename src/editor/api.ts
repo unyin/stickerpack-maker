@@ -326,7 +326,9 @@ export async function composeSelection(
   contributions: readonly Contribution[],
 ): Promise<WandMask> {
   let length = 0;
-  for (const contribution of contributions) if (contribution.kind === "wand") length += contribution.mask.coverage.length;
+  for (const contribution of contributions) {
+    if (contribution.kind === "wand") length += contribution.mask.coverage.length;
+  }
   const body = new Uint8Array(length);
   let offset = 0;
   const wire = contributions.map((contribution) => {

@@ -87,9 +87,7 @@ pub fn compose(meta: &ComposeMeta, body: &[u8]) -> Result<WandMask, String> {
         .ok_or_else(|| "the selection's grid has no pixels or is too large".to_string())?;
     let expected = meta.contributions.iter().try_fold(0usize, |total, contribution| match contribution {
         Contribution::Mask { width, height, .. } => {
-            let len = (*width as usize)
-                .checked_mul(*height as usize)
-                .ok_or_else(|| "the selection's masks are too large".to_string())?;
+            let len = mask_len(*width, *height)?;
             total.checked_add(len).ok_or_else(|| "the selection's masks are too large".to_string())
         }
         Contribution::Poly { .. } => Ok(total),
@@ -121,9 +119,7 @@ pub fn compose(meta: &ComposeMeta, body: &[u8]) -> Result<WandMask, String> {
                 fold(&mut coverage, &poly, *op);
             }
             Contribution::Mask { op, x, y, width: mask_width, height: mask_height, transform } => {
-                let len = (*mask_width as usize)
-                    .checked_mul(*mask_height as usize)
-                    .ok_or_else(|| "the selection's masks are too large".to_string())?;
+                let len = mask_len(*mask_width, *mask_height)?;
                 let (bytes, tail) = rest.split_at(len);
                 rest = tail;
                 let laid = mask_coverage(bytes, (*x, *y, *mask_width, *mask_height), transform, &meta.transform, &inverse, (width, height))?;
@@ -140,6 +136,14 @@ impl Contribution {
             Contribution::Poly { op, .. } | Contribution::Mask { op, .. } => *op,
         }
     }
+}
+
+/// The body bytes one mask contribution's coverage takes: its pixel count,
+/// refused when the width times height overflows.
+fn mask_len(width: u32, height: u32) -> Result<usize, String> {
+    (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| "the selection's masks are too large".to_string())
 }
 
 /// Fold one contribution into the coverage built so far: add takes the
@@ -234,10 +238,12 @@ fn mask_coverage(
         }
         return Ok(laid);
     }
-    let forward = transform_of(source)?;
+    // tiny-skia's inverse of a zero scale is an infinity, not a refusal, so a
+    // degenerate source grid is refused before the transform is built.
     if source.scale_x == 0.0 || source.scale_y == 0.0 {
         return Err("a wand fill's layer is scaled to nothing, so it cannot be composed".to_string());
     }
+    let forward = transform_of(source)?;
     let source_inverse = forward
         .invert()
         .ok_or_else(|| "a wand fill's layer is scaled to nothing, so it cannot be composed".to_string())?;

@@ -48,6 +48,7 @@ import {
   traceOutlines,
   wandReadout,
   type WandGesture,
+  type WandMask,
   type WandMode,
 } from "../editor/model/wand";
 import { downloadProgressText, megabytes } from "../editor/view/download-text";
@@ -129,6 +130,7 @@ import {
   NOTHING_TO_CUT,
   NOTHING_TO_ERASE,
   wandCommitMode,
+  type ComposedRegion,
   type Contribution,
   type ContributionOp,
   type PolyContribution,
@@ -1114,9 +1116,19 @@ function buildEditor(): HTMLElement {
    */
   async function cutFor(source: RasterLayer, region: Region): Promise<CutResult> {
     if (region.kind !== "compose") return cutImage(source.image, source.transform, region.points);
+    return liftMask(source.image, source.transform, await composeMaskFor(source, region, NOTHING_TO_CUT));
+  }
+
+  /**
+   * The coverage a composed selection merges into `source`'s own pixel grid
+   * (SPM-23): a merge that comes back empty is refused with `nothing`, the
+   * calling tool's own wording. Callers handle a plain Rectangle/Lasso region
+   * with their whole-pixel primitive instead.
+   */
+  async function composeMaskFor(source: RasterLayer, region: ComposedRegion, nothing: string): Promise<WandMask> {
     const mask = await composeSelection(source.image.width, source.image.height, source.transform, region.contributions);
-    if (mask.width === 0 || mask.height === 0) throw new Error(NOTHING_TO_CUT);
-    return liftMask(source.image, source.transform, mask);
+    if (mask.width === 0 || mask.height === 0) throw new Error(nothing);
+    return mask;
   }
 
   /**
@@ -1751,9 +1763,7 @@ function buildEditor(): HTMLElement {
    */
   async function eraseFor(source: RasterLayer, region: Region): Promise<RgbaImage> {
     if (region.kind !== "compose") return eraseRegion(source.image, source.transform, region.points);
-    const mask = await composeSelection(source.image.width, source.image.height, source.transform, region.contributions);
-    if (mask.width === 0 || mask.height === 0) throw new Error(NOTHING_TO_ERASE);
-    return eraseMask(source.image, source.transform, mask);
+    return eraseMask(source.image, source.transform, await composeMaskFor(source, region, NOTHING_TO_ERASE));
   }
 
   function moveSelected(step: number): void {

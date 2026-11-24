@@ -342,7 +342,7 @@ stickers, Missing stickers, and the thumbnail.
     Enter. While it is open, Esc cancels it (the previous selection stays) and Backspace
     removes its last segment: the last waypoint, or the whole last freehand stroke while
     the point the stroke began at stays a waypoint, as in GIMP (owner re-tests
-    2026-11-22). A closed lasso with no area clears the selection.
+    2026-11-22). A plain closed lasso with no area clears the selection.
   - The **Wand** (SPM-22, owner decisions 2026-11-24) selects the colour-similar pixels
     around a click: the target follows the effects tools (the selected image layer, else
     the base image) and the click also selects it. A pixel matches when it is visible and
@@ -370,10 +370,15 @@ stickers, Missing stickers, and the thumbnail.
     stack of contributions, each tagged add or subtract: a wand fill in the grid it was
     filled in (with that layer's transform), or a Rectangle/Lasso polygon in document
     pixels. Shift and Alt compose whatever is drawn onto whatever is already there: the
-    modifier is read at release for Rectangle, at close for Lasso (Enter, double-click and
-    release-on-start each read their own event's Shift/Alt), and at press for the Wand;
-    with no selection drawn, every modifier acts as a plain draw. Cut and Delete resolve
-    the target at press: the ONE SELECTED IMAGE LAYER the selection touches — the
+    modifier is read at release for Rectangle, at close for Lasso (Enter, double-click,
+    release-on-start and press-on-start each read their own event's Shift/Alt), and at
+    press for the Wand; with no selection drawn, every modifier acts as a plain draw.
+    With a selection drawn, a modifier gesture that ends with no area drawn — a bare
+    click, or a lasso that closes empty — keeps the existing selection (owner decision
+    2026-11-24): a modifier gesture that adds nothing changes nothing, so an accidental
+    under-slop click while trying to Shift-drag onto the selection does not wipe it. A
+    plain unmodified click or empty lasso still clears the selection as before. Cut and Delete
+    resolve the target at press: the ONE SELECTED IMAGE LAYER the selection touches — the
     Rectangle/Lasso rule made universal, whichever tool or layers built the selection (no
     layer, or several, says to select the one image layer; a selection that touches none
     says so; there is no cross-target refusal). The merge runs in the target layer's own
