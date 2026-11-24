@@ -110,20 +110,39 @@ export function renderSettings(
       onchange: (event) => {
         const value = parseEmojiStyle((event.target as HTMLSelectElement).value);
         void withMessage(styleMessage, async () => {
-          // Custom is picked THROUGH a file: the choice applies only after a
-          // font has loaded from a real file, so the option never lands
-          // without one. Cancelling the picker keeps the previous style.
-          if (value === "custom") {
-            const file = await pickEmojiFont();
-            if (!file) {
-              styleSelect.value = getEmojiStylePreference();
-              return;
+          try {
+            // Custom is picked THROUGH a file — but a REMEMBERED one is
+            // reused without a picker (owner, from the test, 2026-11-24:
+            // switching away and back must not force a re-pick; the config
+            // keeps the path). The picker runs for a first-time Custom
+            // choice, and again when a remembered file no longer loads —
+            // with the choice rolled back, a fresh file is the only
+            // in-session recovery (review round 3, same date).
+            if (value === "custom") {
+              const remembered = getCustomEmojiFontPath();
+              if (remembered) {
+                try {
+                  await chooseEmojiStyle("custom"); // the stored path
+                } catch (err) {
+                  const replacement = await pickEmojiFont();
+                  if (!replacement) throw err; // keep the load error
+                  await chooseEmojiStyle("custom", replacement);
+                }
+              } else {
+                const file = await pickEmojiFont();
+                if (!file) return; // cancelled: keep the current style
+                await chooseEmojiStyle("custom", file);
+              }
+            } else {
+              await chooseEmojiStyle(value);
             }
-            await chooseEmojiStyle("custom", file);
-          } else {
-            await chooseEmojiStyle(value);
+          } finally {
+            // Refresh on success AND failure: a failed choice must not
+            // strand the select on a value that never applied (onchange
+            // only fires on a change, so a stale select cannot be rechosen
+            // — review round 3, 2026-11-24).
+            refreshEmojiCard();
           }
-          refreshEmojiCard();
         });
       },
     },
