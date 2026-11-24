@@ -59,6 +59,7 @@ import {
   textBlocker,
   textOverlayPlacement,
   cssFontFamily,
+  overlayFontFamily,
 } from "../src/editor/view/geometry";
 
 function image(width: number, height: number, fill = 0): RgbaImage {
@@ -443,4 +444,9 @@ test("the font picker matches names starting with the query first, then containi
 test("cssFontFamily quotes a family and escapes quotes and backslashes", () => {
   expect(cssFontFamily("Arial")).toBe('"Arial"');
   expect(cssFontFamily('Ab"c\\d')).toBe('"Ab\\"c\\\\d"');
+});
+
+test("overlayFontFamily puts the chosen font first, then the emoji style stack", () => {
+  expect(overlayFontFamily("Impact")).toBe('"Impact", var(--font-emoji)');
+  expect(overlayFontFamily('Ab"c\\d')).toBe('"Ab\\"c\\\\d", var(--font-emoji)');
 });

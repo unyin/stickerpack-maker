@@ -7,7 +7,7 @@
 //
 // Enter commits, Shift+Enter starts a new line, Esc cancels; clicking
 // elsewhere (blur) commits. The text is rendered in Rust once committed.
-import { cssFontFamily, type OverlayPlacement } from "./geometry";
+import { overlayFontFamily, type OverlayPlacement } from "./geometry";
 
 export interface TextEditRequest {
   readonly text: string;
@@ -54,7 +54,7 @@ export class TextEditOverlay {
     area.setAttribute("aria-label", "Text");
     area.wrap = "off";
     Object.assign(area.style, {
-      fontFamily: cssFontFamily(request.fontFamily),
+      fontFamily: overlayFontFamily(request.fontFamily),
       fontSize: `${request.fontSize}px`,
       lineHeight: request.lineHeight === null ? "normal" : `${request.lineHeight}px`,
       color: request.color,

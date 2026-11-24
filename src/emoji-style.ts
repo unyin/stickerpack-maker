@@ -10,9 +10,11 @@
 // next to the Library path (owner, task decision 2026-11-21) — unlike the
 // theme, a frontend-only localStorage preference (theme.ts).
 //
-// Editor text layers rasterise in Rust and use NO fallback font (SPEC §6),
-// so this DOM choice does not change text-layer rendering; SPM-20 reads the
-// style field from the config for that seam.
+// Editor text layers rasterise in Rust with per-character font fallback and
+// the style's emoji chain (ADR-0005; SPM-20 reads the style field from the
+// config for that seam), so this style picks the emoji font text layers
+// commit with too — and the typing overlay previews it through the same
+// var(--font-emoji).
 
 import { readCustomEmojiFont, setEmojiStyle, type EmojiStyle } from "./api";
 import { errorMessage } from "./ui";

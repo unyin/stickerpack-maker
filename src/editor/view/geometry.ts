@@ -350,6 +350,18 @@ export function cssFontFamily(family: string): string {
 }
 
 /**
+ * The text-editing overlay's CSS font-family (ADR-0005 parity; owner report
+ * 2026-11-24): the chosen family first, so covered glyphs (text-presentation
+ * included) preview in the layer's font, then the emoji style stack, so
+ * Emoji_Presentation emoji preview in the same font the canvas commits. A
+ * glyph the chosen family lacks may fall to the style stack before the
+ * webview's system fallback: the accepted fallback approximation.
+ */
+export function overlayFontFamily(family: string): string {
+  return `${cssFontFamily(family)}, var(--font-emoji)`;
+}
+
+/**
  * A pixel's colour as the pick loupe shows it (SPM-8, CMT-296): lowercase
  * #rrggbb. It only formats - the fully transparent refusal happens before
  * a sample ever reaches it.
