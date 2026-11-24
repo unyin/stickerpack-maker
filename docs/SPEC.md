@@ -343,8 +343,11 @@ stickers, Missing stickers, and the thumbnail.
     selection change — a tolerance drag is one step — and every step-back keeps the
     redo trail. The stored selection stays visible under every draft being drawn (the
     draft draws over it): the modifier is read at release, so a plain draw shows the
-    old selection until its release replaces it. What kills the selection kills its
-    trail: Esc, a Cut/Delete that consumes it, or a document change that drops it.
+    old selection until its release replaces it. The trail follows the owner's rule
+    (2026-11-24): Esc clears it all, and a document edit clears the trail outright —
+    even when a plain Rectangle/Lasso survives the edit; a Cut or Delete that consumes
+    the selection clears it; a document undo or redo clears it only when it removes the
+    selection.
   - The **Lasso** is a hybrid (owner decision 2026-11-22, in the style of GIMP's Free
     Select): a click adds a waypoint (a straight edge from the last point), a drag draws
     freehand, and the two mix in one lasso, which stays open between presses with a
