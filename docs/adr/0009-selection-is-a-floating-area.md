@@ -4,7 +4,7 @@ The Editor's drawn selection (SPEC §6) was target-bound for one cycle: SPM-22's
 
 - A selection is a stack of contributions: a wand fill in the grid it was filled in (with that layer's transform), or a Rectangle/Lasso polygon in document pixels, each tagged add or subtract. One Rust command (`editor_compose_mask`) folds the stack into a grid's coverage mask: the document grid for the dashed-outline preview and the emptiness rule, the target layer's own grid at apply time — polygons via the same pixel-centre spans as Cut (identical pixels, no resampling), a wand mask as-is when applied back to its fill layer (bit-identical for every pre-existing flow), else one soft resample across grids.
 - A plain unmodified Rectangle/Lasso stays SPM-9 geometry untouched; a plain wand click is a single-contribution floating selection. The wand's click-time refusals (transparent spot, outside the layer, text layer, several layers selected) stay: the fill still needs pixels to read.
-- A composed selection inherits the wand lifetime: any document change drops it, while plain rect/lasso regions survive. That lifetime plus the edit-clears rule makes the selection's own undo trail safe (ADR-0005's SPM-23 amendment): the two histories never interleave — Ctrl+Z drains the selection's steps before document undo runs, and a document edit clears the trail outright.
+- A composed selection inherits the wand lifetime: any document change drops it, while plain rect/lasso regions survive. That lifetime plus the edit-clears rule makes the selection's own undo trail safe (ADR-0005's SPM-23 amendment): each Ctrl+Z drains the selection's remaining steps before document undo runs, and a document edit clears the trail outright.
 
 ## Rejected alternative
 
