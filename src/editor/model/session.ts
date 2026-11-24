@@ -1,6 +1,7 @@
-// One editing session: the document history, the layer selection, and
-// change notifications for the view. Selection is NOT an undo step
-// (ADR-0005); undo/redo prunes it to layers that still exist.
+// One editing session: the document history, the layer selection, the cut
+// selection with its own step trail, and change notifications for the view.
+// No selection is an undo step of the document (ADR-0005); undo/redo prunes
+// the layer selection to layers that still exist.
 import { layerImage, layerIndex, textLayersOf, type Doc, type TextLayer } from "./document";
 import { DEFAULT_HISTORY_BUDGET, History } from "./history";
 import type { Region } from "./region";
@@ -20,6 +21,10 @@ export class EditorSession {
   private readonly history: History<Doc>;
   private selected: string[] = [];
   private selectedRegion: Region | null = null;
+  /** The selection's own step trail (SPM-23): the states it came through, oldest first. */
+  private readonly regionPast: (Region | null)[] = [];
+  /** The states the selection was stepped back over, newest last: its redo trail. */
+  private readonly regionFuture: (Region | null)[] = [];
   private readonly listeners = new Set<() => void>();
 
   constructor(doc: Doc, budgetBytes = DEFAULT_HISTORY_BUDGET) {
@@ -40,15 +45,76 @@ export class EditorSession {
     return this.selected;
   }
 
-  /** The cut selection drawn on the canvas, or null (SPM-9). Not an undo step. */
+  /** The cut selection drawn on the canvas, or null (SPM-9). Not an undo step of the document. */
   get region(): Region | null {
     return this.selectedRegion;
   }
 
-  /** Set or clear the cut selection. */
-  setRegion(region: Region | null): void {
+  /**
+   * Commit a selection change as ONE step of the selection's own trail
+   * (SPM-23): the state it replaces joins the past, the stepped-over future
+   * is dropped, and the new state becomes the selection. Committing the
+   * state already drawn changes nothing (no step).
+   */
+  commitRegion(region: Region | null): void {
     if (region === this.selectedRegion) return;
+    this.regionPast.push(this.selectedRegion);
+    this.regionFuture.length = 0;
     this.selectedRegion = region;
+    this.notify();
+  }
+
+  /**
+   * Replace the selection WITHOUT a new step (SPM-23): the wand press's
+   * tolerance refills amend the step the press began, so one drag stays one
+   * step. The amended state diverges from any stepped-over future, which is
+   * therefore dropped.
+   */
+  amendRegion(region: Region | null): void {
+    if (region === this.selectedRegion) return;
+    this.regionFuture.length = 0;
+    this.selectedRegion = region;
+    this.notify();
+  }
+
+  /**
+   * Clear the selection and its whole trail (SPM-23): Esc's path, and the
+   * Cut/Delete paths that use the selection up. The selection was stepped
+   * through to build it, so it cannot be stepped back to once it is consumed.
+   */
+  clearRegion(): void {
+    if (this.selectedRegion === null && this.regionPast.length === 0 && this.regionFuture.length === 0) return;
+    this.selectedRegion = null;
+    this.regionPast.length = 0;
+    this.regionFuture.length = 0;
+    this.notify();
+  }
+
+  /** Whether the selection can be stepped back (its own trail has a state). */
+  get canUndoRegion(): boolean {
+    return this.regionPast.length > 0;
+  }
+
+  /** Whether a stepped-back selection state can be stepped forward to again. */
+  get canRedoRegion(): boolean {
+    return this.regionFuture.length > 0;
+  }
+
+  /** Step the selection back one committed change (the redo trail keeps the state left behind). */
+  undoRegion(): void {
+    const previous = this.regionPast.pop();
+    if (previous === undefined) return;
+    this.regionFuture.push(this.selectedRegion);
+    this.selectedRegion = previous;
+    this.notify();
+  }
+
+  /** Step the selection forward one change, when it was stepped back. */
+  redoRegion(): void {
+    const next = this.regionFuture.pop();
+    if (next === undefined) return;
+    this.regionPast.push(this.selectedRegion);
+    this.selectedRegion = next;
     this.notify();
   }
 
@@ -58,6 +124,32 @@ export class EditorSession {
 
   get canRedo(): boolean {
     return this.history.canRedo;
+  }
+
+  /** Whether Undo has anything to do at all: a selection step or a document step (SPM-23). */
+  get canUndoAny(): boolean {
+    return this.canUndoRegion || this.canUndo;
+  }
+
+  /** Whether Redo has anything to do at all: a selection step or a document step (SPM-23). */
+  get canRedoAny(): boolean {
+    return this.canRedoRegion || this.canRedo;
+  }
+
+  /**
+   * Ctrl+Z and the toolbar's Undo (SPM-23): step the selection back while its
+   * own steps exist, and only then undo the document — which drops whatever
+   * selection remains (the lifetime rule below).
+   */
+  undoSelectionFirst(): void {
+    if (this.canUndoRegion) this.undoRegion();
+    else this.undo();
+  }
+
+  /** Ctrl+Y / Ctrl+Shift+Z and the toolbar's Redo: the selection's steps first, then the document (SPM-23). */
+  redoSelectionFirst(): void {
+    if (this.canRedoRegion) this.redoRegion();
+    else this.redo();
   }
 
   /** Unsaved changes, for the close warning (SPEC §6, wired in SPM-10). */
@@ -125,11 +217,15 @@ export class EditorSession {
   /**
    * A composed region is a floating area built from wand fills (each bound
    * to its layer's pixels) and polygons (SPM-23), so any document change
-   * drops it; a plain rect or lasso region is unanchored geometry and
-   * survives (SPM-22's wand rule, generalized).
+   * drops it, and its step trail with it (the trail lives and dies with the
+   * selection); a plain rect or lasso region is unanchored geometry and
+   * survives, keeping its trail (SPM-22's wand rule, generalized).
    */
   private dropFloatingRegion(): void {
-    if (this.selectedRegion?.kind === "compose") this.selectedRegion = null;
+    if (this.selectedRegion?.kind !== "compose") return;
+    this.selectedRegion = null;
+    this.regionPast.length = 0;
+    this.regionFuture.length = 0;
   }
 
   private notify(): void {

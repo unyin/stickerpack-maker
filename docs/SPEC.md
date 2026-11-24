@@ -332,8 +332,19 @@ stickers, Missing stickers, and the thumbnail.
   - **Move / Rectangle / Lasso / Wand** tools: with one of the latter three, the left
     button draws a selection instead of moving layers or panning; wheel zoom and
     middle-drag pan still work, even mid-drag (only the left button's release ends a
-    drag). The selection is not an undo step; it stays until it is used, replaced, or
-    cleared with Esc (Esc clears it before it clears the layer selection).
+    drag). A bare Alt has no side effects on Windows: the editor marks it handled, so
+    the system menu never engages and the wheel keeps zooming (owner re-test ruling
+    2026-11-24). The selection stays until it is used, replaced, or cleared with Esc
+    (Esc clears it before it clears the layer selection). It is not a step of the
+    document's history, but it has its own step trail (SPM-23, owner decisions
+    2026-11-24): Ctrl+Z and Ctrl+Y (Ctrl+Shift+Z too) step the selection back and
+    forward while selection steps exist, then fall through to document undo/redo, and
+    the toolbar's Undo/Redo buttons follow the same route. One step per committed
+    selection change — a tolerance drag is one step — and every step-back keeps the
+    redo trail. The stored selection stays visible under every draft being drawn (the
+    draft draws over it): the modifier is read at release, so a plain draw shows the
+    old selection until its release replaces it. What kills the selection kills its
+    trail: Esc, a Cut/Delete that consumes it, or a document change that drops it.
   - The **Lasso** is a hybrid (owner decision 2026-11-22, in the style of GIMP's Free
     Select): a click adds a waypoint (a straight edge from the last point), a drag draws
     freehand, and the two mix in one lasso, which stays open between presses with a
@@ -360,10 +371,11 @@ stickers, Missing stickers, and the thumbnail.
     re-filling the layer
     in coarse steps as it changes (a performance choice, not a promise of any particular
     step). A plain click replaces the selection; with a selection drawn, Shift adds the
-    clicked region to it and Alt removes it (with both held, Shift wins) — a selection is
-    session state, so Undo cannot take a region back. The region draws like the others (a
-    dashed outline, one loop per boundary of the merged area) and dies with any edit or
-    undo. A fully transparent or out-of-layer click, and a text layer or several
+    clicked region to it and Alt removes it (with both held, Shift wins) — the way back
+    from an accidental compose is the selection's own step-undo (above), not the
+    document's undo. The region draws like the others (a dashed outline, one loop per
+    boundary of the merged area) and dies with any edit or undo, its step trail with it.
+    A fully transparent or out-of-layer click, and a text layer or several
     selected layers, say why in the message line and change nothing.
   - **The selection composes across the tools** (SPM-23, owner decisions 2026-11-24): a
     selection is one floating area, independent of the layer or the tool that built it — a
@@ -393,7 +405,11 @@ stickers, Missing stickers, and the thumbnail.
     selected now cuts or erases from that selected layer, where the selection touches it;
     with no or several layers selected Delete is refused with the select-one-image-layer
     reason; and Shift + wand-click on another layer adds that region to the selection
-    instead of starting fresh.
+    instead of starting fresh. Every committed change of the selection is ONE step of its
+    own trail — each wand click, each Rectangle/Lasso commit, a tolerance drag as one
+    step — and a subtract that empties the selection is a step too, so Ctrl+Z brings the
+    selection back; the steps are taken back and forward before the document's own
+    undo/redo runs, and the trail dies with the selection (the selection bullet above).
   - **Cut** works on exactly one selected image layer that the selection touches (its
     tooltip says why not). The selected pixels (whole pixels whose centres lie inside the
     selection; a lasso that crosses itself leaves the overlap out) move into a new floating

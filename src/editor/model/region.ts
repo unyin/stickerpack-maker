@@ -1,8 +1,9 @@
 // The selection drawn on the canvas (SPM-9; the wand since SPM-22; composed
 // across tools since SPM-23): what Cut lifts and Delete erases. Like the
-// layer selection it lives in the session and is not an undo step
-// (ADR-0005). A plain Rectangle/Lasso region is unanchored geometry in
-// document pixels and survives document changes; a composed region is a
+// layer selection it lives in the session and is not a step of the
+// document's history (ADR-0005); since SPM-23 it keeps its own step trail
+// beside that history. A plain Rectangle/Lasso region is unanchored geometry
+// in document pixels and survives document changes; a composed region is a
 // floating stack of contributions — a wand fill in the grid it was filled
 // in, or a polygon in document pixels — and dies with any change, like the
 // wand's did. No Konva, no DOM.

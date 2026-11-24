@@ -39,11 +39,12 @@ export type WandMode = "replace" | "add" | "subtract";
 /**
  * What the click's modifiers do (owner decision 2026-11-24): a plain click
  * replaces the selection, Shift adds the clicked region to it, Alt
- * subtracts it — the way back from an accidentally added region, since a
- * selection is session state and never an undo step (ADR-0005). Shift wins
- * when both are held. With no selection on the canvas every modifier acts
- * as a plain click; the caller also treats a Rectangle/Lasso draw that way
- * (SPM-23).
+ * subtracts it. The way back from an accidentally composed region is the
+ * selection's own step-undo (Ctrl+Z while selection steps exist, SPM-23);
+ * Alt-subtract still subtracts, and the selection never enters the
+ * document's history (ADR-0005). Shift wins when both are held. With no
+ * selection on the canvas every modifier acts as a plain click; the caller
+ * also treats a Rectangle/Lasso draw that way (SPM-23).
  */
 export function wandModeFor(shift: boolean, alt: boolean): WandMode {
   if (shift) return "add";

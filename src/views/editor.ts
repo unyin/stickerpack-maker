@@ -238,11 +238,11 @@ function buildEditor(): HTMLElement {
   const addButton = button("Add image as layer", () => run(addImageAsLayer), "primary");
   const undoButton = button("Undo", () => {
     clearNote();
-    session?.undo();
+    session?.undoSelectionFirst();
   });
   const redoButton = button("Redo", () => {
     clearNote();
-    session?.redo();
+    session?.redoSelectionFirst();
   });
   // Sizing tools (SPEC §6), all on the whole image as one group. Their labels
   // and titles come from the active constraint set and are (re)set in
@@ -1154,7 +1154,7 @@ function buildEditor(): HTMLElement {
       ({ source, cut }, doc) => {
         const id = nextLayerId(doc);
         current.apply((d) => cutLayer(d, source.id, cut));
-        current.setRegion(null);
+        current.clearRegion();
         current.select(id);
         setTool("move");
       },
@@ -1337,24 +1337,22 @@ function buildEditor(): HTMLElement {
   let wand: WandPress | null = null;
 
   /**
-   * Merge a floating selection's contributions over the document and draw
-   * its merged outline (SPM-23): the commit every composition shares — a
-   * wand click's add/subtract and a Rectangle/Lasso draw's. A merge that
-   * covers nothing clears the selection (a subtract that emptied it).
+   * Merge a floating selection's contributions over the document (SPM-23):
+   * the dashed outline's source, in document pixels; null when the stack
+   * covers nothing (a subtract that emptied it).
    */
-  async function composeDoc(current: EditorSession, contributions: readonly Contribution[]): Promise<void> {
+  async function mergedSelection(current: EditorSession, contributions: readonly Contribution[]): Promise<ComposedRegion | null> {
     const merged = await composeSelection(current.doc.width, current.doc.height, IDENTITY, contributions);
-    if (merged.width === 0 || merged.height === 0) {
-      current.setRegion(null);
-      return;
-    }
-    current.setRegion({ kind: "compose", contributions, outlines: traceOutlines(merged, IDENTITY) });
+    return merged.width === 0 || merged.height === 0
+      ? null
+      : { kind: "compose", contributions, outlines: traceOutlines(merged, IDENTITY) };
   }
 
   /**
    * A Rectangle/Lasso draw released with Shift or Alt over an existing
    * selection (SPM-23): the polygon joins the selection's stack, which is
-   * merged again over the document for its dashed outline.
+   * merged again over the document for its dashed outline, as one step.
+   * An emptied stack is a step to none, so the step-undo restores it.
    */
   function composeShape(op: ContributionOp, points: readonly Point[]): void {
     const current = session;
@@ -1362,7 +1360,8 @@ function buildEditor(): HTMLElement {
     const region = current.region;
     if (!region) return; // the stage only composes onto a selection already drawn
     const contribution: PolyContribution = { kind: "poly", op, feather: feathered, points };
-    void run(() => composeDoc(current, [...contributionsOf(region, feathered), contribution]));
+    const contributions = [...contributionsOf(region, feathered), contribution];
+    void run(async () => current.commitRegion(await mergedSelection(current, contributions)));
   }
 
   /**
@@ -1405,6 +1404,7 @@ function buildEditor(): HTMLElement {
       base: region ? contributionsOf(region, feathered) : [],
       gesture: startWandGesture(at, tolerance),
       filled: tolerance,
+      stepped: undefined,
       fills: 0,
     };
     void fillWand(wand, tolerance);
@@ -1461,12 +1461,26 @@ function buildEditor(): HTMLElement {
         return;
       }
       const fill: WandContribution = { kind: "wand", op: "add", transform: press.transform, mask };
+      // The press's FIRST landed fill is one selection step (pushing the
+      // pre-press selection); every refill amends that same step, so a
+      // tolerance drag is one step, not one per refill (SPM-23, owner
+      // decision 2026-11-24). A fill that never landed leaves no step, and a
+      // step that died mid-drag (Esc, a document change) is not amended: the
+      // next fill is a fresh step.
+      const amend = press.stepped !== undefined && current.region === press.stepped;
       if (press.mode === "replace") {
-        current.setRegion({ kind: "compose", contributions: [fill], outlines: traceOutlines(mask, press.transform) });
+        const region: ComposedRegion = { kind: "compose", contributions: [fill], outlines: traceOutlines(mask, press.transform) };
+        if (amend) current.amendRegion(region);
+        else current.commitRegion(region);
+        press.stepped = region;
         return;
       }
       const contributions: Contribution[] = [...press.base, { ...fill, op: press.mode }];
-      await composeDoc(current, contributions);
+      const region = await mergedSelection(current, contributions);
+      if (press.fills !== id) return; // a newer fill superseded this one mid-merge
+      if (amend) current.amendRegion(region);
+      else current.commitRegion(region);
+      press.stepped = region;
     } catch (error) {
       say(errorMessage(error));
     }
@@ -1750,7 +1764,7 @@ function buildEditor(): HTMLElement {
       },
       ({ id, hole }) => {
         current.apply((d) => refineLayerPixels(d, id, hole));
-        current.setRegion(null);
+        current.clearRegion();
       },
     );
   }
@@ -1903,8 +1917,8 @@ function buildEditor(): HTMLElement {
     // While the model downloads (the one long busy wait), the disabled Save
     // says the download's progress instead of its idle title (SPEC §2).
     saveButton.title = saveReason ?? downloadNote ?? saveTitle();
-    undoButton.disabled = busy || !current.canUndo;
-    redoButton.disabled = busy || !current.canRedo;
+    undoButton.disabled = busy || !current.canUndoAny;
+    redoButton.disabled = busy || !current.canRedoAny;
     upButton.disabled = busy || !single || index === doc.layers.length - 1;
     downButton.disabled = busy || !single || index === 0;
     mergeButton.disabled = busy || blocker !== null;
@@ -1998,7 +2012,16 @@ function buildEditor(): HTMLElement {
     const current = session;
     // Ctrl+S never reaches the webview's own "save page", even while busy.
     if (view.isConnected && isSaveShortcut(e)) e.preventDefault();
-    if (!current || !view.isConnected || textOverlay.isOpen) return;
+    if (!current || !view.isConnected) return;
+    // A bare Alt is marked handled while a session is open (owner re-test
+    // ruling 2026-11-24, SPM-23): on Windows it is the system menu's toggle,
+    // and while the menu holds the input the wheel never reaches the canvas,
+    // so each Alt press flipped zoom on and off. Only the default is
+    // suppressed; no behaviour is attached. AltGr is safe: its events carry
+    // the character as their key, not "Alt", and a text field keeps the
+    // default (AltGr types there).
+    if (e.key === "Alt" && !isTextTarget(e.target)) e.preventDefault();
+    if (textOverlay.isOpen) return;
     // While the toolbar is busy, Ctrl+S still says why (SPEC §6): the model
     // download is the one wait long enough to need it; other keys wait too.
     if (busy) {
@@ -2016,11 +2039,11 @@ function buildEditor(): HTMLElement {
     const key = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && key === "z" && !e.shiftKey) {
       clearNote();
-      current.undo();
+      current.undoSelectionFirst();
     }
     else if ((e.ctrlKey || e.metaKey) && (key === "y" || (key === "z" && e.shiftKey))) {
       clearNote();
-      current.redo();
+      current.redoSelectionFirst();
     }
     // Ctrl+S saves; a blocked save says why (SPEC §6: hard-blocked), and a
     // mid-press brush stroke is refused before the dialog can open.
@@ -2042,7 +2065,7 @@ function buildEditor(): HTMLElement {
     // swallow it. Esc with nothing selected does nothing (the tool and its
     // preview stay), and Warp/Erase/Restore keep today's Esc.
     else if (e.key === "Escape") {
-      if (escapeTarget(current.region) === "region") current.setRegion(null);
+      if (escapeTarget(current.region) === "region") current.clearRegion();
       else if (escDiscardsEffect(tool, current.selection)) {
         setTool("move"); // first, so the clearSelection's refresh finds no basis to re-decide
         current.clearSelection();
@@ -2051,6 +2074,14 @@ function buildEditor(): HTMLElement {
     else if (e.key === "Delete") deletePressed();
     else return;
     e.preventDefault();
+  });
+
+  // The Windows system menu triggers on Alt's RELEASE, so the keyup is
+  // marked handled too (owner re-test ruling 2026-11-24, SPM-23). With no
+  // session open the Editor leaves Alt alone, as it leaves every shortcut.
+  document.addEventListener("keyup", (e) => {
+    if (!session || !view.isConnected) return;
+    if (e.key === "Alt" && !isTextTarget(e.target)) e.preventDefault();
   });
 
   // Ctrl+V with an image on the clipboard adds it as a layer (SPM-9).
@@ -2115,6 +2146,12 @@ interface WandPress {
   gesture: WandGesture;
   /** The tolerance of the last committed fill. */
   filled: number;
+  /**
+   * The selection state this press's own step landed (undefined before the
+   * first landed fill, and null for a step that emptied the selection), so
+   * its refills amend that step — never one this press no longer owns.
+   */
+  stepped: Region | null | undefined;
   /** Counts fills; the latest wins when a drag outruns the IPC. */
   fills: number;
 }

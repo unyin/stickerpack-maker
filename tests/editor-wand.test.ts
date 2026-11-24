@@ -181,7 +181,7 @@ test("a floating selection dies with any document change; a rectangle's survives
   const session = new EditorSession(newDocument(image(4, 4), "base", STICKER_CANVAS));
   const base = session.doc.layers[0].id;
   const region = wandRegion(session.doc, mask(0, 0, 2, 2, [255, 255, 255, 255]));
-  session.setRegion(region);
+  session.commitRegion(region);
   // An edit that changes nothing keeps it (no history step, no drop).
   session.apply((doc) => doc);
   expect(session.region).toBe(region);
@@ -190,11 +190,11 @@ test("a floating selection dies with any document change; a rectangle's survives
   expect(session.region).toBeNull();
   // A rectangle region is plain geometry and survives edits.
   const rect = rectRegion({ x: 0, y: 0 }, { x: 2, y: 2 })!;
-  session.setRegion(rect);
+  session.commitRegion(rect);
   session.apply((doc) => setLayerImage(doc, base, image(4, 4)));
   expect(session.region).toBe(rect);
   // Undo reaches back past both edits: a floating selection would not survive it.
-  session.setRegion(region);
+  session.commitRegion(region);
   session.undo();
   expect(session.region).toBeNull();
   // The stack a plain rectangle contributes to is floating too (SPM-23).
@@ -203,7 +203,7 @@ test("a floating selection dies with any document change; a rectangle's survives
     contributions: contributionsOf(rect, true),
     outlines: [rect.points],
   };
-  session.setRegion(composed);
+  session.commitRegion(composed);
   session.redo();
   expect(session.region).toBeNull();
 });

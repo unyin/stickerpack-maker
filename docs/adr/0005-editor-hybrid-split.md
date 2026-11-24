@@ -77,3 +77,12 @@ Every operation needs undo/redo. The owner values the editing feel above all (AD
 - A glyph the chosen family lacks may fall to the style stack before the webview's system fallback, so
   the preview can show it in the emoji font while Rust keeps it with the text font. That is an accepted
   approximation of the fallback, not a mismatch the overlay can avoid.
+
+## Amendment (SPM-23, 2026-11-24)
+
+**The selection has its own undo trail beside the document history — it still never enters it.**
+
+- Ctrl+Z/Ctrl+Y step the selection back and forward while selection steps exist (one step per committed selection change; a tolerance drag is one step), then fall through to document undo/redo exactly as before; the toolbar Undo/Redo buttons follow the same route. The core stands: the document's history records document states only, and "unsaved changes" never moves when a selection is edited.
+- Why the trail is safe: a floating selection dies on any document change (its lifetime), so the two histories are never live at once — document undo only ever runs after the selection's steps are exhausted.
+- The trail lives and dies with the selection: every step-back keeps the redo trail; Esc, a document edit, an undo/redo that drops the region, or a Cut/Delete that consumes it clears both (owner, 2026-11-24: "undo shouldn't clear the step history unless it completely removes the selection" — operationalized as: what kills the selection kills its trail).
+- The stored selection also stays visible under every draft while it draws, and bare Alt is marked handled so the Windows system menu never engages (owner re-test rulings, same date; SPEC §6 carries the behavior).

@@ -222,7 +222,7 @@ export class EditorStage {
     flipEnabled: false,
     ignoreStroke: true,
   });
-  /** The cut selection (session.region, or the one being drawn): a halo under a dashed line. */
+  /** The stored Rectangle/Lasso selection: a halo under a dashed line. */
   private readonly regionHalo = new Konva.Line({ closed: true, strokeWidth: 3, strokeScaleEnabled: false, listening: false });
   private readonly regionLine = new Konva.Line({
     closed: true,
@@ -233,6 +233,20 @@ export class EditorStage {
   });
   /** The drawn selection's outlines (SPM-22, composed since SPM-23): one halo-and-dash pair per contour. */
   private readonly regionOutlines = new Konva.Group({ listening: false });
+  /**
+   * The draft being drawn (a rectangle drag, an open lasso): its own halo
+   * under a dashed line, so it draws OVER the stored selection, which stays
+   * visible meanwhile (SPM-23 re-test, owner decision 2026-11-24).
+   */
+  private readonly draftHalo = new Konva.Line({ closed: true, strokeWidth: 3, strokeScaleEnabled: false, listening: false, visible: false });
+  private readonly draftLine = new Konva.Line({
+    closed: true,
+    strokeWidth: 1,
+    dash: [4, 4],
+    strokeScaleEnabled: false,
+    listening: false,
+    visible: false,
+  });
   private outlinePairs: { halo: Konva.Line; line: Konva.Line }[] = [];
   /** The composed region whose outlines are drawn, to rebuild them only on a change. */
   private outlinesDrawn: ComposedRegion | null = null;
@@ -334,7 +348,7 @@ export class EditorStage {
       strokeScaleEnabled: false,
       listening: false,
     });
-    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.regionOutlines, this.brushHalo, this.brushRing, this.warpRing, this.readout.label, this.loupe);
+    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.regionOutlines, this.draftHalo, this.draftLine, this.brushHalo, this.brushRing, this.warpRing, this.readout.label, this.loupe);
     this.loupeCanvas.width = LOUPE_SIDE;
     this.loupeCanvas.height = LOUPE_SIDE;
     // The loupe group hides the whole magnifier until a pick; its hex bubble
@@ -677,6 +691,8 @@ export class EditorStage {
     this.transformer.anchorFill(token("--panel"));
     this.regionHalo.stroke(token("--panel"));
     this.regionLine.stroke(token("--accent-ink"));
+    this.draftHalo.stroke(token("--panel"));
+    this.draftLine.stroke(token("--accent-ink"));
     for (const { halo, line } of this.outlinePairs) {
       halo.stroke(token("--panel"));
       line.stroke(token("--accent-ink"));
@@ -838,8 +854,9 @@ export class EditorStage {
 
   /**
    * A finished draw becomes the session's selection (or none, for a click or
-   * no area). Since SPM-23 a modifier read at the release or close hands the
-   * polygon to the view, which merges it onto the existing selection.
+   * no area), as ONE step of the selection's own trail. Since SPM-23 a
+   * modifier read at the release or close hands the polygon to the view,
+   * which merges it onto the existing selection.
    */
   private commitRegion(drawn: PolygonRegion | null, mods: { shift: boolean; alt: boolean }): void {
     const decision = shapeCommit(drawn, this.session.region, mods);
@@ -848,48 +865,54 @@ export class EditorStage {
       return;
     }
     if (decision.region === this.session.region) this.drawRegion();
-    else this.session.setRegion(decision.region);
+    else this.session.commitRegion(decision.region);
   }
 
-  /** Draw the selection being drawn, else the session's region. */
+  /** Draw the session's selection and, over it, the draft being drawn. */
   private drawRegion(): void {
     const region = this.session.region;
-    // A draft (a rectangle drag, an open lasso) always outranks the stored
-    // region: it is what the release will replace the region with.
-    const drafting = this.rectDrag !== null || this.lasso !== null;
+    // The stored selection stays visible under EVERY draft (owner re-test
+    // 2026-11-24, SPM-23), plain ones included: the modifier is read at the
+    // release, so mid-drag nothing can say whether the release composes or
+    // replaces, and the selection changes only when a release replaces it.
+    // The draft draws its own halo-under-dash pair over the stored outlines.
     // A composed region's outlines (SPM-22, composed since SPM-23): a pair
-    // per contour of its merged mask.
-    if (region?.kind === "compose" && !drafting) {
-      this.regionHalo.visible(false);
-      this.regionLine.visible(false);
+    // per contour of its merged mask, rebuilt only when the region changes.
+    if (region?.kind === "compose") {
       if (this.outlinesDrawn !== region) {
         this.drawOutlines(region.outlines);
         this.outlinesDrawn = region;
       }
-      this.guides.batchDraw();
-      return;
+    } else {
+      this.outlinesDrawn = null;
+      this.clearOutlines();
     }
-    this.outlinesDrawn = null;
-    this.clearOutlines();
-    // A composed region under a draft is already spent (the release replaces
-    // it), so the draft draws alone, like over a Rectangle/Lasso region.
-    const polygon = region && region.kind !== "compose" ? region : undefined;
-    let points: readonly Point[] = polygon?.points ?? [];
-    let closed = true;
+    // The stored Rectangle/Lasso polygon's own dashed line, under the draft.
+    const stored = region && region.kind !== "compose" ? region.points : [];
+    this.setRegionLine(this.regionHalo, this.regionLine, stored, true);
+    const draft = this.draftPolygon();
+    this.setRegionLine(this.draftHalo, this.draftLine, draft.points, draft.closed);
+    this.guides.batchDraw();
+  }
+
+  /** The polygon a draft presently draws, in document px (empty when nothing draws). */
+  private draftPolygon(): { points: readonly Point[]; closed: boolean } {
     if (this.rectDrag) {
       const { start, end } = this.rectDrag;
-      points = [start, { x: end.x, y: start.y }, end, { x: start.x, y: end.y }];
-    } else if (this.lasso) {
-      points = lassoPreview(this.lasso, this.pointer());
-      closed = false;
+      return { points: [start, { x: end.x, y: start.y }, end, { x: start.x, y: end.y }], closed: true };
     }
+    if (this.lasso) return { points: lassoPreview(this.lasso, this.pointer()), closed: false };
+    return { points: [], closed: false };
+  }
+
+  /** Place one dashed selection contour pair (a halo under a line) at `points`; hide it when there are too few. */
+  private setRegionLine(halo: Konva.Line, line: Konva.Line, points: readonly Point[], closed: boolean): void {
     const flat = points.flatMap((p) => [p.x, p.y]);
-    for (const line of [this.regionHalo, this.regionLine]) {
-      line.points(flat);
-      line.closed(closed);
-      line.visible(points.length > 1);
+    for (const node of [halo, line]) {
+      node.points(flat);
+      node.closed(closed);
+      node.visible(points.length > 1);
     }
-    this.guides.batchDraw();
   }
 
   /**
