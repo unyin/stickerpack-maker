@@ -250,7 +250,11 @@ export const EFFECT_HEADER = "x-effect";
  * Draw an outline or fuzzy glow on one layer in Rust (SPM-8): the live
  * preview and the result Apply bakes in are this one call (ADR-0008). A
  * text layer goes as text and comes back as pixels; the result is larger
- * than the layer, with its new transform.
+ * than the layer, with its new transform. Since SPM-18 the Outline tool
+ * on a text layer restyles through renderText and never calls here —
+ * except a layer scaled to nothing, which falls through and is refused
+ * here like any degenerate transform; this call is Glow on text and
+ * every raster target.
  */
 export async function applyEffect(input: LayerInput, effect: Effect): Promise<EffectResult> {
   const { body, meta } = encodeLayers([input]);

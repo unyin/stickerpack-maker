@@ -23,6 +23,17 @@
 //! rounded out to whole pixels: the webview measures text layers by this
 //! box, so "longest side exactly 512" holds for text as it does for
 //! images.
+//!
+//! Since SPM-18 an optional outline (colour, width) strokes those same
+//! monochrome outlines BEHIND the fill — round joins, the width being the
+//! reach beyond the ink IN THE LAYER'S OWN PX (the Outline tool converts
+//! its document-px width on its way in, model/effects.ts `outlineTextPatch`) —
+//! so the box grows by it on every side and the stroke drawn for it is
+//! twice as wide (a stroke straddles its path by half). Colour emoji are
+//! painted, never stroked: the box still grows around their ink. A style
+//! change that grows the box is expected to shift the layer's transform
+//! so the text itself stays put (document.ts `anchoredTransform`), which
+//! is why the metrics report the layout box's place inside the box.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -30,7 +41,7 @@ use std::sync::OnceLock;
 use ab_glyph::{Font, FontRef, GlyphId, OutlineCurve};
 use fontdb::{Database, Family, Query};
 use serde::Deserialize;
-use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Transform};
+use tiny_skia::{FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Transform};
 use ttf_parser::{GlyphId as EmojiGlyphId, RgbaColor};
 
 use super::emoji::{
@@ -39,7 +50,7 @@ use super::emoji::{
 };
 use super::placement::{check_extent, from_pixmap, transform_of, Bounds, LayerTransform, PlacedImage};
 use super::Rgba;
-use crate::limits::{TEXT_MAX_FONT_SIZE, TEXT_MIN_FONT_SIZE};
+use crate::limits::{TEXT_MAX_FONT_SIZE, TEXT_MAX_OUTLINE_WIDTH, TEXT_MIN_FONT_SIZE};
 
 /// A text layer's content and style; mirrors `TextStyle` in src/editor/model/document.ts.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -51,6 +62,38 @@ pub struct TextSpec {
     pub font_size: f32,
     /// `#rrggbb`.
     pub color: String,
+    /// The outline drawn behind the fill (SPM-18), or None for no outline:
+    /// `width` is the reach beyond the glyph ink in the layer's own px at
+    /// scale 1 (the same unit as `font_size`; the Outline tool converts its
+    /// document-px width into it — model/effects.ts `outlineTextPatch`), so the
+    /// stroke drawn for it is twice as wide — a stroke straddles its path
+    /// by half.
+    #[serde(default)]
+    pub outline: Option<OutlineSpec>,
+}
+
+/// A text layer's outline as the wire carries it (SPM-18); `TextSpec::outline`.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutlineSpec {
+    /// `#rrggbb`.
+    pub color: String,
+    /// Reach beyond the glyph ink in px at scale 1.
+    pub width: f32,
+}
+
+/// An outline checked and ready to draw: its colour and reach. The box is
+/// grown for it before the draw, and the stroke drawn with round joins.
+#[derive(Clone, Copy)]
+struct Outline {
+    color: [u8; 3],
+    width: f32,
+}
+
+/// A spec's colours, checked: the fill and the outline, if any.
+struct Checked {
+    fill: [u8; 3],
+    outline: Option<Outline>,
 }
 
 /// Where the text sits in its box, in px at scale 1, for the webview's
@@ -115,7 +158,7 @@ pub(super) fn parse_color(color: &str) -> Result<[u8; 3], String> {
     Ok([channel(0)?, channel(2)?, channel(4)?])
 }
 
-fn check(spec: &TextSpec) -> Result<[u8; 3], String> {
+fn check(spec: &TextSpec) -> Result<Checked, String> {
     if spec.text.trim().is_empty() {
         return Err("a text layer needs some text".to_string());
     }
@@ -123,7 +166,21 @@ fn check(spec: &TextSpec) -> Result<[u8; 3], String> {
     if !(spec.font_size.is_finite() && spec.font_size >= min && spec.font_size <= max) {
         return Err(format!("the font size must be from {min} to {max} px"));
     }
-    parse_color(&spec.color)
+    let fill = parse_color(&spec.color)?;
+    let outline = match &spec.outline {
+        None => None,
+        // A width of 0 never crosses the wire from the webview (its "no
+        // outline" is a null), but a request that sends one gets the same
+        // honesty as any other setting: refused, not silently unoutlined.
+        Some(o) => {
+            let (min, max) = (1.0, TEXT_MAX_OUTLINE_WIDTH as f32);
+            if !(o.width.is_finite() && o.width >= min && o.width <= max) {
+                return Err(format!("the outline width must be from {min} to {max} px"));
+            }
+            Some(Outline { color: parse_color(&o.color)?, width: o.width })
+        }
+    };
+    Ok(Checked { fill, outline })
 }
 
 /// Text laid out in its box (whole pixels, top-left at 0, 0).
@@ -133,6 +190,8 @@ struct Laid {
     path: Option<tiny_skia::Path>,
     /// Colour glyphs from the emoji chain, at their pen positions.
     colour: Vec<ColourGlyph>,
+    /// The outline the box was grown for (SPM-18): stroked behind the fill.
+    outline: Option<Outline>,
     width: u32,
     height: u32,
     metrics: TextMetrics,
@@ -259,6 +318,16 @@ struct Items {
     widest: f32,
 }
 
+/// The chosen font's line metrics at the spec's size: what lay_out computes
+/// once and box_and_path measures the layout box by.
+struct LineMetrics {
+    ascent: f32,
+    descent: f32,
+    line_height: f32,
+    /// The lines stacked: (lines - 1) gaps plus one line box.
+    height: f32,
+}
+
 /// Collect an emoji run's continuation (joiners, selectors, tones, more
 /// starters) after its first characters. A character right after a ZWJ
 /// joins the run whatever its own presentation — that is what a ZWJ means —
@@ -282,6 +351,7 @@ fn lay_out(
     fonts: &Database,
     emoji: &EmojiFonts,
     spec: &TextSpec,
+    outline: Option<Outline>,
     chosen: &FontRef,
     chosen_id: fontdb::ID,
 ) -> Result<Laid, String> {
@@ -350,7 +420,8 @@ fn lay_out(
         }
     }
     let layout_height = (lines.len() - 1) as f32 * line_height + ascent + descent;
-    box_and_path(fonts, emoji, items, layout_height, ascent, descent, line_height)
+    let metrics = LineMetrics { ascent, descent, line_height, height: layout_height };
+    box_and_path(fonts, emoji, items, metrics, outline)
 }
 
 /// Position one character's monochrome glyph, kerned against the previous
@@ -379,16 +450,19 @@ fn place_mono(
 }
 
 /// The box every glyph inks and the one path all monochrome outlines form.
+/// `outline` (SPM-18) grows the box by its width on every side, the ink
+/// box it strokes lying that many px inside it; the layout box the metrics
+/// report shifts with the growth, so the view can keep the text itself
+/// where it was.
 fn box_and_path(
     fonts: &Database,
     emoji: &EmojiFonts,
     items: Items,
-    layout_height: f32,
-    ascent: f32,
-    descent: f32,
-    line_height: f32,
+    lines: LineMetrics,
+    outline: Option<Outline>,
 ) -> Result<Laid, String> {
     let Items { mono, colour, widest } = items;
+    let LineMetrics { ascent, descent, line_height, height: layout_height } = lines;
     // Ink bounds: the monochrome outlines and the colour glyphs' ink.
     let (mut left, mut top, mut right, mut bottom) = (0f32, 0f32, widest, layout_height);
     let mut faces: HashMap<fontdb::ID, Vec<PlacedGlyph>> = HashMap::new();
@@ -426,6 +500,14 @@ fn box_and_path(
             bottom = bottom.max(y1);
         }
     }
+    // The outline's reach grows the box on every side (SPM-18); colour
+    // emoji ink counts as ink (it is painted, not stroked), so the box
+    // pads around emoji exactly as the pixel Outline effect would grow a
+    // layer the emoji sat on.
+    let (left, top, right, bottom) = match outline {
+        Some(o) => (left - o.width, top - o.width, right + o.width, bottom + o.width),
+        None => (left, top, right, bottom),
+    };
     let (left, top) = (left.floor(), top.floor());
     let width = ((right.ceil() - left) as u32).max(1);
     let height = ((bottom.ceil() - top) as u32).max(1);
@@ -445,6 +527,7 @@ fn box_and_path(
     Ok(Laid {
         path: path.finish(),
         colour,
+        outline,
         width,
         height,
         metrics: TextMetrics { origin_x: ox, origin_y: oy, ascent, descent, line_height },
@@ -499,6 +582,7 @@ fn with_layout<T>(
     fonts: &Database,
     emoji: &EmojiFonts,
     spec: &TextSpec,
+    outline: Option<Outline>,
     work: impl FnOnce(Laid) -> Result<T, String>,
 ) -> Result<T, String> {
     let query = Query { families: &[Family::Name(&spec.font_family)], ..Query::default() };
@@ -508,7 +592,7 @@ fn with_layout<T>(
         .with_face_data(id, |data, index| {
             let font = FontRef::try_from_slice_and_index(data, index)
                 .map_err(|_| format!("the font \"{}\" cannot be read", spec.font_family))?;
-            work(lay_out(fonts, emoji, spec, &font, id)?)
+            work(lay_out(fonts, emoji, spec, outline, &font, id)?)
         })
         .ok_or_else(missing)?
 }
@@ -518,6 +602,53 @@ fn fill(canvas: &mut Pixmap, path: &tiny_skia::Path, [r, g, b]: [u8; 3], transfo
     paint.set_color_rgba8(r, g, b, 255);
     paint.anti_alias = true;
     canvas.fill_path(path, &paint, FillRule::Winding, transform, None);
+}
+
+/// Stroke a laid-out text's glyph outlines (SPM-18): `width` px of reach
+/// beyond the ink on each side — the stroke straddles its path by half, so
+/// its own width is twice the reach — with round joins and caps, so it
+/// rounds its corners exactly as the pixel Outline effect's distance
+/// transform does. Drawn before the fill, the fill's pixels stay their own
+/// colour over it.
+fn stroke_outline(
+    canvas: &mut Pixmap,
+    path: &tiny_skia::Path,
+    [r, g, b]: [u8; 3],
+    width: f32,
+    transform: Transform,
+) {
+    let mut paint = Paint::default();
+    paint.set_color_rgba8(r, g, b, 255);
+    paint.anti_alias = true;
+    let pen = tiny_skia::Stroke {
+        width: width * 2.0,
+        line_join: LineJoin::Round,
+        line_cap: LineCap::Round,
+        ..tiny_skia::Stroke::default()
+    };
+    canvas.stroke_path(path, &paint, &pen, transform, None);
+}
+
+/// Stroke a laid-out text's outline, fill its glyphs and paint its colour
+/// emoji into `canvas` under `transform` (SPM-18: the outline behind the
+/// fill, the fill behind the emoji). The one draw path every text render
+/// shares — the view's scale-1 box, merge's placed image, Crop's clip and
+/// the save's canvas window — so they all agree on the pixels.
+fn draw_into(
+    canvas: &mut Pixmap,
+    fonts: &Database,
+    emoji: &EmojiFonts,
+    laid: &Laid,
+    fill_color: [u8; 3],
+    transform: Transform,
+) {
+    if let Some(path) = &laid.path {
+        if let Some(outline) = &laid.outline {
+            stroke_outline(canvas, path, outline.color, outline.width, transform);
+        }
+        fill(canvas, path, fill_color, transform);
+    }
+    paint_colour(canvas, fonts, emoji, laid, fill_color, transform);
 }
 
 /// Paint a laid-out text's colour glyphs (after its monochrome path).
@@ -545,14 +676,11 @@ fn paint_colour(
 /// Draw a text layer at scale 1 into its box: what the webview shows, and
 /// the box it measures the layer by.
 pub fn render(fonts: &Database, emoji: &EmojiFonts, spec: &TextSpec) -> Result<TextRender, String> {
-    let color = check(spec)?;
-    with_layout(fonts, emoji, spec, |laid| {
+    let checked = check(spec)?;
+    with_layout(fonts, emoji, spec, checked.outline, |laid| {
         let mut canvas =
             Pixmap::new(laid.width, laid.height).ok_or_else(|| "cannot allocate the text".to_string())?;
-        if let Some(path) = &laid.path {
-            fill(&mut canvas, path, color, Transform::identity());
-        }
-        paint_colour(&mut canvas, fonts, emoji, &laid, color, Transform::identity());
+        draw_into(&mut canvas, fonts, emoji, &laid, checked.fill, Transform::identity());
         Ok(TextRender { image: from_pixmap(&canvas), metrics: laid.metrics })
     })
 }
@@ -566,16 +694,16 @@ pub fn rasterise_placed(
     spec: &TextSpec,
     t: &LayerTransform,
 ) -> Result<PlacedImage, String> {
-    let color = check(spec)?;
+    let checked = check(spec)?;
     let transform = transform_of(t)?;
-    with_layout(fonts, emoji, spec, |laid| {
+    with_layout(fonts, emoji, spec, checked.outline, |laid| {
         let (left, top, width, height) = Bounds::of(&transform, laid.width, laid.height).whole_pixels();
         check_extent(width, height, "text")?;
         let image = draw_window(
             fonts,
             emoji,
             &laid,
-            color,
+            checked.fill,
             transform,
             TextWindow { x: left as i32, y: top as i32, width, height },
         )?;
@@ -606,30 +734,29 @@ pub fn rasterise_window(
     t: &LayerTransform,
     window: TextWindow,
 ) -> Result<Rgba, String> {
-    let color = check(spec)?;
+    let checked = check(spec)?;
     let transform = transform_of(t)?;
-    with_layout(fonts, emoji, spec, |laid| {
-        draw_window(fonts, emoji, &laid, color, transform, window)
+    with_layout(fonts, emoji, spec, checked.outline, |laid| {
+        draw_window(fonts, emoji, &laid, checked.fill, transform, window)
     })
 }
 
-/// Fill a layout's outlines and paint its colour glyphs, placed by
-/// `transform`, into the pixmap of `window` (whole document pixels).
+/// A laid-out text drawn into the pixmap of `window` (whole document
+/// pixels) through the one shared draw path (`draw_into`): placed by
+/// `transform`, the same pixels `rasterise_placed` produces for the same
+/// window.
 fn draw_window(
     fonts: &Database,
     emoji: &EmojiFonts,
     laid: &Laid,
-    color: [u8; 3],
+    fill_color: [u8; 3],
     transform: Transform,
     window: TextWindow,
 ) -> Result<Rgba, String> {
     let mut canvas =
         Pixmap::new(window.width.max(1), window.height.max(1)).ok_or_else(|| "cannot allocate the text".to_string())?;
     let transform = transform.post_translate(-window.x as f32, -window.y as f32);
-    if let Some(path) = &laid.path {
-        fill(&mut canvas, path, color, transform);
-    }
-    paint_colour(&mut canvas, fonts, emoji, laid, color, transform);
+    draw_into(&mut canvas, fonts, emoji, laid, fill_color, transform);
     Ok(from_pixmap(&canvas))
 }
 
@@ -642,7 +769,7 @@ mod tests {
     use super::*;
 
     fn spec(text: &str, size: f32) -> TextSpec {
-        TextSpec { text: text.into(), font_family: FAMILY.into(), font_size: size, color: "#ff0000".into() }
+        TextSpec { text: text.into(), font_family: FAMILY.into(), font_size: size, color: "#ff0000".into(), outline: None }
     }
 
     /// The test fonts' database: the chosen Test Sans plus its fallback
@@ -891,6 +1018,7 @@ mod tests {
                 font_family: FAMILY.into(),
                 font_size: 100.0,
                 color: "#000000".into(),
+                outline: None,
             })
             .unwrap();
             assert!(
@@ -898,6 +1026,123 @@ mod tests {
                 "{text}: the box matches the ligature"
             );
         }
+    }
+
+    // ---- SPM-18: the outline style ----
+
+    #[test]
+    fn an_outline_strokes_behind_the_fill_and_grows_the_box() {
+        // 'A' inks x 10..50, y 10..80 in a 60x100 box (see the first test);
+        // a 2 px outline reaches 2 px beyond that ink on each side, so the
+        // box grows to 64x104 and the glyph sits 2 px in — its own place
+        // kept by the layer's transform shifting (document.ts
+        // `anchoredTransform`), not by the render.
+        let mut s = spec("A", 100.0);
+        s.outline = Some(OutlineSpec { color: "#0000ff".into(), width: 2.0 });
+        let out = render(&fonts(), &EmojiFonts::empty(), &s).unwrap();
+        assert_eq!((out.image.width, out.image.height), (64, 104));
+        assert_eq!((out.metrics.origin_x, out.metrics.origin_y), (2.0, 2.0));
+        // The fill's own pixels stay exactly their colour over the stroke.
+        assert_eq!(px(&out.image, 30, 50), [255, 0, 0, 255]);
+        // The stroke, just outside the ink (which now starts at x 12, y 12).
+        assert_eq!(px(&out.image, 10, 50), [0, 0, 255, 255]);
+        assert_eq!(px(&out.image, 30, 10), [0, 0, 255, 255]);
+        assert_eq!(px(&out.image, 9, 50)[3], 0, "the stroke ends 2 px out");
+        assert_eq!(px(&out.image, 30, 9)[3], 0);
+        // The corner is round, not square: a square growth would fill the
+        // pixel diagonally off the glyph corner outright, the round join
+        // leaves it partly covered (the pixel Outline effect's own test
+        // pins the same property on its side).
+        let corner = px(&out.image, 10, 10);
+        assert!(corner[3] > 0 && corner[3] < 255, "an anti-aliased round corner: {corner:?}");
+        assert_eq!(px(&out.image, 9, 9)[3], 0);
+    }
+
+    #[test]
+    fn a_placed_outline_scales_with_the_text_and_stays_sharp() {
+        // Scale 2: the box (outline included) doubles, and the stroke is
+        // drawn from the outlines at that scale, so it reaches 4 document
+        // px beyond the ink with exact edges, like the glyphs.
+        let db = fonts();
+        let mut s = spec("A", 100.0);
+        s.outline = Some(OutlineSpec { color: "#0000ff".into(), width: 2.0 });
+        let t = LayerTransform { x: 5.0, y: 7.0, scale_x: 2.0, scale_y: 2.0, rotation: 0.0 };
+        let placed = rasterise_placed(&db, &EmojiFonts::empty(), &s, &t).unwrap();
+        assert_eq!((placed.x, placed.y, placed.image.width, placed.image.height), (5, 7, 128, 208));
+        // The glyph inks doc x 29..109; the stroke 25..113 around it.
+        assert_eq!(px(&placed.image, 26 - 5, 111 - 7), [0, 0, 255, 255]);
+        assert_eq!(px(&placed.image, 24 - 5, 111 - 7)[3], 0, "the stroke ends 4 document px out");
+        assert_eq!(px(&placed.image, 60 - 5, 111 - 7), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn a_window_render_of_an_outlined_text_matches_its_placed_render() {
+        // The one shared draw path: the same spec through rasterise_placed
+        // and through rasterise_window over the placed box inks
+        // identically, so Crop's clip and the save's canvas window show
+        // exactly the pixels merge composites (the acceptance's
+        // "survives merge/crop/save identically to preview").
+        let db = fonts();
+        let mut s = spec("A", 100.0);
+        s.outline = Some(OutlineSpec { color: "#0000ff".into(), width: 2.0 });
+        let t = LayerTransform { x: 5.0, y: 7.0, scale_x: 1.5, scale_y: 1.5, rotation: 30.0 };
+        let placed = rasterise_placed(&db, &EmojiFonts::empty(), &s, &t).unwrap();
+        let window =
+            TextWindow { x: placed.x, y: placed.y, width: placed.image.width, height: placed.image.height };
+        let windowed = rasterise_window(&db, &EmojiFonts::empty(), &s, &t, window).unwrap();
+        assert_eq!(windowed.pixels, placed.image.pixels);
+    }
+
+    #[test]
+    fn an_outline_leaves_colour_emoji_painted_but_grows_the_box() {
+        // Emoji paint as COLR glyphs, not outline paths, so the outline
+        // never rings them (SPM-18's recorded call); the box still grows by
+        // the width around their ink, the pixel effect's box rule.
+        let db = fonts();
+        let chain = emoji_chain();
+        let bare = render(&db, &chain, &spec("😀", 100.0)).unwrap();
+        let mut s = spec("😀", 100.0);
+        s.outline = Some(OutlineSpec { color: "#0000ff".into(), width: 2.0 });
+        let out = render(&db, &chain, &s).unwrap();
+        assert_eq!((out.image.width, out.image.height), (bare.image.width + 4, bare.image.height + 4));
+        // The growth is padding, not ink: no stroke ring anywhere in it.
+        for y in 0..out.image.height {
+            for x in 0..out.image.width {
+                let border = x < 2 || y < 2 || x + 2 >= out.image.width || y + 2 >= out.image.height;
+                if border {
+                    assert_eq!(px(&out.image, x, y)[3], 0, "padding inks nothing: ({x},{y})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn outline_settings_validate_like_the_style_promises() {
+        let db = fonts();
+        let empty = EmojiFonts::empty();
+        let mut s = spec("A", 100.0);
+        for width in [0.0, -1.0, f32::NAN, (TEXT_MAX_OUTLINE_WIDTH + 1) as f32] {
+            s.outline = Some(OutlineSpec { color: "#0000ff".into(), width });
+            assert!(render(&db, &empty, &s).unwrap_err().contains("outline width"), "width {width}");
+        }
+        s.outline = Some(OutlineSpec { color: "blue".into(), width: 2.0 });
+        assert!(render(&db, &empty, &s).unwrap_err().contains("#rrggbb"));
+        s.outline = Some(OutlineSpec { color: "#0000ff".into(), width: TEXT_MAX_OUTLINE_WIDTH as f32 });
+        assert!(render(&db, &empty, &s).is_ok(), "the range's top is fine");
+    }
+
+    #[test]
+    fn the_outline_rides_the_wire_camel_case_and_defaults_to_none() {
+        let plain: TextSpec = serde_json::from_str(
+            r##"{"text":"hi","fontFamily":"Arial","fontSize":24,"color":"#000000"}"##,
+        )
+        .unwrap();
+        assert_eq!(plain.outline, None);
+        let outlined: TextSpec = serde_json::from_str(
+            r##"{"text":"hi","fontFamily":"Arial","fontSize":24,"color":"#000000","outline":{"color":"#ffffff","width":8}}"##,
+        )
+        .unwrap();
+        assert_eq!(outlined.outline, Some(OutlineSpec { color: "#ffffff".into(), width: 8.0 }));
     }
 
     /// Real system fonts (run with `cargo test -- --ignored`): lists the

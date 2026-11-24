@@ -190,7 +190,7 @@ test("splitClips refuses a response whose size does not match the clips", () => 
 test("merge and crop send text layers as text in the header, with no body bytes", async () => {
   const t = { x: 0, y: 0, scaleX: 2, scaleY: 2, rotation: 0 };
   const raster = { width: 1, height: 1, pixels: new Uint8ClampedArray([1, 2, 3, 4]) };
-  const style = { text: "hi", fontFamily: "Arial", fontSize: 30, color: "#112233" };
+  const style = { text: "hi", fontFamily: "Arial", fontSize: 30, color: "#112233", outline: null };
   const render = await api.renderText(style);
   await api.mergeImages([{ image: raster, transform: t }, { text: style, render, transform: t }]);
   let call = calls[calls.length - 1];
@@ -211,9 +211,9 @@ test("layerInput turns model layers into merge inputs", () => {
   const t = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 };
   expect(layerInput({ kind: "raster", id: "a", name: "a", transform: t, image })).toEqual({ image, transform: t });
   const render = { image, metrics: { originX: 0, originY: 0, ascent: 1, descent: 1, lineHeight: 2 } };
-  const text = { kind: "text" as const, id: "b", name: "hi", transform: t, text: "hi", fontFamily: "Arial", fontSize: 9, color: "#000000", render };
+  const text = { kind: "text" as const, id: "b", name: "hi", transform: t, text: "hi", fontFamily: "Arial", fontSize: 9, color: "#000000", outline: null, render };
   expect(layerInput(text)).toEqual({
-    text: { text: "hi", fontFamily: "Arial", fontSize: 9, color: "#000000" },
+    text: { text: "hi", fontFamily: "Arial", fontSize: 9, color: "#000000", outline: null },
     render,
     transform: t,
   });
@@ -221,13 +221,21 @@ test("layerInput turns model layers into merge inputs", () => {
 
 test("fonts and text rendering use the Rust commands and decode the metrics frame", async () => {
   expect(await api.listFonts()).toEqual(["Arial", "Segoe UI"]);
-  const style = { text: "hi", fontFamily: "Arial", fontSize: 30, color: "#112233" };
+  const style = { text: "hi", fontFamily: "Arial", fontSize: 30, color: "#112233", outline: null };
   const render = await api.renderText({ ...style, extra: 1 } as typeof style);
   const call = calls[calls.length - 1];
   expect(call).toEqual({ cmd: "editor_render_text", args: { spec: style } });
   expect(render.metrics).toEqual({ originX: 1.5, originY: 0, ascent: 40, descent: 10, lineHeight: 55 });
   expect([render.image.width, render.image.height]).toEqual([3, 2]);
   expect(() => api.decodeTextFrame(new ArrayBuffer(10))).toThrow("truncated");
+});
+
+test("the outline rides the text style onto the wire, and none is null (SPM-18)", async () => {
+  const outlined = { text: "hi", fontFamily: "Arial", fontSize: 30, color: "#112233", outline: { color: "#ffffff", width: 8 } };
+  await api.renderText(outlined);
+  expect(calls[calls.length - 1].args).toEqual({ spec: outlined });
+  await api.renderText({ ...outlined, outline: null });
+  expect(calls[calls.length - 1].args).toEqual({ spec: { ...outlined, outline: null } });
 });
 
 test("cut sends the layer's pixels and a polygon header, and splits the hole from the cutout", async () => {
@@ -286,7 +294,7 @@ test("an effect sends the layer and its settings, and reads the new transform an
 });
 
 test("an effect on a text layer sends its text and no body bytes", async () => {
-  const style = { text: "Hi", fontFamily: "Impact", fontSize: 64, color: "#000000" };
+  const style = { text: "Hi", fontFamily: "Impact", fontSize: 64, color: "#000000", outline: null };
   const render = { image: { width: 4, height: 2, pixels: new Uint8ClampedArray(32) }, metrics: { originX: 0, originY: 0, ascent: 1, descent: 1, lineHeight: 2 } };
   const t = { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 };
   await api.applyEffect({ text: style, render, transform: t }, { kind: "glow", color: "#ff0000", radius: 5, softness: 0.5, opacity: 1 });
@@ -324,7 +332,7 @@ test("background removal: model status, download with progress, cancel, and the 
 test("save sends the canvas, layers, format and target in one ASCII header", async () => {
   const { newDocument, addTextLayer } = await import("../src/editor/model/document");
   const image = { width: 2, height: 1, pixels: new Uint8ClampedArray([1, 2, 3, 4, 5, 6, 7, 8]) };
-  const style = { text: "café 😀", fontFamily: "Arial", fontSize: 30, color: "#112233" };
+  const style = { text: "café 😀", fontFamily: "Arial", fontSize: 30, color: "#112233", outline: null };
   const render = await api.renderText(style);
   const side = limits.sticker.side;
   let doc = newDocument(image, "base", { width: side, height: 3 });

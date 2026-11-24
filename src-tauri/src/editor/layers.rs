@@ -137,4 +137,32 @@ mod tests {
         // A text layer whose font is missing is refused, not skipped.
         assert!(split_layers(&meta, &body, &Database::new(), &EmojiFonts::empty()).unwrap_err().contains("not installed"));
     }
+
+    #[test]
+    fn an_outlined_text_layer_merges_with_its_ring() {
+        // "A" with a 2 px blue outline (SPM-18): the placed box grows 2 px on
+        // every side, so the transform that kept the text at (10, 0) in the
+        // test above is (8, -2) now — the webview's model shifts it exactly
+        // so (document.ts `anchoredTransform`), and merge sees the same
+        // glyphs at the same place with a ring around them.
+        let fonts = super::super::test_font::database();
+        let meta: Vec<LayerMeta> = serde_json::from_str(&format!(
+            r##"[{{"width":100,"height":100,"transform":{{"x":0,"y":0,"scaleX":1,"scaleY":1,"rotation":0}}}},
+                {{"width":64,"height":104,"transform":{{"x":8,"y":-2,"scaleX":1,"scaleY":1,"rotation":0}},
+                  "text":{{"text":"A","fontFamily":"{}","fontSize":100,"color":"#ff0000","outline":{{"color":"#0000ff","width":2}}}}}}]"##,
+            super::super::test_font::FAMILY
+        ))
+        .unwrap();
+        let body = [255u8; 100 * 100 * 4];
+        let layers = split_layers(&meta, &body, &fonts, &EmojiFonts::empty()).unwrap();
+        assert_eq!((layers[1].image.width, layers[1].image.height), (64, 104));
+        let merged = merge(&layers).unwrap();
+        // The glyph inks x 20..60 as above; the ring reaches 2 px beyond.
+        assert_eq!(pixel(&merged, 18, 40), [0, 0, 255, 255]);
+        assert_eq!(pixel(&merged, 19, 40), [0, 0, 255, 255]);
+        assert_eq!(pixel(&merged, 20, 40), [255, 0, 0, 255]);
+        assert_eq!(pixel(&merged, 17, 40), [255, 255, 255, 255]);
+        assert_eq!(pixel(&merged, 60, 40), [0, 0, 255, 255]);
+        assert_eq!(pixel(&merged, 62, 40), [255, 255, 255, 255]);
+    }
 }

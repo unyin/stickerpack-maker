@@ -46,6 +46,8 @@ export interface EffectBarState {
   readonly targetName: string | null;
   /** Why the tool cannot work now (several layers selected, text for warp), or null. */
   readonly blocker: string | null;
+  /** True when the target is a text layer: Outline restyles it in place, Glow converts it (SPM-18). */
+  readonly textTarget: boolean;
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -126,7 +128,11 @@ export class EffectControls {
     this.applyButton.hidden = !applies;
     this.cancelButton.hidden = !applies;
     this.applyButton.disabled = busy || blocker !== null;
-    this.applyButton.title = blocker ?? `Bake the ${kind} into the layer's pixels (one undo step)`;
+    this.applyButton.title =
+      blocker ??
+      (state.textTarget && kind === "outline"
+        ? "Set the outline style on the text layer (one undo step); it stays editable text"
+        : `Bake the ${kind} into the layer's pixels (one undo step)`);
     this.cancelButton.disabled = busy;
     for (const input of this.inputs) input.disabled = busy;
     this.target.textContent = blocker ?? (state.targetName ? `On: ${state.targetName}` : "");

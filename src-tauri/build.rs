@@ -65,7 +65,9 @@ fn limits() {
          /// Text layers: smallest font size, in px (SPEC §6, SPM-9).\n\
          pub const TEXT_MIN_FONT_SIZE: u32 = {};\n\
          /// Text layers: largest font size, in px (SPEC §6, SPM-9).\n\
-         pub const TEXT_MAX_FONT_SIZE: u32 = {};\n",
+         pub const TEXT_MAX_FONT_SIZE: u32 = {};\n\
+         /// Text layers: largest outline width, in px at scale 1 (SPEC §6, SPM-18).\n\
+         pub const TEXT_MAX_OUTLINE_WIDTH: u32 = {};\n",
         get("/importMaxSide"),
         get("/sticker/side"),
         get("/sticker/maxKilobytes"),
@@ -78,6 +80,7 @@ fn limits() {
         get("/pack/shortNameMaxChars"),
         get("/text/minFontSize"),
         get("/text/maxFontSize"),
+        get("/text/maxOutlineWidth"),
     );
     let out = PathBuf::from(env::var("OUT_DIR").unwrap()).join("limits.rs");
     fs::write(&out, code).unwrap_or_else(|e| panic!("cannot write {}: {e}", out.display()));

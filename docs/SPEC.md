@@ -420,7 +420,9 @@ stickers, Missing stickers, and the thumbnail.
   - One-shot (owner decision 2026-11-22): while the **Outline** or **Glow** tool is active,
     a live preview shows the effect with the current settings (outline: colour, width;
     glow: colour, radius, softness, opacity); **Apply** bakes it into the layer's pixels as
-    ONE undo step and returns to the Move tool; changing settings is not an undo step.
+    ONE undo step and returns to the Move tool (since SPM-18, Outline on a text layer
+    commits a style change instead — see the tool's bullet below); changing settings is
+    not an undo step.
     Normal blending only (owner decision 2026-11-21). The preview is drawn by Rust with
     Apply's own code, so the preview is the result (ADR-0008).
   - The bar's sliders take more than dragging (owner decision 2026-11-23): scrolling the
@@ -460,8 +462,18 @@ stickers, Missing stickers, and the thumbnail.
   - The layer is chosen before the tool (owner decision 2026-11-22): in Outline and Glow
     a click on the canvas selects nothing and nothing moves (empty space still pans).
     With several layers selected the tool says to select one (merge them first to treat
-    them as one). A text layer gets the effect too: Apply rasterises it in Rust and it
-    becomes an image layer with the same name and place; a neutral note says so.
+    them as one). A text layer gets the effect too, split since SPM-18: **Outline** sets
+    the layer's outline style instead — the preview is the restyled text and Apply commits
+    it as one undo step, the layer staying editable text at the same place, with no
+    conversion note, the bar's width staying document px and being converted into the
+    style's own px on commit (divided by the layer's scale), so its on-screen reach is the
+    same at any layer scale, within the style's whole-px rounding, as on a raster layer —
+    a conversion below 1 own px lands the smallest real outline, never none (0 stays the
+    width field's own way to remove one); a shrunk layer's widest settings can convert
+    past the style's 0–100 range, and the message line refuses them, committing nothing;
+    **Glow** still rasterises the layer in
+    Rust and it becomes an image layer with the same name and place; a neutral note says
+    so.
 - **Text**: own layer, movable/resizable until save (system fonts, size, color). Details
   (owner confirmed 2026-11-21, SPM-9):
   - **Add text** opens a text box centred on the canvas; double-click a text layer (or
@@ -476,10 +488,16 @@ stickers, Missing stickers, and the thumbnail.
     the typed text first); arrow keys move, Enter or a click picks, Esc or leaving the
     field keeps the current font (owner decision 2026-11-22); a session's first text uses Impact
     when installed (else a common sans, else the first family). Size is a whole number of
-    px within the range in src/shared/limits.json (1–1000); default 64 px, black. The font,
-    size and colour controls restyle the selected text layers (one undo step), and every
-    change also sticks for the next new text, so the last font, size and colour used carry
-    over (owner re-test 2026-11-22). Only the property changed carries over; selecting a
+    px within the range in src/shared/limits.json (1–1000); default 64 px, black. The
+    outline controls (SPM-18, owner decision 2026-11-22, SPM-8 grilling R2-Q11) sit with
+    them: an outline colour picker and an outline width, a whole number of px from 0 to
+    the range in src/shared/limits.json (0–100); 0 means no outline — also how an outline
+    is removed — and a new text starts with none. The width is in the layer's own px like
+    the font size, so a resized text layer scales its outline with it, and the outline
+    colour applies when a width is set. The font, size, colour and outline controls
+    restyle the selected text layers (one undo step), and every change also sticks for
+    the next new text, so the last font, size, colour and outline used carry over (owner
+    re-test 2026-11-22). Only the property changed carries over; selecting a
     text layer alone changes nothing, so while one is selected the controls show its style
     and Add text still uses the next-text style (owner decision 2026-11-22). To set the
     next text's style without restyling a layer, deselect first (Esc).
@@ -502,7 +520,18 @@ stickers, Missing stickers, and the thumbnail.
     nothing. Limits (owner decision 2026-11-24): a custom emoji font the Rust parser
     cannot colour-paint (woff2, or CBDT/sbix/SVG-emoji bytes) still renders in the DOM
     but the canvas falls back to the bundled Noto; woff2 decoding and bitmap blitting
-    are parked for v2. The canvas
+    are parked for v2. Since SPM-18 an optional outline (the text controls above)
+    strokes those glyph outlines BEHIND the fill — round joins, the width the
+    reach beyond the ink in the layer's own px, the same reach the pixel Outline
+    effect's width gives on an unscaled layer (the tool converts its document
+    px on commit), so the two read as one feature — and the layer's box grows
+    by the outline's width on every
+    side while the glyphs stay where they were (the transform shifts; undo/redo and the
+    typing overlay follow the model, so nothing jumps). Colour emoji are painted, not
+    outlined, so an outline never rings them; their ink still grows the box like any
+    ink. While text is typed the outline shows on the committed canvas render, not in
+    the typing overlay: DOM text cannot stroke glyph outlines, the same accepted
+    approximation class as the overlay's fonts. The canvas
     shows exactly that rendering, so the view, merge, Crop, the sizing tools and the save
     agree on its pixels and its box. Resizing a text layer scales it (it stays
     text, and is drawn sharp at its size when merged or saved); its font size field keeps

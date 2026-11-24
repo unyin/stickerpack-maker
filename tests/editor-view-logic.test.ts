@@ -67,7 +67,7 @@ test("merge needs two or more selected layers, text included, and says why not",
   doc = addRasterLayer(doc, image(2, 2), "cutout");
   doc = addTextLayer(
     doc,
-    { text: "hi", fontFamily: "Arial", fontSize: 12, color: "#000000" },
+    { text: "hi", fontFamily: "Arial", fontSize: 12, color: "#000000", outline: null },
     { image: image(10, 5), metrics: { originX: 0, originY: 0, ascent: 8, descent: 2, lineHeight: 11 } },
   );
   const [base, cutout, text] = doc.layers.map((l) => l.id);
@@ -186,7 +186,7 @@ test("the selected layer's size is its on-canvas bounding box, whole px (owner d
   // A text layer is measured by its rendered box (CMT-61), like everywhere.
   const text = addTextLayer(
     doc,
-    { text: "hi", fontFamily: "Arial", fontSize: 12, color: "#000000" },
+    { text: "hi", fontFamily: "Arial", fontSize: 12, color: "#000000", outline: null },
     { image: image(100, 15), metrics: { originX: 0, originY: 0, ascent: 8, descent: 2, lineHeight: 11 } },
     { ...IDENTITY, scaleX: 2, scaleY: 2 },
   );

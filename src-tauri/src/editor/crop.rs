@@ -316,6 +316,7 @@ mod tests {
             font_family: super::super::test_font::FAMILY.into(),
             font_size: 100.0,
             color: "#0000ff".into(),
+            outline: None,
         };
         // Rotated and scaled, hanging over the box's left and top edges.
         let t = LayerTransform { x: -20.3, y: -15.6, scale_x: 1.3, scale_y: 1.1, rotation: 20.0 };
@@ -348,6 +349,49 @@ mod tests {
         let layers = split_crop_layers(&meta, &[], &fonts, &EmojiFonts::empty()).unwrap();
         // Document (0, 0) is the glyph's (30, 30) at scale 1: inside 'A' (x 10..50, y 10..80).
         assert_eq!(px(&crop_layer(&layers[0].0, clip).unwrap(), 0, 0), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn a_crossing_outlined_text_crops_to_its_merge_rendering() {
+        // SPM-18's fourth surface made explicit: an outlined text clipped
+        // through the crop's window render matches its placed (merge)
+        // rendering, ring included.
+        use super::super::text::{rasterise_placed, OutlineSpec, TextSpec};
+        let fonts = super::super::test_font::database();
+        let spec = TextSpec {
+            text: "A".into(),
+            font_family: super::super::test_font::FAMILY.into(),
+            font_size: 100.0,
+            color: "#0000ff".into(),
+            outline: Some(OutlineSpec { color: "#ff0000".into(), width: 2.0 }),
+        };
+        let t = LayerTransform { x: -20.3, y: -15.6, scale_x: 1.3, scale_y: 1.1, rotation: 20.0 };
+        let reference = rasterise_placed(&fonts, &EmojiFonts::empty(), &spec, &t).unwrap();
+        let clip = ClipRect { x: 0, y: 0, width: 40, height: 40 };
+        let meta = [CropMeta {
+            layer: LayerMeta { width: 64, height: 104, transform: t, text: Some(spec.clone()) },
+            clip,
+        }];
+        let layers = split_crop_layers(&meta, &[], &fonts, &EmojiFonts::empty()).unwrap();
+        let out = crop_layer(&layers[0].0, clip).unwrap();
+        let (mut visible, mut flips) = (0, 0);
+        for y in 0..40 {
+            for x in 0..40 {
+                let expected = merged_px(&reference, x as i32, y as i32);
+                let got = px(&out, x, y);
+                if got != expected {
+                    // The ring's outer anti-aliased edge is the one place a
+                    // whole-pixel window shift flips coverage, so a faint
+                    // edge pixel may differ in alpha alone (16 vs 32 seen):
+                    // what must never differ is a covered ring pixel.
+                    assert!(got[3] == 0 || expected[3] == 0 || got[3].abs_diff(expected[3]) <= 32, "({x},{y}): {got:?} vs {expected:?}");
+                    flips += 1;
+                }
+                visible += (expected[3] > 0) as u32;
+            }
+        }
+        assert!(visible > 100, "the test must compare real pixels, saw {visible}");
+        assert!(flips <= 4, "{flips} pixels differ from merge's rendering");
     }
 
     #[test]

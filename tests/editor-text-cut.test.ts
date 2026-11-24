@@ -4,10 +4,11 @@
 import { expect, test } from "bun:test";
 import limits from "../src/shared/limits.json";
 import type { RgbaImage } from "../src/editor/model/image";
-import { STICKER, TEXT_FONT_SIZE } from "../src/editor/model/constraints";
+import { STICKER, TEXT_FONT_SIZE, TEXT_OUTLINE_WIDTH } from "../src/editor/model/constraints";
 import {
   addRasterLayer,
   addTextLayer,
+  anchoredTransform,
   contentBounds,
   cropBox,
   cropClipInputs,
@@ -43,6 +44,7 @@ import {
   isBlankText,
   isHexColor,
   nextStyleAfter,
+  outlineWidthProblem,
   textLayerName,
 } from "../src/editor/model/text";
 import {
@@ -70,7 +72,7 @@ function render(width: number, height: number): TextRender {
   return { image: image(width, height, 9), metrics: { originX: 2, originY: 0, ascent: 40, descent: 10, lineHeight: 60 } };
 }
 
-const HI: TextStyle = { text: "hi", fontFamily: "Arial", fontSize: 50, color: "#ff0000" };
+const HI: TextStyle = { text: "hi", fontFamily: "Arial", fontSize: 50, color: "#ff0000", outline: null };
 
 /** A 512 canvas with a 100x100 image at (0, 0) and a 60x50 text layer at (`x`, `y`). */
 function withText(x = 200, y = 200): Doc {
@@ -114,6 +116,67 @@ test("changing text or style is one step that keeps the layer's place; the same 
   // Re-applying the current style changes nothing (no undo step).
   expect(setTextStyle(before, id, HI, render(1, 1))).toBe(before);
   expect(() => setTextStyle(before, "layer-1", HI, render(1, 1))).toThrow("not a text layer");
+});
+
+test("an outline grows the layer's box around its text: the glyphs stay put (SPM-18)", () => {
+  // The layer starts with the layout at (2, 0) in a 60x50 box at (200, 200);
+  // the outline render grows the box to 64x54 with the layout at (4, 2) —
+  // what a 2 px outline does — so the transform shifts by the growth and
+  // the layout box (metrics origin through the transform) does not move.
+  const session = new EditorSession(withText());
+  const id = session.doc.layers[1].id;
+  const before = session.doc;
+  const beforeText = before.layers[1];
+  if (beforeText.kind !== "text") throw new Error("not text");
+  const grown: TextRender = { image: image(64, 54), metrics: { originX: 4, originY: 2, ascent: 40, descent: 10, lineHeight: 60 } };
+  const style: TextStyle = { ...HI, outline: { color: "#ffffff", width: 2 } };
+  session.apply((d) => setTextStyle(d, id, style, grown));
+  const text = session.doc.layers[1];
+  if (text.kind !== "text") throw new Error("not text");
+  expect([text.render.image.width, text.render.image.height]).toEqual([64, 54]);
+  expect(text.outline).toEqual({ color: "#ffffff", width: 2 });
+  expect(text.transform).toEqual({ ...IDENTITY, x: 198, y: 198 });
+  const at = localToDoc(text.transform, grown.metrics.originX, grown.metrics.originY);
+  const was = localToDoc(beforeText.transform, beforeText.render.metrics.originX, beforeText.render.metrics.originY);
+  expect(at).toEqual(was);
+  session.undo();
+  expect(session.doc).toBe(before);
+});
+
+test("anchoredTransform shifts through the layer's rotation and scale (SPM-18)", () => {
+  // Rotated 90 at scale 2: a layout move of (3, 1) in box px (the origin
+  // going from (5, 7) to (2, 6)) is the rotated, scaled shift of it.
+  const t = anchoredTransform(
+    { x: 10, y: 20, scaleX: 2, scaleY: 2, rotation: 90 },
+    { originX: 5, originY: 7 },
+    { originX: 2, originY: 6 },
+  );
+  expect(t.x).toBeCloseTo(8);
+  expect(t.y).toBeCloseTo(26);
+  expect([t.scaleX, t.scaleY, t.rotation]).toEqual([2, 2, 90]);
+});
+
+test("outline widths are whole px from 0 to the limit, 0 meaning no outline (SPM-18)", () => {
+  expect(TEXT_OUTLINE_WIDTH).toEqual({ min: 0, max: limits.text.maxOutlineWidth });
+  expect(outlineWidthProblem(0)).toBeNull();
+  expect(outlineWidthProblem(TEXT_OUTLINE_WIDTH.max)).toBeNull();
+  for (const bad of [-1, TEXT_OUTLINE_WIDTH.max + 1, 2.5, NaN]) {
+    expect(outlineWidthProblem(bad)).toContain(`from 0 to ${TEXT_OUTLINE_WIDTH.max}`);
+  }
+});
+
+test("restyledTexts carries an outline to every selected text layer; the same outline is no step (SPM-18)", () => {
+  let doc = withText();
+  doc = addTextLayer(doc, { ...HI, text: "yo" }, render(40, 30), { ...IDENTITY, x: 300, y: 300 });
+  const ids = doc.layers.filter((l) => l.kind === "text").map((l) => l.id);
+  const outlined = { color: "#ffffff", width: 8 };
+  const changes = restyledTexts(doc, ids, { outline: outlined }).map((c) => ({ ...c, render: render(70, 55) }));
+  expect(changes.map((c) => c.style.outline)).toEqual([outlined, outlined]);
+  const session = new EditorSession(doc);
+  session.apply((d) => setTextStyles(d, changes));
+  expect(setTextStyles(session.doc, changes)).toBe(session.doc); // re-applying: no step
+  session.undo();
+  expect(session.doc).toBe(doc);
 });
 
 test("CMT-61: the sizing tools measure text by its rendered box, so Fit gives exactly 512", () => {
@@ -341,11 +404,11 @@ test("the selected text layers come from the model, bottom to top, whatever the 
   expect(session.selectedTexts.map((l) => l.id)).toEqual([b]);
 });
 
-test("one textStyleOf serves layers and styles, keeping only the four style fields", () => {
+test("one textStyleOf serves layers and styles, keeping only the style fields", () => {
   const doc = withText();
   const layer = doc.layers[1];
   if (layer.kind !== "text") throw new Error("not text");
-  expect(Object.keys(textStyleOf(layer)).sort()).toEqual(["color", "fontFamily", "fontSize", "text"]);
+  expect(Object.keys(textStyleOf(layer)).sort()).toEqual(["color", "fontFamily", "fontSize", "outline", "text"]);
   expect(textStyleOf({ ...HI, extra: 1 } as TextStyle)).toEqual(HI);
 });
 
@@ -409,9 +472,14 @@ test("the layer hint adds cut and text reasons only where they are relevant", ()
 });
 
 test("every text-control change sticks for the next new text (owner re-test 2026-11-22)", () => {
-  const next = { fontFamily: "Arial", fontSize: 64, color: "#000000" };
+  const next = { fontFamily: "Arial", fontSize: 64, color: "#000000", outline: null };
   expect(nextStyleAfter(next, { fontSize: 30 })).toEqual({ ...next, fontSize: 30 });
   expect(nextStyleAfter(next, { color: "#ffffff" })).toEqual({ ...next, color: "#ffffff" });
+  // An outline change sticks the same way (SPM-18), 0-width never landing:
+  // the control commits null for it, so the next new text starts clean.
+  const outlined = { color: "#ffffff", width: 8 };
+  expect(nextStyleAfter(next, { outline: outlined })).toEqual({ ...next, outline: outlined });
+  expect(nextStyleAfter(next, { outline: null })).toEqual({ ...next, outline: null });
 });
 
 test("Crop notes how many crossing text layers became images (owner, 2026-11-22)", () => {
