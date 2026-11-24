@@ -52,8 +52,9 @@ export function wandModeFor(shift: boolean, alt: boolean): WandMode {
  * The mask a click leaves on the canvas: `fill` alone for a replacing
  * click, else its combination with the region's `base` over the two
  * masks' union. Adding takes the stronger coverage where regions overlap;
- * subtracting keeps the share of each pixel's coverage the fill does not
- * claim (the same share an erase keeps of a pixel's alpha).
+ * subtracting removes the fill's coverage from each pixel outright, so a
+ * click that subtracts the region it drew empties it completely, feather
+ * ring included (the smoke caught a proportional rule leaving a ghost).
  */
 export function combineMasks(base: WandMask | null, fill: WandMask, mode: WandMode): WandMask {
   if (mode === "replace" || !base) return fill;
@@ -66,7 +67,7 @@ export function combineMasks(base: WandMask | null, fill: WandMask, mode: WandMo
     for (let column = 0; column < width; column++) {
       const b = coverageAt(base, x + column, y + row);
       const f = coverageAt(fill, x + column, y + row);
-      coverage[row * width + column] = mode === "add" ? Math.max(b, f) : Math.floor((b * (255 - f)) / 255);
+      coverage[row * width + column] = mode === "add" ? Math.max(b, f) : Math.max(0, b - f);
     }
   }
   return { x, y, width, height, coverage };

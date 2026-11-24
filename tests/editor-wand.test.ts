@@ -71,12 +71,12 @@ test("combining masks takes the stronger coverage and unions the bounds", () => 
   const fill = mask(1, 0, 2, 1, [128, 255]);
   // Adding: the overlap keeps the stronger coverage.
   expect(combineMasks(base, fill, "add")).toEqual(mask(0, 0, 3, 1, [255, 128, 255]));
-  // Subtracting: the fill claims its share of each pixel's coverage.
+  // Subtracting: the fill's coverage is removed outright, floored at nothing.
   expect(combineMasks(base, fill, "subtract")).toEqual(mask(0, 0, 3, 1, [255, 0, 0]));
-  // Subtracting half of a half-covered pixel leaves the rounded share.
-  const half = mask(0, 0, 1, 1, [128]);
-  const whole = mask(0, 0, 1, 1, [128]);
-  expect(combineMasks(half, whole, "subtract").coverage[0]).toBe(63);
+  // Subtracting removes the fill's coverage outright: a region subtracted
+  // from itself empties completely, feather ring included.
+  expect(combineMasks(mask(0, 0, 1, 1, [128]), mask(0, 0, 1, 1, [128]), "subtract").coverage[0]).toBe(0);
+  expect(combineMasks(mask(0, 0, 1, 1, [255]), mask(0, 0, 1, 1, [128]), "subtract").coverage[0]).toBe(127);
   // Replacing, or combining with nothing, is the fill alone.
   expect(combineMasks(base, fill, "replace")).toBe(fill);
   expect(combineMasks(null, fill, "subtract")).toBe(fill);
