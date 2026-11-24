@@ -46,6 +46,18 @@ function placedFrame(x: number, y: number, inner: ArrayBuffer): ArrayBuffer {
   return out.buffer;
 }
 
+/** A frame as WandMask::to_frame writes it: i32 x, i32 y, u32 width, u32 height, then the coverage. */
+function maskFrame(x: number, y: number, width: number, height: number, coverage: number[]): ArrayBuffer {
+  const out = new ArrayBuffer(16 + coverage.length);
+  const view = new DataView(out);
+  view.setInt32(0, x, true);
+  view.setInt32(4, y, true);
+  view.setUint32(8, width, true);
+  view.setUint32(12, height, true);
+  new Uint8Array(out, 16).set(coverage);
+  return out;
+}
+
 mock.module("@tauri-apps/api/core", () => ({
   invoke: async (cmd: string, args?: Record<string, unknown>, opts?: unknown) => {
     calls.push({ cmd, args });
@@ -67,6 +79,7 @@ mock.module("@tauri-apps/api/core", () => ({
       return out.buffer;
     }
     if (cmd === "editor_probe_pasted") return { width: 30, height: 20, exceedsCap: false };
+    if (cmd === "editor_compose_mask") return maskFrame(0, 0, 0, 0, []);
     if (cmd === "editor_apply_effect") return effectFrame([-3, 4.5, 2, 2, 30], frame(1, 1, 6));
     if (cmd === "editor_background_model_status") return { downloaded: false, sizeBytes: 178648008 };
     if (cmd === "editor_download_background_model") {
@@ -266,6 +279,42 @@ test("cut sends the layer's pixels and a polygon header, and splits the hole fro
   expect(Array.from(out.hole.pixels)).toEqual([1, 2, 3, 4, 0, 0, 0, 0]);
   expect([out.x, out.y, out.cutout.width, ...out.cutout.pixels]).toEqual([1, 0, 1, 9, 9, 9, 9]);
   expect(() => api.decodeCutFrame(new ArrayBuffer(4), 2, 1)).toThrow("truncated");
+});
+
+test("a compose request sends the grid, its contributions and the masks' coverage in order", async () => {
+  const t = { x: 10, y: 20, scaleX: 2, scaleY: 2, rotation: 0 };
+  const first = { x: 1, y: 2, width: 2, height: 1, coverage: new Uint8Array([255, 128]) };
+  const second = { x: 4, y: 0, width: 1, height: 1, coverage: new Uint8Array([64]) };
+  const polygon = [
+    { x: 0, y: 0 },
+    { x: 6, y: 0 },
+    { x: 6, y: 4 },
+  ];
+  const merged = await api.composeSelection(6, 4, t, [
+    { kind: "wand", op: "add", transform: t, mask: first },
+    { kind: "poly", op: "subtract", feather: false, points: polygon },
+    { kind: "wand", op: "subtract", transform: { ...t, rotation: 90 }, mask: second },
+  ]);
+  const call = calls[calls.length - 1];
+  expect(call.cmd).toBe("editor_compose_mask");
+  // Only the masks' coverage travels, concatenated in contribution order.
+  expect(Array.from(call.args as unknown as Uint8Array)).toEqual([255, 128, 64]);
+  const headers = (options[options.length - 1] as { headers: Record<string, string> }).headers;
+  expect(api.COMPOSE_MASK_HEADER).toBe("x-compose-mask");
+  expect(JSON.parse(headers["x-compose-mask"])).toEqual({
+    width: 6,
+    height: 4,
+    transform: t,
+    contributions: [
+      { kind: "mask", op: "add", transform: t, x: 1, y: 2, width: 2, height: 1 },
+      // A polygon crosses as [x, y] pairs (cutImage's wire form), never as
+      // the model's {x, y} Points: serde's [f32; 2] refuses a map.
+      { kind: "poly", op: "subtract", feather: false, points: [[0, 0], [6, 0], [6, 4]] },
+      { kind: "mask", op: "subtract", transform: { ...t, rotation: 90 }, x: 4, y: 0, width: 1, height: 1 },
+    ],
+  });
+  // A zero-size response reads as "nothing is covered": the region clears.
+  expect([merged.width, merged.height, merged.coverage.length]).toEqual([0, 0, 0]);
 });
 
 test("pasted images are probed and imported from their bytes with the scale-to-fit header", async () => {

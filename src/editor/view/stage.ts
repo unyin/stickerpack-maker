@@ -13,7 +13,7 @@ import {
   type Rect,
   type Transform,
 } from "../model/document";
-import { lassoRegion, rectRegion, type Region, type WandRegion } from "../model/region";
+import { lassoRegion, rectRegion, shapeCommit, type ComposedRegion, type ContributionOp, type PolygonRegion } from "../model/region";
 import { effectKindOf } from "../model/effects";
 import { backgroundTarget, restoreBlocker } from "../model/background";
 import { beginStroke, BRUSH_SIZE, finishStroke, strokeTo, type BrushMode, type Stroke } from "../model/brush";
@@ -44,6 +44,16 @@ export interface WandHandler {
   press(at: Point, mods: { shift: boolean; alt: boolean }): void;
   move(at: Point): void;
   release(): void;
+}
+
+/**
+ * A Rectangle/Lasso draw that composes onto the selection already drawn
+ * (SPM-23): the modifiers are read at the release (Rectangle) or the close
+ * (Lasso), per the owner's decision of 2026-11-24. The view merges the
+ * contribution and stores the result; the stage does no IPC.
+ */
+export interface ComposeHandler {
+  compose(op: ContributionOp, points: readonly Point[]): void;
 }
 
 /** A warp press being dragged: its bulge's centre and radius, and the readout beside the pointer. */
@@ -176,6 +186,11 @@ function sameTransform(a: Transform, b: Transform): boolean {
   );
 }
 
+/** The Shift and Alt a pointer event carries (neither for a touch event, as Konva hands them over). */
+function modsOf(e: MouseEvent | TouchEvent): { shift: boolean; alt: boolean } {
+  return e instanceof MouseEvent ? { shift: e.shiftKey, alt: e.altKey } : { shift: false, alt: false };
+}
+
 const FIT_MARGIN = 24;
 
 export class EditorStage {
@@ -207,7 +222,7 @@ export class EditorStage {
     flipEnabled: false,
     ignoreStroke: true,
   });
-  /** The cut selection (session.region, or the one being drawn): a halo under a dashed line. */
+  /** The stored Rectangle/Lasso selection: a halo under a dashed line. */
   private readonly regionHalo = new Konva.Line({ closed: true, strokeWidth: 3, strokeScaleEnabled: false, listening: false });
   private readonly regionLine = new Konva.Line({
     closed: true,
@@ -216,11 +231,25 @@ export class EditorStage {
     strokeScaleEnabled: false,
     listening: false,
   });
-  /** The wand region's outlines (SPM-22): one halo-and-dash pair per contour. */
-  private readonly wandOutlines = new Konva.Group({ listening: false });
-  private wandOutlinePairs: { halo: Konva.Line; line: Konva.Line }[] = [];
-  /** The wand region whose outlines are drawn, to rebuild them only on a change. */
-  private wandRegionDrawn: WandRegion | null = null;
+  /** The drawn selection's outlines (SPM-22, composed since SPM-23): one halo-and-dash pair per contour. */
+  private readonly regionOutlines = new Konva.Group({ listening: false });
+  /**
+   * The draft being drawn (a rectangle drag, an open lasso): its own halo
+   * under a dashed line, so it draws OVER the stored selection, which stays
+   * visible meanwhile (SPM-23 re-test, owner decision 2026-11-24).
+   */
+  private readonly draftHalo = new Konva.Line({ closed: true, strokeWidth: 3, strokeScaleEnabled: false, listening: false, visible: false });
+  private readonly draftLine = new Konva.Line({
+    closed: true,
+    strokeWidth: 1,
+    dash: [4, 4],
+    strokeScaleEnabled: false,
+    listening: false,
+    visible: false,
+  });
+  private outlinePairs: { halo: Konva.Line; line: Konva.Line }[] = [];
+  /** The composed region whose outlines are drawn, to rebuild them only on a change. */
+  private outlinesDrawn: ComposedRegion | null = null;
   /** The warp brush's outline under the pointer (SPM-8). */
   private readonly warpRing = new Konva.Circle({ strokeWidth: 1, strokeScaleEnabled: false, listening: false, visible: false });
   /** The radius or strength readout beside the pointer while a warp press is dragged. */
@@ -245,6 +274,7 @@ export class EditorStage {
   private pickConsumedClick = false;
   private brush?: BrushHandler;
   private wand?: WandHandler;
+  private composeHandler?: ComposeHandler;
   private brushing = false;
   /** The warp press being dragged, which the ring follows instead of the pointer. */
   private gesture: BrushGesture | null = null;
@@ -289,7 +319,7 @@ export class EditorStage {
   /** Only the left button (or a touch) ends a drag: a middle-button pan mid-drag leaves it be. */
   private readonly onRelease = (e: MouseEvent | TouchEvent): void => {
     if (e instanceof MouseEvent && e.button !== 0) return;
-    this.releaseRegion();
+    this.releaseRegion(modsOf(e));
     this.releaseBrush();
   };
   /**
@@ -318,7 +348,7 @@ export class EditorStage {
       strokeScaleEnabled: false,
       listening: false,
     });
-    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.wandOutlines, this.brushHalo, this.brushRing, this.warpRing, this.readout.label, this.loupe);
+    this.guides.add(this.outline, this.boxHalo, this.box, this.regionHalo, this.regionLine, this.regionOutlines, this.draftHalo, this.draftLine, this.brushHalo, this.brushRing, this.warpRing, this.readout.label, this.loupe);
     this.loupeCanvas.width = LOUPE_SIDE;
     this.loupeCanvas.height = LOUPE_SIDE;
     // The loupe group hides the whole magnifier until a pick; its hex bubble
@@ -359,13 +389,13 @@ export class EditorStage {
       // Modifiers are read from the event itself (SPM-8: Shift sets a warp
       // drag's strength; SPM-22: Shift adds a wand click's region, Alt
       // subtracts it).
-      const mods = e.evt instanceof MouseEvent ? { shift: e.evt.shiftKey, alt: e.evt.altKey } : { shift: false, alt: false };
+      const mods = modsOf(e.evt);
       this.pressRegion(mods);
       this.pressBrush();
     });
     this.stage.on("mousemove touchmove", (e) => {
       if (this.pick) return this.scheduleLoupe();
-      const mods = e.evt instanceof MouseEvent ? { shift: e.evt.shiftKey, alt: e.evt.altKey } : { shift: false, alt: false };
+      const mods = modsOf(e.evt);
       this.extendRegion(mods);
       this.moveBrush();
     });
@@ -374,11 +404,11 @@ export class EditorStage {
       this.showBrushAt(null);
       if (this.pick) this.hideLoupe();
     });
-    this.stage.on("dblclick dbltap", () => {
+    this.stage.on("dblclick dbltap", (e) => {
       if (!this.interactive || this.tool !== "lasso" || !this.lasso) return;
       const step = lassoDoubleClick(this.lasso, this.docPx(LASSO_CLOSE_RADIUS));
       this.lasso = step.draft;
-      if (step.close) this.closeLasso(true);
+      if (step.close) this.closeLasso(true, modsOf(e.evt));
     });
     // Released anywhere, even outside the canvas, a drag ends.
     window.addEventListener("mouseup", this.onRelease);
@@ -469,14 +499,15 @@ export class EditorStage {
   }
 
   /**
-   * A key for the lasso in progress (SPM-9): Enter closes it, Escape cancels
-   * it, Backspace removes its last segment (a waypoint or a whole freehand
+   * A key for the lasso in progress (SPM-9): Enter closes it (composing with
+   * the modifiers the key event carries, SPM-23), Escape cancels it,
+   * Backspace removes its last segment (a waypoint or a whole freehand
    * stroke). True when the key was used, so the Editor's own shortcuts (Esc
    * dropping the selection) do not also run.
    */
-  handleLassoKey(key: string): boolean {
+  handleLassoKey(key: string, mods: { shift: boolean; alt: boolean }): boolean {
     if (!this.lasso) return false;
-    if (key === "Enter") this.closeLasso();
+    if (key === "Enter") this.closeLasso(false, mods);
     else if (key === "Escape") this.lasso = null;
     else if (key === "Backspace") this.lasso = lassoUndo(this.lasso);
     else return false;
@@ -504,6 +535,11 @@ export class EditorStage {
   /** The wand tool's side of a press (SPM-22), like the warp brush's. */
   onWand(handler: WandHandler): void {
     this.wand = handler;
+  }
+
+  /** A Rectangle/Lasso draw's composition onto the selection (SPM-23), installed by the view. */
+  onCompose(handler: ComposeHandler): void {
+    this.composeHandler = handler;
   }
 
   /**
@@ -655,7 +691,9 @@ export class EditorStage {
     this.transformer.anchorFill(token("--panel"));
     this.regionHalo.stroke(token("--panel"));
     this.regionLine.stroke(token("--accent-ink"));
-    for (const { halo, line } of this.wandOutlinePairs) {
+    this.draftHalo.stroke(token("--panel"));
+    this.draftLine.stroke(token("--accent-ink"));
+    for (const { halo, line } of this.outlinePairs) {
       halo.stroke(token("--panel"));
       line.stroke(token("--accent-ink"));
     }
@@ -733,7 +771,7 @@ export class EditorStage {
       if (!this.lasso && this.justClosedAt(at, radius)) return; // a closing double-click's second press
       const step = lassoPress(this.lasso, at, radius);
       this.lasso = step.draft;
-      if (step.close) return this.closeLasso(true);
+      if (step.close) return this.closeLasso(true, mods);
     }
     this.drawRegion();
   }
@@ -756,20 +794,24 @@ export class EditorStage {
     this.drawRegion(); // between lasso presses this moves the rubber band
   }
 
-  /** The left button went up: a wand press ends; a rectangle drag ends; a lasso closes only when released on its start. */
-  private releaseRegion(): void {
+  /**
+   * The left button went up: a wand press ends; a rectangle drag ends (the
+   * modifiers read from this release, SPM-23); a lasso closes only when
+   * released on its start.
+   */
+  private releaseRegion(mods: { shift: boolean; alt: boolean }): void {
     if (this.brushing) return this.releaseWarp();
     if (this.tool === "wand") return this.wand?.release();
     const rect = this.rectDrag;
     if (rect) {
       this.rectDrag = null;
-      return this.commitRegion(rectRegion(rect.start, rect.end));
+      return this.commitRegion(rectRegion(rect.start, rect.end), mods);
     }
     if (!this.lasso?.pressed) return;
     const at = this.pointer() ?? this.lasso.points[this.lasso.points.length - 1];
     const step = lassoRelease(this.lasso, at, this.docPx(LASSO_CLOSE_RADIUS));
     this.lasso = step.draft;
-    if (step.close) this.closeLasso();
+    if (step.close) this.closeLasso(false, mods);
     else this.drawRegion();
   }
 
@@ -797,70 +839,89 @@ export class EditorStage {
 
   /**
    * Close the lasso in progress: its polygon becomes the cut selection (none,
-   * if it has no area). A close `byPointer` (a press on the start point or a
-   * double-click) is remembered, to swallow the double-click's second press.
+   * if it has no area) or, with Shift/Alt read from this close, composes onto
+   * the selection drawn (SPM-23). A close `byPointer` (a press on the start
+   * point or a double-click) is remembered, to swallow the double-click's
+   * second press.
    */
-  private closeLasso(byPointer = false): void {
+  private closeLasso(byPointer = false, mods: { shift: boolean; alt: boolean } = { shift: false, alt: false }): void {
     const points = this.lasso?.points ?? [];
     this.lasso = null;
     const at = byPointer ? this.pointer() : null;
     this.lassoClosed = at ? { at, time: performance.now() } : null;
-    this.commitRegion(lassoRegion(points));
-  }
-
-  /** A finished drawing becomes the session's region (or none, for a click or no area). */
-  private commitRegion(region: Region | null): void {
-    if (region === this.session.region) this.drawRegion();
-    else this.session.setRegion(region);
-  }
-
-  /** Draw the selection being drawn, else the session's region. */
-  private drawRegion(): void {
-    const region = this.session.region;
-    // A draft (a rectangle drag, an open lasso) always outranks the stored
-    // region: it is what the release will replace the region with.
-    const drafting = this.rectDrag !== null || this.lasso !== null;
-    // The wand region's outlines (SPM-22): a pair per contour of its mask.
-    if (region?.kind === "wand" && !drafting) {
-      this.regionHalo.visible(false);
-      this.regionLine.visible(false);
-      if (this.wandRegionDrawn !== region) {
-        this.drawWandOutlines(region.outlines);
-        this.wandRegionDrawn = region;
-      }
-      this.guides.batchDraw();
-      return;
-    }
-    this.wandRegionDrawn = null;
-    this.clearWandOutlines();
-    // A wand region under a draft is already spent (the release replaces
-    // it), so the draft draws alone, like over a Rectangle/Lasso region.
-    const polygon = region && region.kind !== "wand" ? region : undefined;
-    let points: readonly Point[] = polygon?.points ?? [];
-    let closed = true;
-    if (this.rectDrag) {
-      const { start, end } = this.rectDrag;
-      points = [start, { x: end.x, y: start.y }, end, { x: start.x, y: end.y }];
-    } else if (this.lasso) {
-      points = lassoPreview(this.lasso, this.pointer());
-      closed = false;
-    }
-    const flat = points.flatMap((p) => [p.x, p.y]);
-    for (const line of [this.regionHalo, this.regionLine]) {
-      line.points(flat);
-      line.closed(closed);
-      line.visible(points.length > 1);
-    }
-    this.guides.batchDraw();
+    this.commitRegion(lassoRegion(points), mods);
   }
 
   /**
-   * Draw the wand region's outlines: one halo-under-dash pair per contour,
+   * A finished draw becomes the session's selection (or none, for a click or
+   * no area), as ONE step of the selection's own trail. Since SPM-23 a
+   * modifier read at the release or close hands the polygon to the view,
+   * which merges it onto the existing selection.
+   */
+  private commitRegion(drawn: PolygonRegion | null, mods: { shift: boolean; alt: boolean }): void {
+    const decision = shapeCommit(drawn, this.session.region, mods);
+    if (decision.kind === "compose") {
+      this.composeHandler?.compose(decision.op, decision.points);
+      return;
+    }
+    if (decision.region === this.session.region) this.drawRegion();
+    else this.session.commitRegion(decision.region);
+  }
+
+  /** Draw the session's selection and, over it, the draft being drawn. */
+  private drawRegion(): void {
+    const region = this.session.region;
+    // The stored selection stays visible under EVERY draft (owner re-test
+    // 2026-11-24, SPM-23), plain ones included: the modifier is read at the
+    // release, so mid-drag nothing can say whether the release composes or
+    // replaces, and the selection changes only when a release replaces it.
+    // The draft draws its own halo-under-dash pair over the stored outlines.
+    // A composed region's outlines (SPM-22, composed since SPM-23): a pair
+    // per contour of its merged mask, rebuilt only when the region changes.
+    if (region?.kind === "compose") {
+      if (this.outlinesDrawn !== region) {
+        this.drawOutlines(region.outlines);
+        this.outlinesDrawn = region;
+      }
+    } else {
+      this.outlinesDrawn = null;
+      this.clearOutlines();
+    }
+    // The stored Rectangle/Lasso polygon's own dashed line, under the draft.
+    const stored = region && region.kind !== "compose" ? region.points : [];
+    this.setRegionLine(this.regionHalo, this.regionLine, stored, true);
+    const draft = this.draftPolygon();
+    this.setRegionLine(this.draftHalo, this.draftLine, draft.points, draft.closed);
+    this.guides.batchDraw();
+  }
+
+  /** The polygon a draft presently draws, in document px (empty when nothing draws). */
+  private draftPolygon(): { points: readonly Point[]; closed: boolean } {
+    if (this.rectDrag) {
+      const { start, end } = this.rectDrag;
+      return { points: [start, { x: end.x, y: start.y }, end, { x: start.x, y: end.y }], closed: true };
+    }
+    if (this.lasso) return { points: lassoPreview(this.lasso, this.pointer()), closed: false };
+    return { points: [], closed: false };
+  }
+
+  /** Place one dashed selection contour pair (a halo under a line) at `points`; hide it when there are too few. */
+  private setRegionLine(halo: Konva.Line, line: Konva.Line, points: readonly Point[], closed: boolean): void {
+    const flat = points.flatMap((p) => [p.x, p.y]);
+    for (const node of [halo, line]) {
+      node.points(flat);
+      node.closed(closed);
+      node.visible(points.length > 1);
+    }
+  }
+
+  /**
+   * Draw a composed region's outlines: one halo-under-dash pair per contour,
    * the SPM-9 selection's own look on a blob's shape.
    */
-  private drawWandOutlines(outlines: readonly (readonly Point[])[]): void {
-    this.wandOutlines.destroyChildren();
-    this.wandOutlinePairs = outlines.flatMap((points) => {
+  private drawOutlines(outlines: readonly (readonly Point[])[]): void {
+    this.regionOutlines.destroyChildren();
+    this.outlinePairs = outlines.flatMap((points) => {
       if (points.length < 3) return [];
       const flat = points.flatMap((p) => [p.x, p.y]);
       const halo = new Konva.Line({
@@ -880,18 +941,18 @@ export class EditorStage {
         listening: false,
         stroke: token("--accent-ink"),
       });
-      this.wandOutlines.add(halo, line);
+      this.regionOutlines.add(halo, line);
       return [{ halo, line }];
     });
-    this.wandOutlines.visible(this.wandOutlinePairs.length > 0);
+    this.regionOutlines.visible(this.outlinePairs.length > 0);
   }
 
-  /** Drop the wand region's outline pairs (no wand region to draw). */
-  private clearWandOutlines(): void {
-    if (this.wandOutlinePairs.length === 0) return;
-    this.wandOutlines.destroyChildren();
-    this.wandOutlinePairs = [];
-    this.wandOutlines.visible(false);
+  /** Drop the composed region's outline pairs (none to draw). */
+  private clearOutlines(): void {
+    if (this.outlinePairs.length === 0) return;
+    this.regionOutlines.destroyChildren();
+    this.outlinePairs = [];
+    this.regionOutlines.visible(false);
   }
 
   // ---- Refine brush (SPM-7): paints live, one undo step per finished stroke ----

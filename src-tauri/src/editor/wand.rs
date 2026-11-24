@@ -27,9 +27,9 @@ use super::placement::{transform_of, LayerInput, PlacedImage};
 use super::Rgba;
 
 /// Coverage of one selected pixel: fully in, or the 1-px feather's half.
-const INSIDE: u8 = 255;
+pub(super) const INSIDE: u8 = 255;
 /// The 1-px feather: a selected pixel beside a non-selected neighbour.
-const FEATHER: u8 = 128;
+pub(super) const FEATHER: u8 = 128;
 
 /// Why a fully transparent spot cannot start a selection. The webview
 /// refuses it before the round trip; this is the server-side twin.

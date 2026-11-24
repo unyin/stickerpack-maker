@@ -1,8 +1,9 @@
 // The magic-wand selection (SPEC §6, SPM-22): what a click builds — the
 // coverage mask Rust's flood fill returns — and the pure decisions around
 // it: the tolerance's range and the drag that sets it, how Shift and Alt
-// combine masks on one layer, and the mask's outlines for the dashed
-// selection line. No Konva, no DOM.
+// combine a click with the selection already drawn (since SPM-23 the
+// composition itself is Rust's, editor::compose), and the mask's outlines
+// for the dashed selection line. No Konva, no DOM.
 import { localToDoc, type Point, type Transform } from "./document";
 
 /** Wand tolerance as a percent of full channel range: its range and default (owner decision 2026-11-24). */
@@ -38,51 +39,16 @@ export type WandMode = "replace" | "add" | "subtract";
 /**
  * What the click's modifiers do (owner decision 2026-11-24): a plain click
  * replaces the selection, Shift adds the clicked region to it, Alt
- * subtracts it — the way back from an accidentally added region, since a
- * selection is session state and never an undo step (ADR-0005). Shift wins
- * when both are held. With no selection on the canvas every modifier acts
- * as a plain click; the caller also treats another layer's click as one.
+ * subtracts it. The way back from an accidentally composed region is the
+ * selection's own step-undo (Ctrl+Z while selection steps exist, SPM-23);
+ * Alt-subtract still subtracts, and the selection never enters the
+ * document's history (ADR-0005). Shift wins when both are held. With no
+ * selection on the canvas every modifier acts as a plain click; the caller
+ * also treats a Rectangle/Lasso draw that way (SPM-23).
  */
 export function wandModeFor(shift: boolean, alt: boolean): WandMode {
   if (shift) return "add";
   return alt ? "subtract" : "replace";
-}
-
-/**
- * The mask a click leaves on the canvas: `fill` alone for a replacing
- * click, else its combination with the region's `base` over the two
- * masks' union. Adding takes the stronger coverage where regions overlap;
- * subtracting removes the fill's coverage from each pixel outright, so a
- * click that subtracts the region it drew empties it completely, feather
- * ring included (the smoke caught a proportional rule leaving a ghost).
- */
-export function combineMasks(base: WandMask | null, fill: WandMask, mode: WandMode): WandMask {
-  if (mode === "replace" || !base) return fill;
-  const x = Math.min(base.x, fill.x);
-  const y = Math.min(base.y, fill.y);
-  const width = Math.max(base.x + base.width, fill.x + fill.width) - x;
-  const height = Math.max(base.y + base.height, fill.y + fill.height) - y;
-  const coverage = new Uint8Array(width * height);
-  for (let row = 0; row < height; row++) {
-    for (let column = 0; column < width; column++) {
-      const b = coverageAt(base, x + column, y + row);
-      const f = coverageAt(fill, x + column, y + row);
-      coverage[row * width + column] = mode === "add" ? Math.max(b, f) : Math.max(0, b - f);
-    }
-  }
-  return { x, y, width, height, coverage };
-}
-
-/** A mask's coverage of a layer pixel (0 outside its bounds). */
-function coverageAt(mask: WandMask, x: number, y: number): number {
-  const column = x - mask.x;
-  const row = y - mask.y;
-  return column >= 0 && row >= 0 && column < mask.width && row < mask.height ? mask.coverage[row * mask.width + column] : 0;
-}
-
-/** Whether a mask covers any pixel at all (a subtract can empty it). */
-export function anyCovered(mask: WandMask): boolean {
-  return mask.coverage.some((c) => c > 0);
 }
 
 /** A wand press being dragged: where it began, and the tolerance it is setting. */

@@ -104,32 +104,27 @@ function apart(a: Rect, b: Rect): boolean {
 }
 
 /**
- * Why Cut is disabled, or null when it can run (SPM-9, the wand since
- * SPM-22): it needs a selection drawn on the canvas and exactly one
- * selected image layer the selection belongs to. Text is cut only after
- * merging it into an image. A wand selection belongs to the layer it was
- * clicked on, so Cut lifts from that one.
+ * Why Cut is disabled, or null when it can run (SPM-9; unified across the
+ * tools by SPM-23): it needs a selection drawn on the canvas and exactly
+ * one selected image layer that the selection touches — whatever built the
+ * selection. Text is cut only after merging it into an image.
  */
 export function cutBlocker(doc: Doc, selection: readonly string[], region: Region | null): string | null {
   const layer = selectedLayer(doc, selection);
   if (!layer) return "Select the one image layer to cut from.";
   if (layer.kind === "text") return "Text layers can't be cut: merge the text into an image layer first.";
   if (!region) return "Draw a selection on the canvas with Rectangle, Lasso or Wand first.";
-  if (region.kind === "wand") {
-    return layer.id === region.targetId ? null : "The selection does not touch the selected layer.";
-  }
   return apart(regionBounds(region), layerBounds(layer)) ? "The selection does not touch the selected layer." : null;
 }
 
 /**
  * Why Delete cannot erase the drawn selection, or null when it can (owner
- * decision 2026-11-24): the wand's from its own target, a
- * Rectangle/Lasso's from the one selected image layer the selection
- * touches, as Cut does. With no selection drawn, Delete deletes layers
- * instead (`deleteBlocker`).
+ * decisions 2026-11-24; unified across the tools by SPM-23): the selection
+ * erases from the one selected image layer it touches, whichever tool built
+ * it. With no selection drawn, Delete deletes layers instead
+ * (`deleteBlocker`).
  */
 export function eraseBlocker(doc: Doc, selection: readonly string[], region: Region): string | null {
-  if (region.kind === "wand") return null; // its target exists while the region does
   const layer = selectedLayer(doc, selection);
   if (!layer) return "Select the one image layer to erase from.";
   if (layer.kind === "text") return "Text layers have no pixels to erase: merge the text into an image layer first.";

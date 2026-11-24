@@ -351,11 +351,11 @@ test("the cut selection lives in the session and is not an undo step", () => {
   let notified = 0;
   session.subscribe(() => notified++);
   const region = rectRegion({ x: 0, y: 0 }, { x: 5, y: 5 });
-  session.setRegion(region);
+  session.commitRegion(region);
   expect(session.region).toBe(region);
   expect(notified).toBe(1);
   expect(session.canUndo).toBe(false);
-  session.setRegion(null);
+  session.clearRegion();
   expect(session.region).toBeNull();
 });
 

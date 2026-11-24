@@ -6,8 +6,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
 import type { Effect, EffectResult } from "./model/effects";
 import { layerInput, textStyleOf, type CropInput, type Doc, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
+import type { Contribution } from "./model/region";
 import type { WandMask } from "./model/wand";
-
 import { IMPORT_EXTENSIONS } from "../shared/import-extensions";
 import type { SaveFormat, SaveOutcome, SaveTarget } from "./save";
 
@@ -211,12 +211,21 @@ export function decodeTextFrame(frame: ArrayBuffer): TextRender {
 export const CUT_LAYER_HEADER = "x-cut-layer";
 
 /**
+ * The wire form of a polygon: cut.rs and compose.rs take theirs as
+ * Vec<[f32; 2]> pairs, while the model's Point is {x, y}; every conversion
+ * to the wire is here.
+ */
+function wirePolygon(polygon: readonly Point[]): [number, number][] {
+  return polygon.map((p) => [p.x, p.y]);
+}
+
+/**
  * Cut a selection (a polygon in document pixels) out of a raster layer in
  * Rust (SPM-9): the layer with a hole, and the cutout with its top-left in
  * the layer's own pixel grid. Rust refuses a selection with nothing visible.
  */
 export async function cutImage(image: RgbaImage, transform: Transform, polygon: readonly Point[]): Promise<CutResult> {
-  const meta = { width: image.width, height: image.height, transform, polygon: polygon.map((p) => [p.x, p.y]) };
+  const meta = { width: image.width, height: image.height, transform, polygon: wirePolygon(polygon) };
   const frame = await invokeRaw("editor_cut_layer", bytesOf(image), CUT_LAYER_HEADER, meta);
   return decodeCutFrame(frame, image.width, image.height);
 }
@@ -307,13 +316,50 @@ export async function eraseMask(image: RgbaImage, transform: Transform, mask: Wa
   return decodeFrame(frame);
 }
 
+/** Header carrying a compose request's grid (size and transform) and its contributions; mirrors COMPOSE_MASK_HEADER. */
+export const COMPOSE_MASK_HEADER = "x-compose-mask";
+
+/**
+ * Merge a floating selection's contributions into one grid's coverage mask
+ * in Rust (SPM-23): the target layer's own grid when Cut or Delete applies
+ * the selection, the document's for the dashed-outline preview. The wire
+ * form of a wand contribution carries the mask's place instead of its
+ * bytes; the coverage travels as the raw body, concatenated in order.
+ * Response: the merged mask, cropped to the covered bounds — a zero-size
+ * mask when nothing is covered.
+ */
+export async function composeSelection(
+  width: number,
+  height: number,
+  transform: Transform,
+  contributions: readonly Contribution[],
+): Promise<WandMask> {
+  let length = 0;
+  for (const contribution of contributions) {
+    if (contribution.kind === "wand") length += contribution.mask.coverage.length;
+  }
+  const body = new Uint8Array(length);
+  let offset = 0;
+  const wire = contributions.map((contribution) => {
+    // The wire contract chose Vec<[f32; 2]> pairs for polygons.
+    if (contribution.kind === "poly") {
+      return { ...contribution, points: wirePolygon(contribution.points) };
+    }
+    body.set(contribution.mask.coverage, offset);
+    offset += contribution.mask.coverage.length;
+    return { kind: "mask", op: contribution.op, transform: contribution.transform, ...maskPlace(contribution.mask) };
+  });
+  const frame = await invokeRaw("editor_compose_mask", body, COMPOSE_MASK_HEADER, { width, height, transform, contributions: wire });
+  return decodeWandFrame(frame);
+}
+
 /**
  * Erase a Rectangle/Lasso selection from a raster layer in Rust (SPM-22,
  * owner decision 2026-11-24: Delete with a selection drawn erases it):
  * whole pixels, exactly what Cut's hole leaves.
  */
 export async function eraseRegion(image: RgbaImage, transform: Transform, polygon: readonly Point[]): Promise<RgbaImage> {
-  const meta = { width: image.width, height: image.height, transform, polygon: polygon.map((p) => [p.x, p.y]), mode: "erase" };
+  const meta = { width: image.width, height: image.height, transform, polygon: wirePolygon(polygon), mode: "erase" };
   const frame = await invokeRaw("editor_cut_layer", bytesOf(image), CUT_LAYER_HEADER, meta);
   return decodeFrame(frame);
 }

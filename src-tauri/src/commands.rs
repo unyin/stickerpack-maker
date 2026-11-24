@@ -541,6 +541,27 @@ pub fn editor_cut_mask(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::R
     Ok(tauri::ipc::Response::new(frame))
 }
 
+/// Header carrying a compose request's grid (size and transform) and its
+/// contributions in order (JSON `ComposeMeta`); the mask contributions'
+/// coverage bytes travel as the raw body.
+pub const COMPOSE_MASK_HEADER: &str = "x-compose-mask";
+
+/// Merge a floating selection's contributions into one grid's coverage mask
+/// (SPM-23): the target layer's own grid when Cut or Delete applies the
+/// selection, the document's for the dashed-outline preview. Request: raw
+/// body = the mask contributions' coverage bytes, concatenated in order,
+/// header `x-compose-mask`. Response: `WandMask::to_frame` cropped to the
+/// covered bounds; a zero-size frame when nothing is covered (the webview
+/// reads that as "clear the selection").
+#[tauri::command(async)]
+pub fn editor_compose_mask(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let body = raw_body(&request, "selection compose")?;
+    let meta: editor::compose::ComposeMeta = serde_json::from_str(header(&request, COMPOSE_MASK_HEADER)?)
+        .map_err(|e| format!("the compose header is invalid: {e}"))?;
+    let mask = editor::compose::compose(&meta, body)?;
+    Ok(tauri::ipc::Response::new(mask.to_frame()))
+}
+
 /// Header carrying the effect request's layer size, transform (or text)
 /// and effect settings (JSON `EffectMeta`); a raster layer's pixels travel
 /// as the raw body.
