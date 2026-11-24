@@ -1,6 +1,8 @@
 //! "Cut" (SPEC §6, SPM-9): move the pixels of a raster layer that lie inside
 //! a selection (a rectangle or a lasso, as a polygon in document pixels) into
-//! a new floating layer. The source keeps a transparent hole.
+//! a new floating layer. The source keeps a transparent hole. Since SPM-22 a
+//! request may instead erase the same pixels in place (Delete with a
+//! selection drawn, owner decision 2026-11-24), leaving just the hole.
 //!
 //! The selection is mapped into the layer's own pixel grid through the
 //! inverse of its transform (translate, rotate, scale; placement.rs), so a
@@ -26,6 +28,9 @@ pub struct CutMeta {
     #[serde(flatten)]
     pub layer: LayerMeta,
     pub polygon: Vec<[f32; 2]>,
+    /// What the request does with the selected pixels; the lift when absent.
+    #[serde(default)]
+    pub mode: CutMode,
 }
 
 impl CutMeta {
@@ -59,6 +64,20 @@ impl Cut {
 /// Why nothing could be cut: the selection holds no visible pixel of the layer.
 pub const NOTHING_TO_CUT: &str = "The selection holds no visible pixels of this layer; nothing was cut.";
 
+/// Why nothing could be erased: the selection holds no visible pixel of the layer.
+pub const NOTHING_TO_ERASE: &str = "The selection holds no visible pixels of this layer; nothing was erased.";
+
+/// What a cut request does with the selected pixels: lift them into a new
+/// floating layer (the default, SPM-9), or erase them in place (owner
+/// decision 2026-11-24: Delete with a selection drawn erases its pixels).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CutMode {
+    #[default]
+    Lift,
+    Erase,
+}
+
 /// For each row of a `width` x `height` grid, the pixel spans whose centres
 /// are inside `polygon` (even-odd), as half-open [start, end) ranges.
 fn spans(polygon: &[Point], width: u32, height: u32) -> Vec<Vec<(u32, u32)>> {
@@ -86,8 +105,15 @@ fn spans(polygon: &[Point], width: u32, height: u32) -> Vec<Vec<(u32, u32)>> {
     rows
 }
 
-/// Cut `polygon` (document pixels) out of `layer`.
-pub fn cut(layer: &LayerInput, polygon: &[[f32; 2]]) -> Result<Cut, String> {
+/// Run `visit` for each pixel whose centre lies inside `polygon` (document
+/// pixels, mapped into the layer's own grid), in row order; true once
+/// `visit` reports a visible pixel. Cut's validations and mapping, shared
+/// with the in-place erase (SPM-22).
+fn for_each_visible(
+    layer: &LayerInput,
+    polygon: &[[f32; 2]],
+    mut visit: impl FnMut(usize, u32, u32) -> bool,
+) -> Result<bool, String> {
     let (width, height) = (layer.image.width, layer.image.height);
     if layer.image.pixels.len() != width as usize * height as usize * 4 {
         return Err("the layer's pixels do not match its size".to_string());
@@ -100,36 +126,68 @@ pub fn cut(layer: &LayerInput, polygon: &[[f32; 2]]) -> Result<Cut, String> {
         .ok_or_else(|| "the layer is scaled to nothing, so it cannot be cut".to_string())?;
     let mut local: Vec<Point> = polygon.iter().map(|&[x, y]| Point::from_xy(x, y)).collect();
     inverse.map_points(&mut local);
-    let mut hole = layer.image.clone();
-    let mut moved = vec![0u8; hole.pixels.len()];
-    let (mut left, mut top, mut right, mut bottom) = (u32::MAX, u32::MAX, 0u32, 0u32);
+    let mut any = false;
     for (y, row) in spans(&local, width, height).into_iter().enumerate() {
         for (start, end) in row {
             for x in start..end {
                 let i = (y * width as usize + x as usize) * 4;
-                if hole.pixels[i + 3] == 0 {
-                    continue; // nothing visible to move
-                }
-                moved[i..i + 4].copy_from_slice(&hole.pixels[i..i + 4]);
-                hole.pixels[i..i + 4].fill(0);
-                (left, top) = (left.min(x), top.min(y as u32));
-                (right, bottom) = (right.max(x + 1), bottom.max(y as u32 + 1));
+                any |= visit(i, x, y as u32);
             }
         }
     }
-    if left >= right {
+    Ok(any)
+}
+
+/// Cut `polygon` (document pixels) out of `layer`: the whole visible pixels
+/// inside move into a new floating cutout, and the source keeps a
+/// transparent hole.
+pub fn cut(layer: &LayerInput, polygon: &[[f32; 2]]) -> Result<Cut, String> {
+    let width = layer.image.width as usize;
+    let mut hole = layer.image.clone();
+    let mut moved = vec![0u8; hole.pixels.len()];
+    let (mut left, mut top, mut right, mut bottom) = (u32::MAX, u32::MAX, 0u32, 0u32);
+    let moved_any = for_each_visible(layer, polygon, |i, x, y| {
+        if hole.pixels[i + 3] == 0 {
+            return false; // nothing visible to move
+        }
+        moved[i..i + 4].copy_from_slice(&hole.pixels[i..i + 4]);
+        hole.pixels[i..i + 4].fill(0);
+        (left, top) = (left.min(x), top.min(y));
+        (right, bottom) = (right.max(x + 1), bottom.max(y + 1));
+        true
+    })?;
+    if !moved_any {
         return Err(NOTHING_TO_CUT.to_string());
     }
     let (cw, ch) = (right - left, bottom - top);
     let mut pixels = Vec::with_capacity(cw as usize * ch as usize * 4);
     for y in top..bottom {
-        let start = (y as usize * width as usize + left as usize) * 4;
+        let start = (y as usize * width + left as usize) * 4;
         pixels.extend_from_slice(&moved[start..start + cw as usize * 4]);
     }
     Ok(Cut {
         hole,
         cutout: PlacedImage { x: left as i32, y: top as i32, image: Rgba { width: cw, height: ch, pixels } },
     })
+}
+
+/// Erase `polygon` (document pixels) from `layer` in place: the whole
+/// visible pixels inside become transparent, exactly what a lift's hole
+/// leaves behind (SPM-22, owner decision 2026-11-24: Delete with a
+/// selection drawn erases its pixels).
+pub fn erase_polygon(layer: &LayerInput, polygon: &[[f32; 2]]) -> Result<Rgba, String> {
+    let mut hole = layer.image.clone();
+    let erased = for_each_visible(layer, polygon, |i, _, _| {
+        if hole.pixels[i + 3] == 0 {
+            return false; // nothing visible to erase
+        }
+        hole.pixels[i..i + 4].fill(0);
+        true
+    })?;
+    if !erased {
+        return Err(NOTHING_TO_ERASE.to_string());
+    }
+    Ok(hole)
 }
 
 #[cfg(test)]
@@ -260,5 +318,39 @@ mod tests {
         .unwrap();
         assert_eq!(meta.polygon.len(), 3);
         assert!(meta.layer.text.is_none());
+        assert_eq!(meta.mode, CutMode::Lift);
+    }
+
+    #[test]
+    fn an_erase_request_names_its_mode() {
+        let meta: CutMeta = serde_json::from_str(
+            r#"{"width":2,"height":1,"transform":{"x":0,"y":0,"scaleX":1,"scaleY":1,"rotation":0},
+                "polygon":[[0,0],[1,0],[1,1]],"mode":"erase"}"#,
+        )
+        .unwrap();
+        assert_eq!(meta.mode, CutMode::Erase);
+    }
+
+    #[test]
+    fn an_erase_clears_the_whole_visible_pixels_in_place() {
+        // Layer at (10, 20); select document x 12..15, y 21..23 = layer x 2..5, y 1..3.
+        let source = layer(coords(8, 6), LayerTransform { x: 10.0, y: 20.0, ..LayerTransform::IDENTITY });
+        let out = erase_polygon(&source, &rect(12.0, 21.0, 15.0, 23.0)).unwrap();
+        for y in 0..6 {
+            for x in 0..8 {
+                let inside = (2..5).contains(&x) && (1..3).contains(&y);
+                let expected = if inside { [0, 0, 0, 0] } else { [x as u8, y as u8, 7, 255] };
+                assert_eq!(px(&out, x, y), expected, "erased at ({x},{y})");
+            }
+        }
+        // A selection holding nothing visible erases nothing and says so.
+        let mut transparent = coords(6, 6);
+        for p in transparent.pixels.chunks_mut(4) {
+            p[3] = 0;
+        }
+        assert_eq!(
+            erase_polygon(&layer(transparent, LayerTransform::IDENTITY), &rect(0.0, 0.0, 6.0, 6.0)).unwrap_err(),
+            NOTHING_TO_ERASE,
+        );
     }
 }

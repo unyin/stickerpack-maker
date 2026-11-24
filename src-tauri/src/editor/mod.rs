@@ -22,6 +22,7 @@ pub mod save;
 #[cfg(test)]
 mod test_font;
 pub mod text;
+pub mod wand;
 
 use fast_image_resize::images::Image as FirImage;
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};

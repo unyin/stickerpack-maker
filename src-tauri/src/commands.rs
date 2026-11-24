@@ -482,17 +482,62 @@ pub fn editor_render_text(
 /// polygon (JSON `CutMeta`); the layer's pixels travel as the raw body.
 pub const CUT_LAYER_HEADER: &str = "x-cut-layer";
 
-/// Cut a selection out of a raster layer (SPM-9). Request: raw body = the
-/// layer's RGBA bytes, header `x-cut-layer`. Response: `Cut::to_frame` (the
-/// layer with a hole, then the placed cutout).
+/// Cut a selection out of a raster layer (SPM-9), or erase it in place
+/// (SPM-22: Delete with a Rectangle/Lasso selection drawn). Request: raw
+/// body = the layer's RGBA bytes, header `x-cut-layer`; the mode in the
+/// header lifts by default. Response: `Cut::to_frame` (the layer with a
+/// hole, then the placed cutout) for a lift, `Rgba::to_frame` (the hole)
+/// for an erase.
 #[tauri::command(async)]
 pub fn editor_cut_layer(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
     let body = raw_body(&request, "cut")?;
     let meta: editor::cut::CutMeta = serde_json::from_str(header(&request, CUT_LAYER_HEADER)?)
         .map_err(|e| format!("the cut header is invalid: {e}"))?;
     let layer = meta.decode_layer(body)?;
-    let cut = editor::cut::cut(&layer, &meta.polygon)?;
-    Ok(tauri::ipc::Response::new(cut.to_frame()))
+    let frame = match meta.mode {
+        editor::cut::CutMode::Lift => editor::cut::cut(&layer, &meta.polygon)?.to_frame(),
+        editor::cut::CutMode::Erase => editor::cut::erase_polygon(&layer, &meta.polygon)?.to_frame(),
+    };
+    Ok(tauri::ipc::Response::new(frame))
+}
+
+/// Header carrying a wand request's layer size and transform, the clicked
+/// spot and the tolerance; mirrors WAND_HEADER.
+pub const WAND_HEADER: &str = "x-wand-select";
+
+/// Select the colour-similar contiguous region around a clicked spot
+/// (SPM-22). Request: raw body = the target layer's RGBA bytes, header
+/// `x-wand-select`. Response: `WandMask::to_frame` (the mask's place and
+/// size, then its coverage bytes).
+#[tauri::command(async)]
+pub fn editor_wand_select(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let body = raw_body(&request, "wand")?;
+    let meta: editor::wand::WandMeta = serde_json::from_str(header(&request, WAND_HEADER)?)
+        .map_err(|e| format!("the wand header is invalid: {e}"))?;
+    let layer = meta.decode_layer(body)?;
+    let mask = editor::wand::select(&layer, &meta.seed, meta.tolerance)?;
+    Ok(tauri::ipc::Response::new(mask.to_frame()))
+}
+
+/// Header carrying a mask cut's layer size and transform, the mask's place
+/// and the mode; mirrors CUT_MASK_HEADER.
+pub const CUT_MASK_HEADER: &str = "x-cut-mask";
+
+/// Cut or erase a wand selection's coverage mask out of a raster layer
+/// (SPM-22). Request: raw body = the layer's RGBA bytes then the mask's
+/// coverage, header `x-cut-mask`. Response: `Cut::to_frame` for a lift,
+/// `Rgba::to_frame` for an erase.
+#[tauri::command(async)]
+pub fn editor_cut_mask(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+    let body = raw_body(&request, "mask cut")?;
+    let meta: editor::wand::CutMaskMeta = serde_json::from_str(header(&request, CUT_MASK_HEADER)?)
+        .map_err(|e| format!("the mask cut header is invalid: {e}"))?;
+    let (layer, mask) = meta.decode(body)?;
+    let frame = match meta.mode {
+        editor::cut::CutMode::Lift => editor::wand::cut_mask(&layer, &mask)?.to_frame(),
+        editor::cut::CutMode::Erase => editor::wand::erase_mask(&layer, &mask)?.to_frame(),
+    };
+    Ok(tauri::ipc::Response::new(frame))
 }
 
 /// Header carrying the effect request's layer size, transform (or text)

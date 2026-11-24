@@ -328,12 +328,12 @@ stickers, Missing stickers, and the thumbnail.
 ### Layers and tools
 - Session layer model: base image, pasted cutouts, text objects. Undo/redo throughout.
 - **Cut / paste / resize** floating parts. Details below are owner
-  confirmed 2026-11-21 (SPM-9):
-  - **Move / Rectangle / Lasso** tools: with Rectangle or Lasso, the left button draws a
-    selection instead of moving layers or panning; wheel zoom and middle-drag pan still
-    work, even mid-drag (only the left button's release ends a drag). The selection is not
-    an undo step; it stays until it is used, replaced, or cleared with Esc (Esc clears it
-    before it clears the layer selection).
+  confirmed 2026-11-21 (SPM-9; the Wand, 2026-11-24, SPM-22):
+  - **Move / Rectangle / Lasso / Wand** tools: with one of the latter three, the left
+    button draws a selection instead of moving layers or panning; wheel zoom and
+    middle-drag pan still work, even mid-drag (only the left button's release ends a
+    drag). The selection is not an undo step; it stays until it is used, replaced, or
+    cleared with Esc (Esc clears it before it clears the layer selection).
   - The **Lasso** is a hybrid (owner decision 2026-11-22, in the style of GIMP's Free
     Select): a click adds a waypoint (a straight edge from the last point), a drag draws
     freehand, and the two mix in one lasso, which stays open between presses with a
@@ -343,6 +343,24 @@ stickers, Missing stickers, and the thumbnail.
     removes its last segment: the last waypoint, or the whole last freehand stroke while
     the point the stroke began at stays a waypoint, as in GIMP (owner re-tests
     2026-11-22). A closed lasso with no area clears the selection.
+  - The **Wand** (SPM-22, owner decisions 2026-11-24) selects the colour-similar pixels
+    around a click: the target follows the effects tools (the selected image layer, else
+    the base image) and the click also selects it, so Cut and Delete act on what was
+    clicked. A pixel matches when it is visible and no RGB channel drifts more than the
+    tolerance — a percent of full range, default 20, in the Tolerance field beside the
+    tools — from the clicked sample; the fill is contiguous, stopping at the first
+    non-matching pixel, and the mask carries a 1-px feather (half coverage on its
+    boundary), so erasing up to manga ink lines leaves no razor cut through the
+    anti-aliased band. A click-drag sets the tolerance live, with a readout beside the
+    pointer (up increases, as the warp strength; down decreases), re-filling the layer
+    once per 5% step. A plain click replaces the selection; on the same layer Shift adds
+    the clicked region and Alt removes one — a selection is session state, so Undo cannot
+    take a region back — and a click on another layer starts fresh, whatever the
+    modifiers. The region draws like the others (a dashed outline, one loop per boundary
+    of the blob) and dies with any edit or undo (its mask is bound to its layer's pixels).
+    Cut lifts it into a floating layer like a Rectangle/Lasso cut; Delete erases it (below).
+    A fully transparent or out-of-layer click, and a text layer or several selected
+    layers, say why in the message line and change nothing.
   - **Cut** works on exactly one selected image layer that the selection touches (its
     tooltip says why not). The selected pixels (whole pixels whose centres lie inside the
     selection; a lasso that crosses itself leaves the overlap out) move into a new floating
@@ -351,7 +369,12 @@ stickers, Missing stickers, and the thumbnail.
     cutout is trimmed to its visible pixels; a selection holding no visible pixels cuts
     nothing. After a cut the cutout is selected and the Move tool is back, so it can be
     dragged and resized at once. Text layers are not cut (merge them into an image first).
-    Delete still deletes layers, never selected pixels. Ctrl+X runs Cut (lifting the
+    Delete erases a drawn selection's pixels from the layer it belongs to (owner decision
+    2026-11-24, amending the 2026-11-21 rule that Delete never touched pixels): whole
+    pixels for a Rectangle/Lasso selection, the wand's feathered coverage for a wand
+    region, keeping the layer's restore source so Restore brings them back, as ONE undo
+    step; with no selection drawn it deletes the selected layers, never pixels. Ctrl+X
+    runs Cut (lifting the
     selection to a new layer, not to the clipboard; when Cut is blocked it shows the
     tooltip's reason in the message line), and there is no Ctrl+C (owner decision
     2026-11-21).
@@ -396,7 +419,7 @@ stickers, Missing stickers, and the thumbnail.
     message line says so and nothing changes.
   - One model: **ISNet general use** (no model choice in the UI; the anime model offered on
     2026-11-22 was dropped by the owner on 2026-11-23 — colour anime is out of scope, and
-    manga will be handled by a separate magic-wand tool).
+    manga is handled by the Wand tool above, SPM-22).
   - The model runs offline in Rust. Its first use asks in the shared dialog (§2),
     "Download the background removal model?", naming its size, with
     **Download** and **Cancel** (the default); its one-time download (179 MB)
