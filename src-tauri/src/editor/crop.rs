@@ -13,7 +13,7 @@ use serde::Deserialize;
 
 use super::layers::{decode_layer, finish_body, LayerMeta};
 use super::placement::{check_window, from_pixmap, place_layers, render_window, LayerInput, LayerTransform};
-use super::text::rasterise_window;
+use super::text::{rasterise_window, TextWindow};
 use super::Rgba;
 
 /// A rectangle of whole document pixels; mirrors `Rect` in document.ts.
@@ -43,6 +43,7 @@ pub fn split_crop_layers(
     meta: &[CropMeta],
     body: &[u8],
     fonts: &Database,
+    emoji: &super::emoji::EmojiFonts,
 ) -> Result<Vec<(LayerInput, ClipRect)>, String> {
     let mut rest = body;
     let layers = meta
@@ -51,7 +52,8 @@ pub fn split_crop_layers(
             let clip = m.clip;
             let layer = decode_layer(&m.layer, &mut rest, |spec, t| {
                 check_window(clip.width, clip.height, "crop")?;
-                let image = rasterise_window(fonts, spec, t, clip.x, clip.y, clip.width, clip.height)?;
+                let window = TextWindow { x: clip.x, y: clip.y, width: clip.width, height: clip.height };
+                let image = rasterise_window(fonts, emoji, spec, t, window)?;
                 let transform = LayerTransform { x: clip.x as f32, y: clip.y as f32, ..LayerTransform::IDENTITY };
                 Ok(LayerInput { image, transform })
             })?;
@@ -90,6 +92,7 @@ pub fn crop(layers: &[(LayerInput, ClipRect)]) -> Result<Vec<u8>, String> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::emoji::EmojiFonts;
     use super::super::merge::merge;
     use super::super::placement::{PlacedImage, MAX_LAYER_SIDE};
     use super::*;
@@ -249,10 +252,10 @@ mod tests {
         .unwrap();
         let body = [1, 2, 3, 255, 5, 6, 7, 255, 9, 10, 11, 255];
         let fonts = Database::new();
-        let layers = split_crop_layers(&meta, &body, &fonts).unwrap();
+        let layers = split_crop_layers(&meta, &body, &fonts, &EmojiFonts::empty()).unwrap();
         assert_eq!(layers[0].1, ClipRect { x: 1, y: 0, width: 1, height: 1 });
         assert_eq!(crop(&layers).unwrap(), vec![5, 6, 7, 255, 9, 10, 11, 255]);
-        assert!(split_crop_layers(&meta, &body[..11], &fonts).is_err());
+        assert!(split_crop_layers(&meta, &body[..11], &fonts, &EmojiFonts::empty()).is_err());
     }
 
     #[test]
@@ -267,7 +270,7 @@ mod tests {
             super::super::test_font::FAMILY
         ))
         .unwrap();
-        let layers = split_crop_layers(&meta, &[], &fonts).unwrap();
+        let layers = split_crop_layers(&meta, &[], &fonts, &EmojiFonts::empty()).unwrap();
         let out = crop_layer(&layers[0].0, layers[0].1).unwrap();
         assert_eq!((out.width, out.height), (30, 100));
         assert_eq!(px(&out, 0, 10), [0, 255, 0, 255]);
@@ -293,7 +296,7 @@ mod tests {
         ))
         .unwrap();
         let body = [1, 2, 3, 255, 5, 6, 7, 255, 9, 10, 11, 255];
-        let layers = split_crop_layers(&meta, &body, &fonts).unwrap();
+        let layers = split_crop_layers(&meta, &body, &fonts, &EmojiFonts::empty()).unwrap();
         // The text arrives already clip-sized, at the clip's top-left.
         assert_eq!((layers[1].0.image.width, layers[1].0.image.height), (30, 100));
         assert_eq!((layers[1].0.transform.x, layers[1].0.transform.y), (0.0, 0.0));
@@ -301,7 +304,7 @@ mod tests {
         assert_eq!(&out[..4], &[5, 6, 7, 255]);
         assert_eq!(&out[out.len() - 4..], &[9, 10, 11, 255]);
         assert_eq!(out.len(), 4 + 30 * 100 * 4 + 4);
-        assert!(split_crop_layers(&meta, &body[..8], &fonts).is_err());
+        assert!(split_crop_layers(&meta, &body[..8], &fonts, &EmojiFonts::empty()).is_err());
     }
 
     #[test]
@@ -316,13 +319,13 @@ mod tests {
         };
         // Rotated and scaled, hanging over the box's left and top edges.
         let t = LayerTransform { x: -20.3, y: -15.6, scale_x: 1.3, scale_y: 1.1, rotation: 20.0 };
-        let reference = rasterise_placed(&fonts, &spec, &t).unwrap();
+        let reference = rasterise_placed(&fonts, &EmojiFonts::empty(), &spec, &t).unwrap();
         let clip = ClipRect { x: 0, y: 0, width: 40, height: 40 };
         let meta = [CropMeta {
             layer: LayerMeta { width: 60, height: 100, transform: t, text: Some(spec.clone()) },
             clip,
         }];
-        let layers = split_crop_layers(&meta, &[], &fonts).unwrap();
+        let layers = split_crop_layers(&meta, &[], &fonts, &EmojiFonts::empty()).unwrap();
         let out = crop_layer(&layers[0].0, clip).unwrap();
         let (mut visible, mut flips) = (0, 0);
         for y in 0..40 {
@@ -340,9 +343,9 @@ mod tests {
         assert!(flips <= 4, "{flips} pixels differ from merge's rendering");
         // Scaled 100x the text is far too large for merge, yet a small clip crops.
         let huge = LayerTransform { x: -3000.0, y: -3000.0, scale_x: 100.0, scale_y: 100.0, rotation: 0.0 };
-        assert!(rasterise_placed(&fonts, &spec, &huge).unwrap_err().contains("too large"));
+        assert!(rasterise_placed(&fonts, &EmojiFonts::empty(), &spec, &huge).unwrap_err().contains("too large"));
         let meta = [CropMeta { layer: LayerMeta { width: 60, height: 100, transform: huge, text: Some(spec) }, clip }];
-        let layers = split_crop_layers(&meta, &[], &fonts).unwrap();
+        let layers = split_crop_layers(&meta, &[], &fonts, &EmojiFonts::empty()).unwrap();
         // Document (0, 0) is the glyph's (30, 30) at scale 1: inside 'A' (x 10..50, y 10..80).
         assert_eq!(px(&crop_layer(&layers[0].0, clip).unwrap(), 0, 0), [0, 0, 255, 255]);
     }

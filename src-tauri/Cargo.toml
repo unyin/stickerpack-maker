@@ -40,6 +40,10 @@ tauri-plugin-opener = "2"
 # exactly the same for the view, merge, Crop and the save flatten.
 fontdb = "0.24"
 ab_glyph = "0.2"
+# Emoji colour layers and fallback cmaps (SPM-20): the same version fontdb
+# already pulls in, so no extra copy — read directly here for COLR/CPAL
+# painting, GSUB emoji ligatures and cmap coverage checks.
+ttf-parser = "0.25"
 # Outline and fuzzy glow (SPM-8): Euclidean distance transform and box
 # blurs. No default features: no rayon, and `image` stays as configured above.
 imageproc = { version = "0.25", default-features = false }

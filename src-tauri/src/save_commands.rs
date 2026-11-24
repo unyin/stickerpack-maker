@@ -18,6 +18,7 @@ use crate::editor::save::{render_for_save, ConstraintSet, SaveDoc};
 use crate::library::packs;
 use crate::library::schema::{Pack, Sticker};
 use crate::library::stickers::{self, NewSticker};
+use crate::commands::style_emoji_fonts;
 use crate::pack_commands::{with_library, LibraryLock};
 use crate::{editor, SharedConfig};
 
@@ -72,7 +73,8 @@ pub const SAVE_HEADER: &str = "x-save-image";
 #[tauri::command(async)]
 pub fn editor_save_image(
     request: tauri::ipc::Request<'_>,
-    config: State<'_, SharedConfig>,
+    app: tauri::AppHandle,
+    config_state: State<'_, SharedConfig>,
     lock: State<'_, LibraryLock>,
 ) -> Result<SaveOutcome, String> {
     let body = match request.body() {
@@ -93,15 +95,19 @@ pub fn editor_save_image(
         _ => ConstraintSet::Sticker,
     };
     let cap_kb = save_cap_kb(set);
-    // The pixel work runs before taking the Library lock.
-    let encoded = match render_for_save(set, &meta.doc, body, editor::text::system_fonts(), meta.format, cap_kb)? {
+    // The pixel work runs before taking the Library lock; a text layer
+    // rasterises with the style's emoji chain (SPM-20). The helper drops
+    // the config guard before returning: with_library re-locks the config,
+    // so holding it here would deadlock every save.
+    let emoji = style_emoji_fonts(&app, &config_state)?;
+    let encoded = match render_for_save(set, &meta.doc, body, editor::text::system_fonts(), &emoji, meta.format, cap_kb)? {
         EncodeOutcome::Fits(encoded) => encoded,
         // The cap actually used, so the dialog names it (the override's, in a debug build).
         EncodeOutcome::TooLarge { format, smallest } => {
             return Ok(SaveOutcome::TooLarge { format, bytes: smallest, max_kilobytes: cap_kb })
         }
     };
-    with_library(&config, &lock, |conn, dir| match meta.target {
+    with_library(&config_state, &lock, |conn, dir| match meta.target {
         SaveTarget::Thumbnail { pack_id } => {
             let pack = write_thumbnail(conn, dir, pack_id, &encoded)?;
             // The file is new: the Pack Manager reads it once instead of trusting its last check.
@@ -352,7 +358,7 @@ mod tests {
                 text: None,
             }],
         };
-        let err = render_for_save(ConstraintSet::Thumbnail, &doc, &image.pixels, fonts, SaveFormat::Png, THUMBNAIL_MAX_KB).unwrap_err();
+        let err = render_for_save(ConstraintSet::Thumbnail, &doc, &image.pixels, fonts, &crate::editor::emoji::EmojiFonts::empty(), SaveFormat::Png, THUMBNAIL_MAX_KB).unwrap_err();
         assert!(err.starts_with("Not saved:"), "{err}");
         // And the core refuses a non-square file even if encoding let it through.
         let mut lib = Lib::new();

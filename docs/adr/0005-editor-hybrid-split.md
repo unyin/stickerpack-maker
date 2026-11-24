@@ -64,3 +64,16 @@ Every operation needs undo/redo. The owner values the editing feel above all (AD
   rendering enlarged, so it can look softer than the result.
 - Editing still uses the `<textarea>` overlay, styled with the same family and the Rust line metrics;
   each committed edit costs one small IPC round trip.
+
+## Amendment (SPM-20, 2026-11-24)
+
+**The text-editing overlay is styled with the layer's family followed by the emoji style stack.**
+
+- The overlay's `font-family` is the chosen family first, then `var(--font-emoji)`, the style stack the
+  rest of the DOM draws emoji with (SPM-17). Chosen font first keeps covered glyphs, text-presentation
+  included, in the layer's own font; the emoji style stack next makes `Emoji_Presentation` emoji preview
+  in the same font the canvas commits, because the Rust chain routes those emoji through the same style
+  stack per character (owner report 2026-11-24). This supersedes "styled with the same family" above.
+- A glyph the chosen family lacks may fall to the style stack before the webview's system fallback, so
+  the preview can show it in the emoji font while Rust keeps it with the text font. That is an accepted
+  approximation of the fallback, not a mismatch the overlay can avoid.

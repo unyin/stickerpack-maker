@@ -220,6 +220,139 @@ pub fn read_custom_emoji_font(path: String) -> Result<tauri::ipc::Response, Stri
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+// ---- The text renderer's emoji chain (SPM-20) ----
+
+/// The bundled emoji fonts' asset paths (SPM-17's files in public/fonts,
+/// which vite copies into dist/, the app's frontendDist).
+const BUNDLED_NOTO: &str = "fonts/Noto-COLRv1.ttf";
+const BUNDLED_TWEMOJI: &str = "fonts/Twemoji_COLRv1.ttf";
+
+/// A bundled emoji font's bytes, cached for the process: the embedded
+/// frontendDist asset at release (AssetResolver — no installer growth; the
+/// bytes already ship in the exe), dist/ from disk in dev, and in a dev
+/// run without a built dist the very file the dev webview serves from
+/// public/ (a stale-or-absent dist must not desync the canvas from the
+/// DOM). The public/ fallback compiles out of release, where the resolver
+/// always works.
+fn bundled_emoji_font(app: &tauri::AppHandle, path: &str) -> Option<std::sync::Arc<Vec<u8>>> {
+    if let Some(asset) = app.asset_resolver().get(path.to_string()) {
+        return Some(std::sync::Arc::new(asset.bytes));
+    }
+    #[cfg(debug_assertions)]
+    {
+        let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../public").join(path);
+        if let Ok(bytes) = fs::read(&file) {
+            return Some(std::sync::Arc::new(bytes));
+        }
+    }
+    eprintln!("cannot load the bundled emoji font {path}; emoji fall back to the system fonts");
+    None
+}
+
+fn noto_bytes(app: &tauri::AppHandle) -> Option<std::sync::Arc<Vec<u8>>> {
+    static CACHE: std::sync::OnceLock<Option<std::sync::Arc<Vec<u8>>>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| bundled_emoji_font(app, BUNDLED_NOTO)).clone()
+}
+
+fn twemoji_bytes(app: &tauri::AppHandle) -> Option<std::sync::Arc<Vec<u8>>> {
+    static CACHE: std::sync::OnceLock<Option<std::sync::Arc<Vec<u8>>>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| bundled_emoji_font(app, BUNDLED_TWEMOJI)).clone()
+}
+
+/// The custom style's font file read from its stored path, cached by path
+/// (the canvas twin of the webview's one FontFace under the alias): the
+/// read_custom_emoji_font guards apply, and a file the Rust parser cannot
+/// read (woff2, say — a documented limit) is skipped, falling to the
+/// bundled Noto behind it.
+type CustomEmojiFontCache = std::sync::Mutex<Option<(PathBuf, std::sync::Arc<Vec<u8>>)>>;
+
+fn custom_emoji_font_bytes(path: &PathBuf) -> Option<std::sync::Arc<Vec<u8>>> {
+    static CACHE: std::sync::OnceLock<CustomEmojiFontCache> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(None));
+    if let Ok(guard) = cache.lock() {
+        if let Some((cached, bytes)) = guard.as_ref() {
+            if cached == path {
+                return Some(bytes.clone());
+            }
+        }
+    }
+    let bytes = match custom_emoji_font_problem(&path.to_string_lossy()) {
+        Some(why) => {
+            eprintln!("the custom emoji font is skipped: {why}");
+            None
+        }
+        None => match fs::read(path) {
+            Ok(bytes) => Some(std::sync::Arc::new(bytes)),
+            Err(e) => {
+                eprintln!("the custom emoji font is skipped: cannot read {}: {e}", path.display());
+                None
+            }
+        },
+    };
+    if let (Ok(mut guard), Some(bytes)) = (cache.lock(), &bytes) {
+        *guard = Some((path.clone(), bytes.clone()));
+    }
+    bytes
+}
+
+/// The emoji font chain for the current style (SPM-20), the Rust twin of
+/// the webview's EMOJI_STYLE_STACKS (src/emoji-style.ts): the style's own
+/// font first, then the system emoji fonts. A chain font that covers a
+/// character only in monochrome is skipped by the renderer itself
+/// (never monochrome outlines, SPEC §5), so the tail never draws emoji
+/// where the style's font already could.
+fn emoji_fonts(app: &tauri::AppHandle, cfg: &AppConfig) -> editor::emoji::EmojiFonts {
+    use editor::emoji::{EmojiSource, EmojiFonts};
+    let mut sources: Vec<EmojiSource> = Vec::new();
+    match cfg.emoji_style {
+        EmojiStyle::Android => {
+            if let Some(bytes) = noto_bytes(app) {
+                sources.push(EmojiSource::Bytes(bytes));
+            }
+        }
+        EmojiStyle::Twemoji => {
+            if let Some(bytes) = twemoji_bytes(app) {
+                sources.push(EmojiSource::Bytes(bytes));
+            }
+        }
+        // Nothing bundled: the system Segoe IS the style's font.
+        EmojiStyle::Windows => {}
+        EmojiStyle::Custom => {
+            if let Some(path) = &cfg.custom_emoji_font_path {
+                if let Some(bytes) = custom_emoji_font_bytes(path) {
+                    sources.push(EmojiSource::Bytes(bytes));
+                }
+            }
+            // A broken, missing or unparsable custom file falls to the
+            // bundled Noto, the canvas twin of the webview's Android
+            // fallback (SPM-17's applyEmojiStyle).
+            if let Some(bytes) = noto_bytes(app) {
+                sources.push(EmojiSource::Bytes(bytes));
+            }
+        }
+    }
+    for family in ["Segoe UI Emoji", "Noto Color Emoji"] {
+        let query =
+            fontdb::Query { families: &[fontdb::Family::Name(family)], ..fontdb::Query::default() };
+        if let Some(id) = editor::text::system_fonts().query(&query) {
+            sources.push(EmojiSource::System(id));
+        }
+    }
+    EmojiFonts::new(sources)
+}
+
+/// The style's emoji chain as the commands take it (SPM-20): the config is
+/// read under its lock and the guard is DROPPED here, before any pixel
+/// work — `with_library` re-locks the config (pack_commands.rs documents
+/// the order), so a caller holding it across a save deadlocks the app.
+pub(crate) fn style_emoji_fonts(
+    app: &tauri::AppHandle,
+    state: &State<'_, SharedConfig>,
+) -> Result<editor::emoji::EmojiFonts, String> {
+    let config = lock_config(state)?;
+    Ok(emoji_fonts(app, &config))
+}
+
 // ---- Editor (ADR-0005: one-shot pixel work in Rust) ----
 
 /// Header-only probe of an import candidate: displayed size and whether it
@@ -245,13 +378,19 @@ pub const MERGE_LAYERS_HEADER: &str = "x-merge-layers";
 /// Merge selected layers (SPEC §6). Request: raw body = the raster layers'
 /// RGBA bytes concatenated bottom to top, header `x-merge-layers` = every
 /// layer's size and transform, plus the text of text layers (which have no
-/// bytes in the body). Response: `PlacedImage::to_frame` (origin + image).
+/// bytes in the body). A text layer rasterises with the style's emoji
+/// chain (SPM-20). Response: `PlacedImage::to_frame` (origin + image).
 #[tauri::command(async)]
-pub fn editor_merge_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+pub fn editor_merge_layers(
+    request: tauri::ipc::Request<'_>,
+    app: tauri::AppHandle,
+    state: State<'_, SharedConfig>,
+) -> Result<tauri::ipc::Response, String> {
     let body = raw_body(&request, "merge")?;
     let meta: Vec<editor::layers::LayerMeta> = serde_json::from_str(header(&request, MERGE_LAYERS_HEADER)?)
         .map_err(|e| format!("merge layer header is invalid: {e}"))?;
-    let layers = editor::layers::split_layers(&meta, body, editor::text::system_fonts())?;
+    let emoji = style_emoji_fonts(&app, &state)?;
+    let layers = editor::layers::split_layers(&meta, body, editor::text::system_fonts(), &emoji)?;
     let merged = editor::merge::merge(&layers)?;
     Ok(tauri::ipc::Response::new(merged.to_frame()))
 }
@@ -262,14 +401,20 @@ pub const CROP_LAYERS_HEADER: &str = "x-crop-layers";
 
 /// Crop layers to the crop box (SPEC §6). Request: raw body = the raster
 /// layers' RGBA bytes concatenated, header `x-crop-layers` = their sizes,
-/// transforms and clips (text layers carry their text and no bytes).
+/// transforms and clips (text layers carry their text and no bytes). A
+/// text layer rasterises with the style's emoji chain (SPM-20).
 /// Response: each clip's RGBA bytes, concatenated.
 #[tauri::command(async)]
-pub fn editor_crop_layers(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+pub fn editor_crop_layers(
+    request: tauri::ipc::Request<'_>,
+    app: tauri::AppHandle,
+    state: State<'_, SharedConfig>,
+) -> Result<tauri::ipc::Response, String> {
     let body = raw_body(&request, "crop")?;
     let meta: Vec<editor::crop::CropMeta> = serde_json::from_str(header(&request, CROP_LAYERS_HEADER)?)
         .map_err(|e| format!("crop layer header is invalid: {e}"))?;
-    let layers = editor::crop::split_crop_layers(&meta, body, editor::text::system_fonts())?;
+    let emoji = style_emoji_fonts(&app, &state)?;
+    let layers = editor::crop::split_crop_layers(&meta, body, editor::text::system_fonts(), &emoji)?;
     Ok(tauri::ipc::Response::new(editor::crop::crop(&layers)?))
 }
 
@@ -320,10 +465,16 @@ pub fn editor_list_fonts() -> Vec<String> {
 }
 
 /// Draw a text layer at scale 1 (SPM-9): what the view shows and the box the
-/// layer is measured by. Response: `TextRender::to_frame` (metrics + image).
+/// layer is measured by. Emoji draw from the style's chain, in colour
+/// (SPM-20). Response: `TextRender::to_frame` (metrics + image).
 #[tauri::command(async)]
-pub fn editor_render_text(spec: editor::text::TextSpec) -> Result<tauri::ipc::Response, String> {
-    let render = editor::text::render(editor::text::system_fonts(), &spec)?;
+pub fn editor_render_text(
+    spec: editor::text::TextSpec,
+    app: tauri::AppHandle,
+    state: State<'_, SharedConfig>,
+) -> Result<tauri::ipc::Response, String> {
+    let emoji = style_emoji_fonts(&app, &state)?;
+    let render = editor::text::render(editor::text::system_fonts(), &emoji, &spec)?;
     Ok(tauri::ipc::Response::new(render.to_frame()))
 }
 
@@ -352,14 +503,20 @@ pub const EFFECT_HEADER: &str = "x-effect";
 /// Draw an outline or fuzzy glow on one layer (SPM-8): both the live
 /// preview and the result Apply bakes in (ADR-0008). Request: raw body =
 /// the raster layer's RGBA bytes (none for a text layer, which Rust
-/// rasterises), header `x-effect`. Response: `EffectResult::to_frame` (the
-/// new transform, then the grown image).
+/// rasterises with the style's emoji chain, SPM-20), header `x-effect`.
+/// Response: `EffectResult::to_frame` (the new transform, then the
+/// grown image).
 #[tauri::command(async)]
-pub fn editor_apply_effect(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
+pub fn editor_apply_effect(
+    request: tauri::ipc::Request<'_>,
+    app: tauri::AppHandle,
+    state: State<'_, SharedConfig>,
+) -> Result<tauri::ipc::Response, String> {
     let body = raw_body(&request, "effect")?;
     let meta: editor::effects::EffectMeta = serde_json::from_str(header(&request, EFFECT_HEADER)?)
         .map_err(|e| format!("the effect header is invalid: {e}"))?;
-    let layer = meta.decode_layer(body, editor::text::system_fonts())?;
+    let emoji = style_emoji_fonts(&app, &state)?;
+    let layer = meta.decode_layer(body, editor::text::system_fonts(), &emoji)?;
     let result = editor::effects::apply(&layer, &meta.effect)?;
     Ok(tauri::ipc::Response::new(result.to_frame()))
 }

@@ -8,6 +8,12 @@ pub mod crop;
 pub mod cut;
 pub mod effects;
 pub mod encode;
+/// Emoji fonts and colour painting for text layers (SPM-20).
+pub mod emoji;
+#[cfg(test)]
+mod emoji_test_font;
+#[cfg(test)]
+mod fallback_test_font;
 pub mod import;
 pub mod layers;
 pub mod merge;
