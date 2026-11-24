@@ -139,7 +139,9 @@ stickers, Missing stickers, and the thumbnail.
   **Twemoji** — bundled, artwork CC-BY 4.0 with the credit shown in Settings and the licence
   texts shipped beside the fonts; **Windows** — the system's Segoe UI Emoji, nothing bundled;
   **custom font file** — a user-picked .ttf/.otf/.woff2, read from where it is and never shipped;
-  a custom file that is missing or not a font falls back to Android with a message in Settings.
+  a custom file that is missing, not a font, or refused by the app's embedded web engine (some
+  fonts Windows itself renders are rejected inside the app — not a bug drawable around) falls
+  back to Android with a message in Settings.
   The choice changes every emoji in the app without a restart (one font-family stack on the
   emoji fields' shared variable, re-measuring the Emoji String box), and persists in the app
   config next to the Library path.

@@ -86,15 +86,29 @@ export function emojiStyleProblem(): string | null {
 
 /**
  * Load the custom style's face from its stored file. Throws when nothing is
- * set, the file is missing, or FontFace rejects the bytes (not a real font).
- * The same file already loaded is kept: switching styles never re-reads it.
+ * set, the file is missing, or FontFace rejects the bytes. The same file
+ * already loaded is kept: switching styles never re-reads it.
  */
 async function loadCustomFace(path: string | null): Promise<void> {
   if (!path) throw new Error("no custom emoji font file is set");
   if (path === customFacePath && customFace) return;
   const bytes = await readCustomEmojiFont(path);
   const face = new FontFace(CUSTOM_FAMILY, bytes); // sniffs the container format
-  await face.load();
+  try {
+    await face.load();
+  } catch (err) {
+    // The web view's font engine (Chromium's OTS) rejects font FILES that
+    // Windows' own renderer accepts: repacked or scraped "good" emoji fonts
+    // commonly land here, and no webview-based app can draw them — the
+    // rejection is the engine's, not a bug we can fix. Say that plainly
+    // instead of surfacing Chromium's raw "Invalid font data in
+    // ArrayBuffer" (owner, from the test, 2026-11-24).
+    throw new Error(
+      `${path} looks like a font, but the app's embedded web engine refused to load it. ` +
+        `Other apps on this machine may render it, yet it cannot be used here — ` +
+        `pick a different emoji font file. (${errorMessage(err)})`,
+    );
+  }
   document.fonts.add(face);
   if (customFace) document.fonts.delete(customFace); // one face under the alias
   customFace = face;
