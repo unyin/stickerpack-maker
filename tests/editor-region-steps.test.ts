@@ -101,15 +101,14 @@ test("Ctrl+Z steps the selection first, then falls through to the document", () 
   const s = session();
   const base = s.doc.layers[0].id;
   const a = rect(0, 0, 2, 2);
+  s.apply((doc) => setLayerImage(doc, base, image(4, 4)));
+  const changed = s.doc;
   s.commitRegion(a);
   expect(s.canUndoAny).toBe(true);
   s.undoSelectionFirst();
   expect(s.region).toBeNull();
   expect(s.canUndoRegion).toBe(false);
   // The selection's steps are exhausted: the SAME key (and button) undoes the document.
-  s.apply((doc) => setLayerImage(doc, base, image(4, 4)));
-  expect(s.canUndoAny).toBe(true);
-  const changed = s.doc;
   s.undoSelectionFirst();
   expect(s.doc).not.toBe(changed);
   expect(s.canRedoAny).toBe(true);
@@ -134,7 +133,12 @@ test("the buttons' enablement follows either history: a selection step or a docu
   s.redoRegion();
   s.apply((doc) => setLayerImage(doc, s.doc.layers[0].id, image(4, 4)));
   expect(s.canUndoAny).toBe(true);
-  // Both histories live: Undo and Redo are enabled from whichever has a step.
+  // The edit cleared the selection's trail: only the document has steps left.
+  expect(s.canUndoRegion).toBe(false);
+  expect(s.canRedoRegion).toBe(false);
+  // Both histories still live at once: a selection step after the edit, then a
+  // document undo that leaves the plain selection alone.
+  s.commitRegion(rect(1, 1, 3, 3));
   s.undo();
   expect(s.canUndoAny).toBe(true); // the selection's step
   expect(s.canRedoAny).toBe(true); // the document step
@@ -156,7 +160,7 @@ test("Esc and a consume clear the selection with its whole trail", () => {
   expect(s.canRedoRegion).toBe(false);
 });
 
-test("a document change drops a floating selection and its trail; a plain one keeps both", () => {
+test("a document edit drops a floating selection with its trail; a plain one survives it, trailless", () => {
   const s = session();
   const base = s.doc.layers[0].id;
   const plan = rect(0, 0, 2, 2);
@@ -166,11 +170,54 @@ test("a document change drops a floating selection and its trail; a plain one ke
   expect(s.region).toBeNull();
   expect(s.canUndoRegion).toBe(false);
   expect(s.canRedoRegion).toBe(false);
-  // A plain Rectangle/Lasso survives an edit, its trail with it.
+  // A plain Rectangle/Lasso survives an edit, but the edit clears its trail.
   s.commitRegion(plan);
   s.apply((doc) => setLayerImage(doc, base, image(4, 4)));
   expect(s.region).toBe(plan);
-  expect(s.canUndoRegion).toBe(true);
+  expect(s.canUndoRegion).toBe(false);
+  expect(s.canRedoRegion).toBe(false);
+});
+
+test("a document edit clears a surviving plain selection's trail: Ctrl+Z then undoes the document", () => {
+  const s = session();
+  const base = s.doc.layers[0].id;
+  const plan = rect(0, 0, 2, 2);
+  s.commitRegion(plan);
+  s.apply((doc) => setLayerImage(doc, base, image(4, 4)));
+  const changed = s.doc;
+  expect(s.region).toBe(plan);
+  expect(s.canUndoRegion).toBe(false);
+  // Ctrl+Z is a document undo, never a step back through the pre-edit selection.
+  s.undoSelectionFirst();
+  expect(s.doc).not.toBe(changed);
+  expect(s.region).toBe(plan);
+});
+
+test("a document edit kills stepped-back selection states even with no selection drawn", () => {
+  const s = session();
+  const base = s.doc.layers[0].id;
+  s.commitRegion(rect(0, 0, 2, 2));
   s.undoRegion();
   expect(s.region).toBeNull();
+  expect(s.canRedoRegion).toBe(true);
+  s.apply((doc) => setLayerImage(doc, base, image(4, 4)));
+  expect(s.region).toBeNull();
+  expect(s.canUndoRegion).toBe(false);
+  // Ctrl+Y cannot resurrect a pre-edit selection state.
+  expect(s.canRedoRegion).toBe(false);
+});
+
+test("a document undo that leaves the selection alone keeps its trail", () => {
+  const s = session();
+  const base = s.doc.layers[0].id;
+  s.apply((doc) => setLayerImage(doc, base, image(4, 4)));
+  const plan = rect(0, 0, 2, 2);
+  const next = rect(1, 1, 3, 3);
+  s.commitRegion(plan);
+  s.commitRegion(next);
+  s.undo(); // a document undo; the plain selection itself is untouched
+  expect(s.region).toBe(next);
+  expect(s.canUndoRegion).toBe(true);
+  s.undoRegion();
+  expect(s.region).toBe(plan);
 });

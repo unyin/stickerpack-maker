@@ -85,8 +85,7 @@ export class EditorSession {
   clearRegion(): void {
     if (this.selectedRegion === null && this.regionPast.length === 0 && this.regionFuture.length === 0) return;
     this.selectedRegion = null;
-    this.regionPast.length = 0;
-    this.regionFuture.length = 0;
+    this.clearRegionTrail();
     this.notify();
   }
 
@@ -163,6 +162,10 @@ export class EditorSession {
     if (next === this.doc) return;
     this.history.commit(next);
     this.dropFloatingRegion();
+    // A document EDIT clears the selection's step trail whatever remains of it
+    // (owner, 2026-11-24: "Esc should clear it all, as should document
+    // edits"): Ctrl+Z after an edit is a document undo, never a selection step.
+    this.clearRegionTrail();
     this.pruneSelection();
     this.notify();
   }
@@ -217,13 +220,19 @@ export class EditorSession {
   /**
    * A composed region is a floating area built from wand fills (each bound
    * to its layer's pixels) and polygons (SPM-23), so any document change
-   * drops it, and its step trail with it (the trail lives and dies with the
-   * selection); a plain rect or lasso region is unanchored geometry and
-   * survives, keeping its trail (SPM-22's wand rule, generalized).
+   * drops it, and a change that removes the selection takes its whole step
+   * trail with it (the owner's undo clause). A plain rect or lasso region is
+   * unanchored geometry and survives such a change (SPM-22's wand rule,
+   * generalized); an EDIT still clears its trail in apply(), since edits
+   * clear it all, while an undo/redo that leaves the region alone keeps it.
    */
   private dropFloatingRegion(): void {
     if (this.selectedRegion?.kind !== "compose") return;
     this.selectedRegion = null;
+    this.clearRegionTrail();
+  }
+
+  private clearRegionTrail(): void {
     this.regionPast.length = 0;
     this.regionFuture.length = 0;
   }
