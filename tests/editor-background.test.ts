@@ -58,7 +58,7 @@ const TEXT_RENDER = {
   image: solid(10, 4, [0, 0, 0, 255]),
   metrics: { originX: 0, originY: 0, ascent: 3, descent: 1, lineHeight: 4 },
 };
-const STYLE = { text: "Hi", fontFamily: "Impact", fontSize: 64, color: "#000000" };
+const STYLE = { text: "Hi", fontFamily: "Impact", fontSize: 64, color: "#000000", outline: null };
 
 // ---- Target ----
 

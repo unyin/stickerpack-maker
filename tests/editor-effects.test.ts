@@ -11,6 +11,7 @@ import {
   IDENTITY,
   localToDoc,
   newDocument,
+  setTransform,
   type Doc,
   type TextRender,
 } from "../src/editor/model/document";
@@ -24,6 +25,7 @@ import {
   GLOW_DEFAULTS,
   GLOW_SOFTNESS,
   glowEffect,
+  outlineTextPatch,
   OUTLINE_DEFAULTS,
   OUTLINE_WIDTH,
   outlineEffect,
@@ -36,6 +38,7 @@ import {
 import { bulgeDab, moveWarpGesture, restoreRect, startWarpGesture, warpAmount, warpReadout, WARP_DEFAULTS, WARP_RADIUS } from "../src/editor/model/warp";
 import { EffectPreview, type PreviewRequest } from "../src/editor/view/effect-preview";
 import { EditorSession } from "../src/editor/model/session";
+import { DEFAULT_OUTLINE_COLOR } from "../src/editor/model/text";
 
 function solid(width: number, height: number, rgba = [255, 0, 0, 255]): RgbaImage {
   const pixels = new Uint8ClampedArray(width * height * 4);
@@ -52,7 +55,7 @@ function render(width = 40, height = 20): TextRender {
 function threeLayers(): Doc {
   let doc = newDocument(solid(100, 100), "Base", CANVAS);
   doc = addRasterLayer(doc, solid(10, 10), "Top", { ...IDENTITY, x: 5, y: 5 });
-  return addTextLayer(doc, { text: "Hi", fontFamily: "Impact", fontSize: 64, color: "#000000" }, render());
+  return addTextLayer(doc, { text: "Hi", fontFamily: "Impact", fontSize: 64, color: "#000000", outline: null }, render());
 }
 
 // ---- Targeting (SPEC §6: the selected layer, else the base image) ----
@@ -61,7 +64,7 @@ test("an effect targets the one selected layer, else the base image", () => {
   const doc = threeLayers();
   expect(effectTarget(doc, ["layer-2"])).toEqual({ id: "layer-2" });
   expect(effectTarget(doc, [])).toEqual({ id: "layer-1" });
-  expect(effectTarget(doc, ["layer-3"])).toEqual({ id: "layer-3" }); // text is rasterised on Apply
+  expect(effectTarget(doc, ["layer-3"])).toEqual({ id: "layer-3" }); // text is a target: Glow rasterises it on Apply, Outline restyles it (SPM-18)
   const both = effectTarget(doc, ["layer-1", "layer-2"]);
   expect("blocker" in both && both.blocker).toContain("one layer");
 });
@@ -163,13 +166,27 @@ test("applying an effect replaces the layer's pixels and transform, keeping its 
   expect(next.nextId).toBe(doc.nextId);
 });
 
-test("an effect on a text layer turns it into an image layer, with a neutral note", () => {
+test("an effect on a text layer turns it into an image layer, with a neutral note (glow only)", () => {
   const doc = threeLayers();
   const next = applyEffectResult(doc, "layer-3", { image: solid(46, 26), transform: { ...IDENTITY, x: -3, y: -3 } });
   expect(next.layers[2].kind).toBe("raster");
   expect(next.layers[2].name).toBe("Hi");
-  expect(effectTextNotice(doc.layers[2], "outline")).toBe("The text layer was converted to an image for the outline.");
-  expect(effectTextNotice(doc.layers[1], "outline")).toBeNull();
+  expect(effectTextNotice(doc.layers[2], "glow")).toBe("The text layer was converted to an image for the glow.");
+  expect(effectTextNotice(doc.layers[2], "outline")).toBeNull(); // SPM-18: Outline restyles text, never converts
+  expect(effectTextNotice(doc.layers[1], "glow")).toBeNull();
+});
+
+test("the Outline tool on a text layer is a style patch; Glow and raster targets are not (SPM-18)", () => {
+  const doc = threeLayers();
+  const text = doc.layers[2];
+  const raster = doc.layers[1];
+  if (text.kind !== "text") throw new Error("not text");
+  expect(outlineTextPatch(outlineEffect(OUTLINE_DEFAULTS), text)).toEqual({
+    outline: { color: OUTLINE_DEFAULTS.color, width: OUTLINE_DEFAULTS.width },
+    layer: text,
+  });
+  expect(outlineTextPatch(glowEffect(GLOW_DEFAULTS), text)).toBeNull();
+  expect(outlineTextPatch(outlineEffect(OUTLINE_DEFAULTS), raster)).toBeNull();
 });
 
 test("Apply is ONE undo step, and undo brings the layer back exactly", () => {
@@ -393,4 +410,27 @@ test("docToLocal inverts localToDoc for a turned and scaled layer", () => {
   const p = docToLocal(t, localToDoc(t, 7, 3));
   expect(p.x).toBeCloseTo(7, 9);
   expect(p.y).toBeCloseTo(3, 9);
+});
+
+test("the Outline tool's document-px width lands as the style's own px on a scaled layer (SPM-18)", () => {
+  // A 2x-scaled text layer: the bar's 8 document px is 4 px at scale 1 —
+  // the same on-screen reach the pixel effect's 8 would give, so the two
+  // tools keep one meaning for their width.
+  const doc = threeLayers();
+  const scaled = setTransform(doc, "layer-3", { ...IDENTITY, x: 10, y: 10, scaleX: 2, scaleY: 2, rotation: 0 });
+  const patch = outlineTextPatch(outlineEffect({ ...OUTLINE_DEFAULTS, width: 8 }), scaled.layers[2]);
+  expect(patch?.outline).toEqual({ color: OUTLINE_DEFAULTS.color, width: 4 });
+
+  // A 1.5x-scaled layer rounds into the whole-px domain: 8 / 1.5 -> 5.
+  const odd = setTransform(doc, "layer-3", { ...IDENTITY, x: 10, y: 10, scaleX: 1.5, scaleY: 1.5, rotation: 0 });
+  const rounded = outlineTextPatch(outlineEffect({ ...OUTLINE_DEFAULTS, width: 8 }), odd.layers[2]);
+  expect(rounded?.outline).toEqual({ color: OUTLINE_DEFAULTS.color, width: 5 });
+  // A layer scaled to nothing is not a text restyle: the patch yields and
+  // the pixel path refuses it (effects.rs `layer_px`'s own message).
+  const flat = setTransform(doc, "layer-3", { ...IDENTITY, x: 10, y: 10, scaleX: 0, scaleY: 0, rotation: 0 });
+  expect(outlineTextPatch(outlineEffect(OUTLINE_DEFAULTS), flat.layers[2])).toBeNull();
+});
+
+test("the text style's default outline colour is the effect's (SPM-18)", () => {
+  expect(DEFAULT_OUTLINE_COLOR).toBe(OUTLINE_DEFAULTS.color);
 });

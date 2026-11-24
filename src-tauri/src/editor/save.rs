@@ -218,6 +218,30 @@ mod tests {
     }
 
     #[test]
+    fn an_outlined_text_layer_saves_with_its_ring() {
+        // The same glyph placed so the text sits where the test above had
+        // it (box (8, -2), the grown box the model's transform shift lands,
+        // SPM-18): the ring draws 2 document px beyond the ink, clipped by
+        // the canvas like everything else — the save agrees with merge.
+        let fonts = super::super::test_font::database();
+        let doc: SaveDoc = serde_json::from_str(&format!(
+            r##"{{"width":40,"height":40,"layers":[
+                {{"width":40,"height":40,"transform":{{"x":0,"y":0,"scaleX":1,"scaleY":1,"rotation":0}}}},
+                {{"width":64,"height":104,"transform":{{"x":8,"y":-2,"scaleX":1,"scaleY":1,"rotation":0}},
+                  "text":{{"text":"A","fontFamily":"{}","fontSize":100,"color":"#ff0000","outline":{{"color":"#0000ff","width":2}}}}}}]}}"##,
+            super::super::test_font::FAMILY
+        ))
+        .unwrap();
+        let body = [255u8; 40 * 40 * 4];
+        let layers = split_save_layers(&doc, &body, &fonts, &EmojiFonts::empty()).unwrap();
+        let out = flatten(&layers, 40, 40).unwrap();
+        // Row 20: inside the canvas, mid-glyph (the glyph inks y 10..80).
+        assert_eq!(px(&out, 18, 20), [0, 0, 255, 255], "the ring inside the canvas");
+        assert_eq!(px(&out, 17, 20), [255, 255, 255, 255]);
+        assert_eq!(px(&out, 20, 20), [255, 0, 0, 255]);
+    }
+
+    #[test]
     fn the_body_must_match_the_layers() {
         let fonts = Database::new();
         let doc = SaveDoc { width: 2, height: 2, layers: vec![raster_meta(1, 1, 0.0, 0.0)] };

@@ -2,6 +2,11 @@
 //! layer (ADR-0005). The same code draws the live preview and the result
 //! Apply bakes in (owner decision 2026-11-22, ADR-0008), so they match.
 //!
+//! Since SPM-18 that is still the whole truth for every raster target and
+//! for Glow on text; the Outline tool on a text layer restyles the layer
+//! through the text renderer instead (text.rs, SPM-18) and never arrives
+//! here.
+//!
 //! Both effects grow a mask out of the layer's alpha silhouette and draw it
 //! in a colour BEHIND the layer's own pixels (normal blending only, owner
 //! decision 2026-11-21), so every opaque pixel of the layer is unchanged:

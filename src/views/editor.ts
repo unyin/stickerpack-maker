@@ -63,6 +63,7 @@ import { packMemory } from "../pack-manager/model/pack-memory";
 import { markStickerFileChanged, markThumbnailChanged } from "../pack-manager/model/changed-files";
 import { loadPackView, type Sticker } from "../pack-manager/api";
 import {
+  anchoredTransform,
   addRasterLayer,
   addTextLayer,
   centeredPlacement,
@@ -86,29 +87,36 @@ import {
   scaleLongestSide,
   restyledTexts,
   setLayerImage,
+  setTextStyle,
   setTextStyles,
   textStyleOf,
   type CropAction,
   type Doc,
+  type OutlineStyle,
   type Point,
   type Rect,
   type ResizeSide,
+  type TextLayer,
+  type TextRender,
   type TextStyle,
+  type Transform,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
-import { readoutStatus, startCanvas, STICKER, THUMBNAIL, TEXT_FONT_SIZE, type ConstraintSet } from "../editor/model/constraints";
+import { readoutStatus, startCanvas, STICKER, THUMBNAIL, TEXT_FONT_SIZE, TEXT_OUTLINE_WIDTH, type ConstraintSet } from "../editor/model/constraints";
 import {
   DEFAULT_FONT_SIZE,
+  DEFAULT_OUTLINE_COLOR,
   DEFAULT_TEXT_COLOR,
   defaultFontFamily,
   fontSizeProblem,
   isBlankText,
   isHexColor,
   nextStyleAfter,
+  outlineWidthProblem,
   type NextStyle,
 } from "../editor/model/text";
 import { EditorSession } from "../editor/model/session";
-import { applyEffectResult, effectBasis, effectKindOf, escDiscardsEffect, nextEffectBasis, effectTarget, effectTextNotice, warpTarget, type EffectBasis, type EffectResult } from "../editor/model/effects";
+import { applyEffectResult, effectBasis, effectKindOf, escDiscardsEffect, nextEffectBasis, effectTarget, effectTextNotice, outlineTextPatch, warpTarget, type EffectBasis, type EffectResult } from "../editor/model/effects";
 import {
   cropBlocker,
   cropTextNotice,
@@ -167,8 +175,8 @@ function buildEditor(): HTMLElement {
   let fonts: readonly string[] | null = null;
   let fontsProblem: string | null = null;
   // The style the next new text gets: the text controls edit it while no
-  // text layer is selected.
-  let nextStyle: NextStyle = { fontFamily: "", fontSize: DEFAULT_FONT_SIZE, color: DEFAULT_TEXT_COLOR };
+  // text layer is selected. A new text starts with no outline (SPM-18).
+  let nextStyle: NextStyle = { fontFamily: "", fontSize: DEFAULT_FONT_SIZE, color: DEFAULT_TEXT_COLOR, outline: null };
   // The save dialog starts on the last save's format (SPM-10); its pack comes from packMemory.
   let lastFormat: SaveFormat = "png";
   // Which side of the whole image the free-resize field sets (CMT-152):
@@ -273,9 +281,24 @@ function buildEditor(): HTMLElement {
     apply: () => void run(applyEffectTool),
     cancel: () => setTool("move"),
   });
-  // The live outline/glow preview, drawn by Rust with Apply's own code (ADR-0008).
+  // The live outline/glow preview, drawn by Rust with Apply's own code
+  // (ADR-0008). On a text layer the Outline branch (SPM-18) previews the
+  // RESTYLED TEXT — the very render Apply commits — so the preview is the
+  // result there too: the layer keeps its glyphs and gains a ring, shown
+  // through the same override the pixel effects draw into.
   const preview = new EffectPreview<EffectResult>(
-    (req) => applyEffect(layerInput(req.doc.layers[layerIndex(req.doc, req.layerId)]), req.effect),
+    async (req) => {
+      const layer = req.doc.layers[layerIndex(req.doc, req.layerId)];
+      const patch = outlineTextPatch(req.effect, layer);
+      if (patch) {
+        // The transform the model's setTextStyle will land (anchoredTransform):
+        // the box grows around the text, so the preview shows it at its
+        // final place, not where the old box's corner was.
+        const drawn = await outlinedTextRender(patch.layer, patch.outline);
+        return { image: drawn.render.image, transform: drawn.transform };
+      }
+      return applyEffect(layerInput(layer), req.effect);
+    },
     (req, result) => stage?.setOverride(req && result ? { id: req.layerId, ...result } : null),
     (err) => say(errorMessage(err)),
   );
@@ -303,15 +326,38 @@ function buildEditor(): HTMLElement {
     "aria-label": "Font size in pixels",
   }) as HTMLInputElement;
   const colorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": "Text colour" }) as HTMLInputElement;
-  // The text controls' busy/text-reason disable loop; the eyedropper beside
-  // the text colour picker enrolls itself (owner decision 2026-11-23) and
-  // starts a canvas pick whose sample follows the picker's own path.
-  const textControls: { disabled: boolean }[] = [fontPicker, fontSizeInput, colorInput];
+  // The outline controls (SPM-18): a colour picker with its eyedropper and
+  // a width field like the font size's. Width 0 means no outline — the
+  // style's outline is null then, so 0 is also how an outline is removed.
+  // The labels say "text outline" because the effect bar's own Outline
+  // colour picker shares the page (hidden while the tool is off).
+  const outlineColorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": "Text outline colour" }) as HTMLInputElement;
+  const outlineWidthInput = el("input", {
+    class: "editor-side-input",
+    type: "number",
+    min: String(TEXT_OUTLINE_WIDTH.min),
+    max: String(TEXT_OUTLINE_WIDTH.max),
+    step: "1",
+    "aria-label": "Text outline width in pixels",
+  }) as HTMLInputElement;
+  // The text controls' busy/text-reason disable loop; the eyedroppers beside
+  // the colour pickers enroll themselves (owner decision 2026-11-23) and
+  // start canvas picks whose samples follow the pickers' own paths.
+  const textControls: { disabled: boolean }[] = [fontPicker, fontSizeInput, colorInput, outlineColorInput, outlineWidthInput];
   const textEyedropper = eyedropperButton(
     () =>
       stage?.beginColorPick((hex) => {
         colorInput.value = hex;
         restyle({ color: hex });
+      }),
+    textControls,
+  );
+  const outlineEyedropper = eyedropperButton(
+    () =>
+      stage?.beginColorPick((hex) => {
+        outlineColorInput.value = hex;
+        const width = shownOutline()?.width ?? 0;
+        if (width > 0) restyle({ outline: { color: hex, width } });
       }),
     textControls,
   );
@@ -333,6 +379,40 @@ function buildEditor(): HTMLElement {
   colorInput.addEventListener("change", () => {
     if (isHexColor(colorInput.value)) restyle({ color: colorInput.value.toLowerCase() });
     colorInput.blur();
+  });
+  // The outline the text controls act on: the first selected text layer's,
+  // else the next new text's (the same `shown` the refresh below syncs from).
+  function shownOutline() {
+    const texts = session?.selectedTexts ?? [];
+    return texts.length > 0 ? texts[0].outline : nextStyle.outline;
+  }
+  // An outline colour change commits only when an outline exists (a width
+  // above 0): with none it commits nothing and the picker KEEPS the choice
+  // — the next width commit takes it along, so colour first, width second
+  // works too.
+  outlineColorInput.addEventListener("change", () => {
+    if (isHexColor(outlineColorInput.value)) {
+      const width = shownOutline()?.width ?? 0;
+      if (width > 0) restyle({ outline: { color: outlineColorInput.value.toLowerCase(), width } });
+    }
+    outlineColorInput.blur();
+  });
+  outlineWidthInput.addEventListener("change", () => {
+    // Empty reverts like every slider field's rule (SPEC §6, owner decision
+    // 2026-11-23): it never means 0, which would silently remove the outline.
+    const raw = outlineWidthInput.value.trim();
+    const width = raw === "" ? NaN : Number(raw);
+    const problem = outlineWidthProblem(width);
+    if (problem) {
+      say(problem);
+      refresh(); // shows the current width again
+      return;
+    }
+    // The colour the picker shows rides along, so width first, colour
+    // second is the natural order; 0 removes the outline (the null style).
+    const color = outlineColorInput.value.toLowerCase();
+    restyle({ outline: width === 0 ? null : { color, width } });
+    outlineWidthInput.blur();
   });
   // Background removal and the refine brush (SPM-7): on the selected image layer, or the base image.
   const removeBackgroundButton = button("Remove background", () => run(removeBackground));
@@ -455,6 +535,9 @@ function buildEditor(): HTMLElement {
       el("label", { class: "editor-side" }, fontSizeInput, " px"),
       colorInput,
       textEyedropper,
+      outlineColorInput,
+      outlineEyedropper,
+      el("label", { class: "editor-side" }, "Outline ", outlineWidthInput, " px"),
     ),
     readout,
     resetViewButton,
@@ -1024,9 +1107,26 @@ function buildEditor(): HTMLElement {
   }
 
   /**
+   * The Outline tool's preview and Apply on a text layer (SPM-18): the
+   * style it sets, the Rust render of it, and the transform the model's
+   * setTextStyle will land for that render (anchoredTransform) — the one
+   * place both callers share, so the preview IS the result. Apply commits
+   * style + render and lets setTextStyle do its own anchoring; the
+   * transform here is what the preview override shows.
+   */
+  async function outlinedTextRender(text: TextLayer, outline: OutlineStyle): Promise<{ style: TextStyle; render: TextRender; transform: Transform }> {
+    const style: TextStyle = { ...textStyleOf(text), outline };
+    const render = await renderText(style);
+    return { style, render, transform: anchoredTransform(text.transform, text.render.metrics, render.metrics) };
+  }
+
+  /**
    * Apply (CMT-183): bake the previewed effect into the layer's pixels as
    * ONE undo step: the very result the preview shows (or, when the settings
-   * just changed, the one being drawn). The Move tool comes back, as after Cut.
+   * just changed, the one being drawn). The Move tool comes back, as after
+   * Cut. Since SPM-18, Outline on a TEXT layer commits a STYLE change
+   * instead: the layer keeps its text and its place, one undo step, no
+   * conversion note — only Glow on text still bakes pixels.
    */
   async function applyEffectTool(): Promise<void> {
     const current = session;
@@ -1034,6 +1134,25 @@ function buildEditor(): HTMLElement {
     const req = previewRequest();
     if (!current || !kind || !req) return;
     const layer = req.doc.layers[layerIndex(req.doc, req.layerId)];
+    // The Outline tool on a text layer (SPM-18): the same render the
+    // preview showed, committed as the layer's outline style.
+    if (outlineTextPatch(req.effect, layer)) {
+      await editAsync(
+        current,
+        { doing: "drawing the outline", done: "applied" },
+        async (doc) => {
+          const live = doc.layers[layerIndex(doc, req.layerId)];
+          const patch = outlineTextPatch(req.effect, live);
+          if (!patch) return null; // it stopped being a text layer under the snapshot
+          return await outlinedTextRender(patch.layer, patch.outline);
+        },
+        ({ style, render }) => {
+          setTool("move"); // drops the preview first: the styled text replaces it
+          current.apply((d) => setTextStyle(d, req.layerId, style, render));
+        },
+      );
+      return;
+    }
     await editAsync(
       current,
       { doing: `drawing the ${kind}`, done: "applied" },
@@ -1204,7 +1323,19 @@ function buildEditor(): HTMLElement {
     overlayLayerId = layer ? layer.id : null;
     const placement = textOverlayPlacement(stage.view(), layer ?? null, current.doc);
     textOverlay.open(
-      { ...style, lineHeight: layer ? layer.render.metrics.lineHeight : null, placement },
+      {
+        // The overlay styles what DOM text can render: family, size, line
+        // metrics, colour. The outline (SPM-18) is a Rust stroke on the
+        // glyph outlines, so it shows on the committed canvas render, not
+        // while typing — the same approximation class as the overlay's
+        // fallback fonts (ADR-0005's SPM-20 amendment).
+        text: style.text,
+        fontFamily: style.fontFamily,
+        fontSize: style.fontSize,
+        color: style.color,
+        lineHeight: layer ? layer.render.metrics.lineHeight : null,
+        placement,
+      },
       {
         commit: (text) => {
           stage?.setEditing(null);
@@ -1490,11 +1621,16 @@ function buildEditor(): HTMLElement {
     fontPicker.value = shown.fontFamily;
     if (document.activeElement !== fontSizeInput) fontSizeInput.value = String(shown.fontSize);
     colorInput.value = shown.color;
+    // The outline controls (SPM-18): width 0 stands for the style's null.
+    if (document.activeElement !== outlineWidthInput) outlineWidthInput.value = String(shown.outline?.width ?? 0);
+    outlineColorInput.value = shown.outline?.color ?? DEFAULT_OUTLINE_COLOR;
     for (const control of textControls) control.disabled = busy || textReason !== null;
     const target = texts.length > 0 ? "the selected text" : "the next text";
     fontPicker.title = textReason ?? `Font of ${target}`;
     fontSizeInput.title = textReason ?? `Font size of ${target} in px (${TEXT_FONT_SIZE.min}–${TEXT_FONT_SIZE.max})`;
     colorInput.title = textReason ?? `Colour of ${target}`;
+    outlineColorInput.title = textReason ?? `Outline colour of ${target}`;
+    outlineWidthInput.title = textReason ?? `Outline width of ${target} in px (0 for no outline)`;
     // Explain disabled actions only once something is selected.
     layerHint.textContent = layerHintText(doc, current.selection, current.region, {
       merge: blocker,
@@ -1505,11 +1641,15 @@ function buildEditor(): HTMLElement {
     dirtyLabel.hidden = !current.isDirty;
     // Effect tools (SPM-8): the bar, the brush ring and the live preview follow the current state.
     const effectOn = tool === "warp" ? warpTarget(doc, current.selection) : effectTarget(doc, current.selection);
+    const effectLayer = "id" in effectOn ? doc.layers[layerIndex(doc, effectOn.id)] : null;
     effectControls.update({
       tool,
       busy,
       targetName: "id" in effectOn ? layerLabel(doc, effectOn.id, current.selection) : null,
       blocker: "blocker" in effectOn ? effectOn.blocker : null,
+      // The bar's Apply says what it does on a text layer (SPM-18): Outline
+      // restyles it, Glow converts it.
+      textTarget: effectLayer?.kind === "text",
     });
     stage?.setBrushRadius(effectControls.warp.radius);
     preview.request(previewRequest());

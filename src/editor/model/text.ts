@@ -1,12 +1,18 @@
 // Text tool rules (SPEC §6, SPM-9): the default style, validation, and the
 // font a session starts with. Rendering and measuring happen in Rust
 // (src-tauri/src/editor/text.rs); this file has no Konva and no DOM.
-import { TEXT_FONT_SIZE } from "./constraints";
+import { TEXT_FONT_SIZE, TEXT_OUTLINE_WIDTH } from "./constraints";
 import type { TextStyle } from "./document";
 
 /** A new text layer's size and colour until the user picks others. */
 export const DEFAULT_FONT_SIZE = 64;
 export const DEFAULT_TEXT_COLOR = "#000000";
+
+/**
+ * The colour an outline gets when none was ever chosen (SPM-18): the pixel
+ * Outline effect's own default, so the two features look one.
+ */
+export const DEFAULT_OUTLINE_COLOR = "#ffffff";
 
 /**
  * Families tried, in order, for the first text of a session: common on
@@ -33,6 +39,17 @@ export function fontSizeProblem(size: number): string | null {
   return Number.isInteger(size) && size >= TEXT_FONT_SIZE.min && size <= TEXT_FONT_SIZE.max
     ? null
     : `The font size must be a whole number of pixels from ${TEXT_FONT_SIZE.min} to ${TEXT_FONT_SIZE.max}.`;
+}
+
+/**
+ * Why `width` is not a valid outline width (SPM-18), or null when it is.
+ * 0 means no outline — the style's outline is null then, so removing an
+ * outline is typing 0.
+ */
+export function outlineWidthProblem(width: number): string | null {
+  return Number.isInteger(width) && width >= TEXT_OUTLINE_WIDTH.min && width <= TEXT_OUTLINE_WIDTH.max
+    ? null
+    : `The outline width must be a whole number of pixels from ${TEXT_OUTLINE_WIDTH.min} to ${TEXT_OUTLINE_WIDTH.max} (0 for no outline).`;
 }
 
 /** `#rrggbb`, the only colour form the colour picker and the Rust rasteriser use. */

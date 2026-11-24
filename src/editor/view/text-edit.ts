@@ -7,6 +7,9 @@
 //
 // Enter commits, Shift+Enter starts a new line, Esc cancels; clicking
 // elsewhere (blur) commits. The text is rendered in Rust once committed.
+// The one style the overlay cannot show is the outline (SPM-18): a Rust
+// stroke on the glyph outlines, it appears on the committed canvas render,
+// not while typing — a deliberate omission (SPEC §6), not an oversight.
 import { overlayFontFamily, type OverlayPlacement } from "./geometry";
 
 export interface TextEditRequest {

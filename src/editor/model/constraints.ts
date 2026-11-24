@@ -99,6 +99,17 @@ export const TEXT_FONT_SIZE = {
   max: limits.text.maxFontSize,
 } as const;
 
+/**
+ * Outline widths a text layer's style field accepts, in px at scale 1
+ * (SPM-18). 0 is not a limit from limits.json but the structural "no
+ * outline" (the style itself is null then); a resized layer scales its
+ * outline with it, like its glyphs.
+ */
+export const TEXT_OUTLINE_WIDTH = {
+  min: 0,
+  max: limits.text.maxOutlineWidth,
+} as const;
+
 /** The readout's text and whether the canvas meets the set, from one status computation. */
 export function readoutStatus(canvas: Size, set: ConstraintSet): { text: string; ok: boolean } {
   const status = constraintStatus(canvas, set);

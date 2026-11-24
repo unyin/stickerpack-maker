@@ -3,7 +3,11 @@
 // (owner decision 2026-11-22, CMT-183): a live preview shows the result
 // while the settings change, and Apply bakes it in as ONE undo step; the
 // preview itself never enters the document or its history (CMT-186).
-import { layerIndex, type Doc, type Layer, type RasterLayer, type Transform } from "./document";
+// Since SPM-18 the Outline tool on a TEXT layer is not a pixel effect at
+// all: it sets the layer's outline style (the text stays editable text),
+// and only Glow still rasterises and converts.
+import limits from "../../shared/limits.json";
+import { layerIndex, type Doc, type Layer, type OutlineStyle, type RasterLayer, type TextLayer, type Transform } from "./document";
 import type { CanvasTool } from "./tools";
 import type { RgbaImage } from "./image";
 
@@ -37,9 +41,15 @@ export interface Range {
 }
 
 // The ranges and defaults are a parked owner decision (SPM-8 tracker):
-// change them here, nothing else depends on the numbers. Sizes are in
-// document px, so they mean the same on screen at any layer scale.
-export const OUTLINE_WIDTH: Range = { min: 1, max: 100, initial: 8 };
+// change them here, nothing else depends on the numbers — except the
+// outline width, whose max rides limits.text.maxOutlineWidth since SPM-18
+// (the Outline tool writes text styles too, so the derived max keeps
+// every bar setting within the style's limit on a layer at scale >= 1; a
+// shrunk layer's wider settings can still convert past it, and the message
+// line reports Rust's refusal, committing nothing), and whose initial
+// seeds the outline the tool first shows. Sizes are in document px, so
+// they mean the same on screen at any layer scale.
+export const OUTLINE_WIDTH: Range = { min: 1, max: limits.text.maxOutlineWidth, initial: 8 };
 export const GLOW_RADIUS: Range = { min: 1, max: 200, initial: 24 };
 export const GLOW_SOFTNESS: Range = { min: 0, max: 100, initial: 70 };
 export const GLOW_OPACITY: Range = { min: 1, max: 100, initial: 80 };
@@ -56,7 +66,7 @@ export function typedSliderValue(text: string, range: Range): number | null {
   return Math.max(range.min, Math.min(range.max, Number(trimmed)));
 }
 
-/** A white sticker-style outline. */
+/** A white sticker-style outline; also the text style's default colour (model/text.ts DEFAULT_OUTLINE_COLOR, SPM-18 — the equality is pinned by test). */
 export const OUTLINE_DEFAULTS: OutlineSettings = { color: "#ffffff", width: OUTLINE_WIDTH.initial };
 /** A warm yellow glow, visible on the light and the dark checkerboard. */
 export const GLOW_DEFAULTS: GlowSettings = {
@@ -81,6 +91,35 @@ export function outlineEffect(s: OutlineSettings): Effect {
   return { kind: "outline", color: s.color, width: s.width };
 }
 
+/**
+ * The text-style patch the Outline tool sets on a TEXT layer (SPM-18), with
+ * the layer narrowed to its text kind, or null when this effect does not
+ * restyle text (glow, or anything on a raster layer): the one decision the
+ * view's preview and its Apply both branch on, pure so tests pin it. The
+ * layer keeps its text; only Glow on text still rasterises and converts.
+ *
+ * The bar's width is DOCUMENT px, like every effect setting (SPEC §6:
+ * on-screen px, the same at any layer scale); the STYLE's width is the
+ * layer's own px at scale 1, like the font size. Convert on the way in —
+ * by the geometric-mean scale the pixel effect divides by (effects.rs
+ * `layer_px`), rounded into the style's whole-px domain (the control's
+ * own rule, so a commit stays displayable and re-typable; the preview
+ * shows the rounded result) — so the tool's reach on screen matches the
+ * raster effect's at any layer scale, within the rounding's sub-pixel. A
+ * layer scaled to nothing returns null and takes the pixel path, which
+ * refuses it with its own message.
+ */
+export function outlineTextPatch(effect: Effect, layer: Layer): { outline: OutlineStyle; layer: TextLayer } | null {
+  if (effect.kind !== "outline" || layer.kind !== "text") return null;
+  const scale = Math.sqrt(Math.abs(layer.transform.scaleX * layer.transform.scaleY));
+  if (!Number.isFinite(scale) || scale <= 0) return null;
+  // The style's width is a whole-px domain, like its control's field:
+  // round the converted reach (the preview shows exactly this), never
+  // below 1 — a sub-pixel reach becomes the smallest real outline.
+  const width = Math.max(1, Math.round(effect.width / scale));
+  return { outline: { color: effect.color, width }, layer };
+}
+
 export function glowEffect(s: GlowSettings): Effect {
   return { kind: "glow", color: s.color, radius: s.radius, softness: s.softness / 100, opacity: s.opacity / 100 };
 }
@@ -102,8 +141,9 @@ function targetId(doc: Doc, selection: readonly string[]): string | null {
 
 /**
  * The layer an outline or glow goes on (SPEC §6): the selected layer, or
- * the base image when nothing is selected. Text layers qualify: Rust
- * rasterises them for the effect, so Apply turns them into image layers.
+ * the base image when nothing is selected. Text layers qualify: since
+ * SPM-18 the Outline tool restyles them in place (`outlineTextPatch`) and
+ * only Glow rasterises them, turning the layer into an image on Apply.
  */
 export function effectTarget(doc: Doc, selection: readonly string[]): Target {
   const id = targetId(doc, selection);
@@ -180,8 +220,8 @@ export function applyEffectResult(doc: Doc, id: string, result: EffectResult): D
   return { ...doc, layers };
 }
 
-/** The neutral note after an effect turned a text layer into an image (as after Crop), else null. */
+/** The neutral note after an effect turned a text layer into an image (as after Crop), else null. Glow only: since SPM-18 the Outline tool restyles text in place, so it never converts. */
 export function effectTextNotice(layer: Layer, kind: EffectKind): string | null {
-  if (layer.kind !== "text") return null;
+  if (layer.kind !== "text" || kind !== "glow") return null;
   return `The text layer was converted to an image for the ${kind}.`;
 }

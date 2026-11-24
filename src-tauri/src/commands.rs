@@ -501,11 +501,14 @@ pub fn editor_cut_layer(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::
 pub const EFFECT_HEADER: &str = "x-effect";
 
 /// Draw an outline or fuzzy glow on one layer (SPM-8): both the live
-/// preview and the result Apply bakes in (ADR-0008). Request: raw body =
-/// the raster layer's RGBA bytes (none for a text layer, which Rust
-/// rasterises with the style's emoji chain, SPM-20), header `x-effect`.
-/// Response: `EffectResult::to_frame` (the new transform, then the
-/// grown image).
+/// preview and the result Apply bakes in (ADR-0008). Since SPM-18 the
+/// Outline tool on a TEXT layer previews and applies through
+/// `editor_render_text` and a style change instead (src/views/editor.ts);
+/// this command still draws Glow on text and every raster target. Request:
+/// raw body = the raster layer's RGBA bytes (none for a text layer, which
+/// Rust rasterises with the style's emoji chain, SPM-20), header
+/// `x-effect`. Response: `EffectResult::to_frame` (the new transform, then
+/// the grown image).
 #[tauri::command(async)]
 pub fn editor_apply_effect(
     request: tauri::ipc::Request<'_>,

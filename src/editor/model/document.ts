@@ -57,6 +57,19 @@ export interface TextRender {
   readonly metrics: TextMetrics;
 }
 
+/**
+ * A text layer's outline (SPM-18): the reach beyond the glyph ink in the
+ * layer's own px at scale 1 — the same unit as the font size, so a resized
+ * layer scales its outline with it — and its `#rrggbb` colour. Null means
+ * no outline (Rust's `TextSpec::outline`). The Outline EFFECT tool's width
+ * is document px; it is converted into this unit on commit
+ * (model/effects.ts `outlineTextPatch`).
+ */
+export interface OutlineStyle {
+  readonly color: string;
+  readonly width: number;
+}
+
 /** Text stays editable vector data until merged, cropped across or saved (SPEC §6). */
 export interface TextLayer {
   readonly kind: "text";
@@ -67,6 +80,7 @@ export interface TextLayer {
   readonly fontFamily: string;
   readonly fontSize: number;
   readonly color: string;
+  readonly outline: OutlineStyle | null;
   readonly render: TextRender;
 }
 
@@ -77,6 +91,7 @@ export interface TextStyle {
   readonly fontFamily: string;
   readonly fontSize: number;
   readonly color: string;
+  readonly outline: OutlineStyle | null;
 }
 
 /** The canvas size plus layers, bottom to top. */
@@ -153,8 +168,8 @@ export function addRasterLayer(
 
 /** The style fields of a text layer (or of any style): nothing else rides along. */
 export function textStyleOf(source: TextStyle): TextStyle {
-  const { text, fontFamily, fontSize, color } = source;
-  return { text, fontFamily, fontSize, color };
+  const { text, fontFamily, fontSize, color, outline } = source;
+  return { text, fontFamily, fontSize, color, outline };
 }
 
 /** The text layers among `ids`, bottom to top (the layer order, not the id order). */
@@ -180,20 +195,57 @@ export function addTextLayer(
   return withLayers(doc, [...doc.layers, layer], doc.nextId + 1);
 }
 
+/** Two outlines are the same style when both are none or both match (SPM-18). */
+function sameOutline(a: OutlineStyle | null, b: OutlineStyle | null): boolean {
+  return a === b || (a !== null && b !== null && a.color === b.color && a.width === b.width);
+}
+
 function sameStyle(a: TextStyle, b: TextStyle): boolean {
-  return a.text === b.text && a.fontFamily === b.fontFamily && a.fontSize === b.fontSize && a.color === b.color;
+  return (
+    a.text === b.text &&
+    a.fontFamily === b.fontFamily &&
+    a.fontSize === b.fontSize &&
+    a.color === b.color &&
+    sameOutline(a.outline, b.outline)
+  );
 }
 
 /**
- * Change a text layer's text or style, with its new rendering. Its box's
- * top-left stays where it is; the layer is renamed after its text. The same
- * style returns the document as is (no undo step).
+ * The transform that keeps a text layer's LAYOUT BOX where it was when its
+ * rendering's metrics origin moved (SPM-18): the box grows around the text
+ * — an outline added, changed or removed, a font change, an ink overhang
+ * edited — so the box's top-left moving out is what keeps the glyphs
+ * standing still. Undo/redo and the typing overlay read the model, so
+ * nothing jumps.
+ */
+export function anchoredTransform(
+  t: Transform,
+  from: Pick<TextMetrics, "originX" | "originY">,
+  to: Pick<TextMetrics, "originX" | "originY">,
+): Transform {
+  const rad = (t.rotation * Math.PI) / 180;
+  const du = (from.originX - to.originX) * t.scaleX;
+  const dv = (from.originY - to.originY) * t.scaleY;
+  return {
+    ...t,
+    x: t.x + du * Math.cos(rad) - dv * Math.sin(rad),
+    y: t.y + du * Math.sin(rad) + dv * Math.cos(rad),
+  };
+}
+
+/**
+ * Change a text layer's text or style, with its new rendering. The layout
+ * box stays where it was (`anchoredTransform`, SPM-18), so a box that grew
+ * — an outline is the loud case — reads as the layer growing around its
+ * text, never as the text moving; the layer is renamed after its text. The
+ * same style returns the document as is (no undo step).
  */
 export function setTextStyle(doc: Doc, id: string, style: TextStyle, render: TextRender): Doc {
   const layer = doc.layers[layerIndex(doc, id)];
   if (layer.kind !== "text") throw new Error(`layer ${id} is not a text layer`);
   if (sameStyle(layer, style)) return doc;
-  return replaceAt(doc, id, () => ({ ...layer, ...textStyleOf(style), name: textLayerName(style.text), render }));
+  const transform = anchoredTransform(layer.transform, layer.render.metrics, render.metrics);
+  return replaceAt(doc, id, () => ({ ...layer, ...textStyleOf(style), name: textLayerName(style.text), transform, render }));
 }
 
 /** A text layer's new style and its Rust rendering (one entry of `setTextStyles`). */
