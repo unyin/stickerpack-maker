@@ -502,7 +502,7 @@ pub fn editor_cut_layer(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::
 }
 
 /// Header carrying a wand request's layer size and transform, the clicked
-/// spot and the tolerance; mirrors WAND_HEADER.
+/// spot and the tolerance.
 pub const WAND_HEADER: &str = "x-wand-select";
 
 /// Select the colour-similar contiguous region around a clicked spot
@@ -520,7 +520,7 @@ pub fn editor_wand_select(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc
 }
 
 /// Header carrying a mask cut's layer size and transform, the mask's place
-/// and the mode; mirrors CUT_MASK_HEADER.
+/// and the mode.
 pub const CUT_MASK_HEADER: &str = "x-cut-mask";
 
 /// Cut or erase a wand selection's coverage mask out of a raster layer

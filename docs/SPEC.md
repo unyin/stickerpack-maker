@@ -351,16 +351,21 @@ stickers, Missing stickers, and the thumbnail.
     tools — from the clicked sample; the fill is contiguous, stopping at the first
     non-matching pixel, and the mask carries a 1-px feather (half coverage on its
     boundary), so erasing up to manga ink lines leaves no razor cut through the
-    anti-aliased band. A click-drag sets the tolerance live, with a readout beside the
-    pointer (up increases, as the warp strength; down decreases), re-filling the layer
-    once per 5% step. A plain click replaces the selection; on the same layer Shift adds
-    the clicked region and Alt removes one — a selection is session state, so Undo cannot
-    take a region back — and a click on another layer starts fresh, whatever the
-    modifiers. The region draws like the others (a dashed outline, one loop per boundary
-    of the blob) and dies with any edit or undo (its mask is bound to its layer's pixels).
-    Cut lifts it into a floating layer like a Rectangle/Lasso cut; Delete erases it (below).
-    A fully transparent or out-of-layer click, and a text layer or several selected
-    layers, say why in the message line and change nothing.
+    anti-aliased band. A selection that runs to the layer's own edge stays fully covered
+    there, so erasing a background to the panel's edge leaves no faint half-covered line
+    along it. A click-drag sets the tolerance live, with a readout beside the pointer (up
+    increases, down decreases — the warp strength's own convention), re-filling the layer
+    in coarse steps as it changes (a performance choice, not a promise of any particular
+    step). A plain click replaces the selection; on the same layer Shift adds the clicked
+    region and Alt removes one (with both held, Shift wins) — a selection is session state,
+    so Undo cannot take a region back — and a click on another layer starts fresh,
+    whatever the modifiers. The region draws like the others (a dashed outline, one loop
+    per boundary of the blob) and dies with any edit or undo (its mask is bound to its
+    layer's pixels). Cut lifts it into a floating layer like a Rectangle/Lasso cut, so it
+    keeps Cut's one-selected-layer rule (the click selects the target; picking another
+    layer blocks Cut until the region is dropped); Delete always follows the region's own
+    target (below). A fully transparent or out-of-layer click, and a text layer or several
+    selected layers, say why in the message line and change nothing.
   - **Cut** works on exactly one selected image layer that the selection touches (its
     tooltip says why not). The selected pixels (whole pixels whose centres lie inside the
     selection; a lasso that crosses itself leaves the overlap out) move into a new floating

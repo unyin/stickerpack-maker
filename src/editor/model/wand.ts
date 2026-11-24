@@ -8,6 +8,12 @@ import { localToDoc, type Point, type Transform } from "./document";
 /** Wand tolerance as a percent of full channel range: its range and default (owner decision 2026-11-24). */
 export const TOLERANCE = { min: 0, max: 100, initial: 20 } as const;
 
+/** The webview twin of Rust's `TRANSPARENT_SPOT`: why a fully transparent spot cannot be selected. */
+export const NOTHING_TO_SELECT_TRANSPARENT = "Nothing to select there: that spot is fully transparent.";
+
+/** The webview twin of Rust's `OUTSIDE_LAYER`: why a click outside the layer selects nothing. */
+export const NOTHING_TO_SELECT_OUTSIDE = "Nothing to select there: that spot is outside the layer.";
+
 /** Why `value` is not a valid tolerance, or null when it is. */
 export function toleranceProblem(value: number): string | null {
   return Number.isInteger(value) && value >= TOLERANCE.min && value <= TOLERANCE.max

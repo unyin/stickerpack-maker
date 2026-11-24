@@ -39,6 +39,8 @@ import {
   anyCovered,
   combineMasks,
   moveWandGesture,
+  NOTHING_TO_SELECT_OUTSIDE,
+  NOTHING_TO_SELECT_TRANSPARENT,
   refillStepOf,
   startWandGesture,
   TOLERANCE,
@@ -122,6 +124,7 @@ import {
   type Transform,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
+import type { Region } from "../editor/model/region";
 import { readoutStatus, startCanvas, STICKER, THUMBNAIL, TEXT_FONT_SIZE, TEXT_OUTLINE_WIDTH, type ConstraintSet } from "../editor/model/constraints";
 import {
   DEFAULT_FONT_SIZE,
@@ -1077,6 +1080,11 @@ function buildEditor(): HTMLElement {
     refresh();
   }
 
+  /** The layer a drawn selection acts on: the wand's own target, else the one selected layer. */
+  function regionTargetId(region: Region, selection: readonly string[]): string {
+    return region.kind === "wand" ? region.targetId : selection[0];
+  }
+
   /**
    * Cut (SPM-9, the wand since SPM-22): the selected pixels of the cut
    * selection's layer move into a new floating layer at the same spot, as
@@ -1094,7 +1102,7 @@ function buildEditor(): HTMLElement {
       async (doc) => {
         // A wand selection lifts from the layer it was clicked on; a
         // Rectangle/Lasso from the one selected image layer.
-        const id = region.kind === "wand" ? region.targetId : current.selection[0];
+        const id = regionTargetId(region, current.selection);
         const source = doc.layers[layerIndex(doc, id)];
         if (source.kind !== "raster") return null;
         const cut =
@@ -1307,12 +1315,12 @@ function buildEditor(): HTMLElement {
     const layer = target.layer;
     const local = docToLocal(layer.transform, at);
     if (local.x < 0 || local.y < 0 || local.x >= layer.image.width || local.y >= layer.image.height) {
-      say("Nothing to select there: that spot is outside the layer.");
+      say(NOTHING_TO_SELECT_OUTSIDE);
       return;
     }
     const base = ((local.y | 0) * layer.image.width + (local.x | 0)) * 4;
     if (layer.image.pixels[base + 3] === 0) {
-      say("Nothing to select there: that spot is fully transparent.");
+      say(NOTHING_TO_SELECT_TRANSPARENT);
       return;
     }
     const region = current.region?.kind === "wand" && current.region.targetId === layer.id ? current.region : null;
@@ -1616,6 +1624,13 @@ function buildEditor(): HTMLElement {
     resizeWholeImage((doc, content) => resizeToSide(doc, content, side, freeSide));
   }
 
+  /** Why Delete cannot run right now: with a region drawn it erases, else it deletes layers. */
+  function deleteReasonOf(current: EditorSession): string | null {
+    return current.region
+      ? eraseBlocker(current.doc, current.selection, current.region)
+      : deleteBlocker(current.doc, current.selection);
+  }
+
   /** Delete the selected layers as one undoable step (SPEC §6); one layer always stays. */
   function deleteSelected(): void {
     const current = session;
@@ -1634,7 +1649,7 @@ function buildEditor(): HTMLElement {
     const current = session;
     if (!current) return;
     if (!current.region) return deleteSelected();
-    const reason = eraseBlocker(current.doc, current.selection, current.region);
+    const reason = deleteReasonOf(current);
     if (reason) {
       say(reason);
       return;
@@ -1657,15 +1672,14 @@ function buildEditor(): HTMLElement {
       current,
       { doing: "erasing", done: "erased" },
       async (doc) => {
-        if (region.kind === "wand") {
-          const source = doc.layers[layerIndex(doc, region.targetId)];
-          return source.kind === "raster" ? eraseMask(source.image, source.transform, region.mask) : null;
-        }
-        const source = doc.layers[layerIndex(doc, current.selection[0])];
-        return source.kind === "raster" ? eraseRegion(source.image, source.transform, region.points) : null;
+        const source = doc.layers[layerIndex(doc, regionTargetId(region, current.selection))];
+        if (source.kind !== "raster") return null;
+        return region.kind === "wand"
+          ? eraseMask(source.image, source.transform, region.mask)
+          : eraseRegion(source.image, source.transform, region.points);
       },
       (hole) => {
-        const id = region.kind === "wand" ? region.targetId : current.selection[0];
+        const id = regionTargetId(region, current.selection);
         current.apply((d) => refineLayerPixels(d, id, hole));
         current.setRegion(null);
       },
@@ -1771,9 +1785,7 @@ function buildEditor(): HTMLElement {
     const blocker = mergeBlocker(current.selection);
     // With a selection drawn Delete erases its pixels; with none it deletes
     // the selected layers (owner decision 2026-11-24).
-    const deleteReason = current.region
-      ? eraseBlocker(doc, current.selection, current.region)
-      : deleteBlocker(doc, current.selection);
+    const deleteReason = deleteReasonOf(current);
     addButton.disabled = busy;
     // Each sizing tool is disabled when it would change nothing or, for Longest
     // side, when the set needs a square canvas (SPEC §6).
