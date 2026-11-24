@@ -147,10 +147,13 @@ pub fn repoint_library(
 /// the webview's FontFace can parse. Case-insensitive.
 const CUSTOM_EMOJI_FONT_EXTENSIONS: [&str; 3] = ["ttf", "otf", "woff2"];
 
-/// A colour-emoji font reaches a few tens of MB (Noto's CBDT build is
-/// ~24 MB); a file past this generous cap is not a font and would only drag
-/// memory into the webview on every style application.
-const CUSTOM_EMOJI_FONT_MAX_BYTES: u64 = 64 * 1024 * 1024;
+/// A colour-emoji font reaches tens of MB — Noto's CBDT build is ~24 MB
+/// and Apple's sbix build ~90 MB+ — and real custom emoji packs can be
+/// larger still, so the cap sits at 256 MiB: every known emoji font fits
+/// with room, while a deliberately absurd "font" is still refused before
+/// its bytes cross into the webview (owner, 2026-11-24: the first cap,
+/// 64 MiB, blocked real packs and was raised).
+const CUSTOM_EMOJI_FONT_MAX_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Validate a picked custom emoji font path: suffix, existence, size cap.
 /// The command takes any path from the webview, so the guard (not the UI's
