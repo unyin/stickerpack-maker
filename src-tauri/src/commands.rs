@@ -507,15 +507,16 @@ pub const WAND_HEADER: &str = "x-wand-select";
 
 /// Select the colour-similar contiguous region around a clicked spot
 /// (SPM-22). Request: raw body = the target layer's RGBA bytes, header
-/// `x-wand-select`. Response: `WandMask::to_frame` (the mask's place and
-/// size, then its coverage bytes).
+/// `x-wand-select`; the feather rides in the header and defaults on.
+/// Response: `WandMask::to_frame` (the mask's place and size, then its
+/// coverage bytes).
 #[tauri::command(async)]
 pub fn editor_wand_select(request: tauri::ipc::Request<'_>) -> Result<tauri::ipc::Response, String> {
     let body = raw_body(&request, "wand")?;
     let meta: editor::wand::WandMeta = serde_json::from_str(header(&request, WAND_HEADER)?)
         .map_err(|e| format!("the wand header is invalid: {e}"))?;
     let layer = meta.decode_layer(body)?;
-    let mask = editor::wand::select(&layer, &meta.seed, meta.tolerance)?;
+    let mask = editor::wand::select(&layer, &meta.seed, meta.tolerance, meta.feather)?;
     Ok(tauri::ipc::Response::new(mask.to_frame()))
 }
 

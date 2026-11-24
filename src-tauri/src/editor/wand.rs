@@ -38,7 +38,8 @@ pub const TRANSPARENT_SPOT: &str = "Nothing to select there: that spot is fully 
 pub const OUTSIDE_LAYER: &str = "Nothing to select there: that spot is outside the layer.";
 
 /// Metadata of a wand request: the target layer (raster only, like cut) and
-/// the click in document pixels plus the tolerance as a percent.
+/// the click in document pixels, the tolerance as a percent, and whether
+/// the fill feathers its boundary.
 #[derive(Debug, Clone, Deserialize)]
 pub struct WandMeta {
     #[serde(flatten)]
@@ -47,6 +48,16 @@ pub struct WandMeta {
     pub seed: [f32; 2],
     /// Per-channel tolerance as a percent of full range (0-100, whole).
     pub tolerance: u32,
+    /// Whether the boundary ring takes half coverage. On when absent, so
+    /// requests without it keep the feathered behaviour (owner decision
+    /// 2026-11-24: the Feather checkbox, on by default).
+    #[serde(default = "feathers_by_default")]
+    pub feather: bool,
+}
+
+/// The wand feathers its boundary unless a request says otherwise.
+fn feathers_by_default() -> bool {
+    true
 }
 
 impl WandMeta {
@@ -141,8 +152,9 @@ fn matches(seed: [u8; 3], max: u32, px: &[u8]) -> bool {
 }
 
 /// Select the colour-similar contiguous region around the document-space
-/// `seed` on `layer`, at `tolerance` percent per channel.
-pub fn select(layer: &LayerInput, seed: &[f32; 2], tolerance: u32) -> Result<WandMask, String> {
+/// `seed` on `layer`, at `tolerance` percent per channel, feathering the
+/// boundary ring unless `feather` is false.
+pub fn select(layer: &LayerInput, seed: &[f32; 2], tolerance: u32, feather: bool) -> Result<WandMask, String> {
     let (width, height) = (layer.image.width, layer.image.height);
     if layer.image.pixels.len() != width as usize * height as usize * 4 {
         return Err("the layer's pixels do not match its size".to_string());
@@ -229,6 +241,7 @@ pub fn select(layer: &LayerInput, seed: &[f32; 2], tolerance: u32) -> Result<Wan
     // The 1-px feather: a selected pixel beside a NON-selected neighbour
     // inside the image takes partial coverage. The image's own edge is not a
     // feather — a selection running to the layer's edge stays fully covered.
+    // With the feather switched off every selected pixel is fully in.
     let coverage = (0..width as usize * height as usize)
         .map(|i| {
             if !filled[i] {
@@ -239,7 +252,7 @@ pub fn select(layer: &LayerInput, seed: &[f32; 2], tolerance: u32) -> Result<Wan
                 || (x + 1 < width && !filled[i + 1])
                 || (y > 0 && !filled[i - width as usize])
                 || (y + 1 < height && !filled[i + width as usize]);
-            if edge { FEATHER } else { INSIDE }
+            if edge && feather { FEATHER } else { INSIDE }
         })
         .collect::<Vec<u8>>();
 
@@ -404,7 +417,7 @@ mod tests {
     #[test]
     fn a_click_selects_the_white_around_the_ink_and_stops_at_it() {
         let source = layer(manga(), LayerTransform::IDENTITY);
-        let mask = select(&source, &[1.5, 1.5], 20).unwrap();
+        let mask = select(&source, &[1.5, 1.5], 20, true).unwrap();
         // The connected white left of the ink band; the gray band and the
         // right-hand white are other components.
         assert_eq!((mask.x, mask.y, mask.width, mask.height), (0, 0, 3, 8));
@@ -416,15 +429,28 @@ mod tests {
     }
 
     #[test]
+    fn the_feather_can_be_switched_off() {
+        // The same manga click, unfeathered: the ink boundary stays fully in.
+        let source = layer(manga(), LayerTransform::IDENTITY);
+        let mask = select(&source, &[1.5, 1.5], 20, false).unwrap();
+        assert_eq!((mask.x, mask.y, mask.width, mask.height), (0, 0, 3, 8));
+        for y in 0..8 {
+            for x in 0..3 {
+                assert_eq!(cover(&mask, x, y), INSIDE, "a hard edge at ({x},{y})");
+            }
+        }
+    }
+
+    #[test]
     fn tolerance_admits_a_deviation_up_to_the_percent_and_contiguity_stops_there() {
         // White seed; tolerance 20 admits a deviation up to 51 of 255.
         let mut image = flat(4, 1, [255, 255, 255]);
         image.pixels[4..8].copy_from_slice(&[204, 204, 204, 255]); // exactly at the limit
         image.pixels[8..12].copy_from_slice(&[203, 203, 203, 255]); // one past it
-        let mask = select(&layer(image.clone(), LayerTransform::IDENTITY), &[0.5, 0.5], 20).unwrap();
+        let mask = select(&layer(image.clone(), LayerTransform::IDENTITY), &[0.5, 0.5], 20, true).unwrap();
         assert_eq!((mask.x, mask.width), (0, 2));
         // A gray seed on the other side of the 203 pixel selects nothing new.
-        let mask = select(&layer(image, LayerTransform::IDENTITY), &[3.5, 0.5], 20).unwrap();
+        let mask = select(&layer(image, LayerTransform::IDENTITY), &[3.5, 0.5], 20, true).unwrap();
         assert_eq!((mask.x, mask.width), (3, 1));
     }
 
@@ -432,7 +458,7 @@ mod tests {
     fn transparent_pixels_never_match_and_block_the_fill() {
         let mut image = flat(3, 1, [255, 255, 255]);
         image.pixels[4..8].fill(0);
-        let mask = select(&layer(image, LayerTransform::IDENTITY), &[0.5, 0.5], 100).unwrap();
+        let mask = select(&layer(image, LayerTransform::IDENTITY), &[0.5, 0.5], 100, true).unwrap();
         assert_eq!(mask.width, 1);
         assert_eq!(cover(&mask, 0, 0), FEATHER);
     }
@@ -442,28 +468,28 @@ mod tests {
         // Scale 2: document x 12..16 is layer pixels x 6..8 — the white
         // right of the anti-aliased band, unreachable by this click unscaled.
         let source = layer(manga(), LayerTransform { scale_x: 2.0, scale_y: 2.0, ..LayerTransform::IDENTITY });
-        let mask = select(&source, &[13.0, 1.0], 20).unwrap();
+        let mask = select(&source, &[13.0, 1.0], 20, true).unwrap();
         assert_eq!((mask.x, mask.y, mask.width, mask.height), (6, 0, 2, 8));
         assert_eq!(cover(&mask, 0, 0), FEATHER, "the gray band's boundary feathers");
         assert_eq!(cover(&mask, 1, 0), INSIDE, "the image edge is not a feather");
         // The same click on the unscaled layer is outside it entirely.
         let unscaled = layer(manga(), LayerTransform::IDENTITY);
-        assert_eq!(select(&unscaled, &[13.0, 1.0], 20).unwrap_err(), OUTSIDE_LAYER);
+        assert_eq!(select(&unscaled, &[13.0, 1.0], 20, true).unwrap_err(), OUTSIDE_LAYER);
     }
 
     #[test]
     fn refused_clicks_and_layers() {
         let source = layer(flat(4, 4, [9, 9, 9]), LayerTransform::IDENTITY);
-        assert_eq!(select(&source, &[-1.0, 1.0], 20).unwrap_err(), OUTSIDE_LAYER);
-        assert_eq!(select(&source, &[4.0, 1.0], 20).unwrap_err(), OUTSIDE_LAYER);
-        assert_eq!(select(&source, &[f32::NAN, 1.0], 20).unwrap_err(), "the clicked spot is not a finite point");
-        assert_eq!(select(&source, &[1.0, 1.0], 101).unwrap_err(), "the wand tolerance must be a whole number from 0 to 100");
+        assert_eq!(select(&source, &[-1.0, 1.0], 20, true).unwrap_err(), OUTSIDE_LAYER);
+        assert_eq!(select(&source, &[4.0, 1.0], 20, true).unwrap_err(), OUTSIDE_LAYER);
+        assert_eq!(select(&source, &[f32::NAN, 1.0], 20, true).unwrap_err(), "the clicked spot is not a finite point");
+        assert_eq!(select(&source, &[1.0, 1.0], 101, true).unwrap_err(), "the wand tolerance must be a whole number from 0 to 100");
         let mut transparent = flat(2, 2, [255, 255, 255]);
         transparent.pixels.fill(0);
-        assert_eq!(select(&layer(transparent, LayerTransform::IDENTITY), &[0.5, 0.5], 20).unwrap_err(), TRANSPARENT_SPOT);
+        assert_eq!(select(&layer(transparent, LayerTransform::IDENTITY), &[0.5, 0.5], 20, true).unwrap_err(), TRANSPARENT_SPOT);
         let flat_scale = layer(flat(2, 2, [255, 255, 255]), LayerTransform { scale_x: 0.0, ..LayerTransform::IDENTITY });
         assert_eq!(
-            select(&flat_scale, &[0.5, 0.5], 20).unwrap_err(),
+            select(&flat_scale, &[0.5, 0.5], 20, true).unwrap_err(),
             "the layer is scaled to nothing, so it cannot be selected",
         );
     }
@@ -492,6 +518,13 @@ mod tests {
         assert_eq!(meta.seed, [1.5, 0.5]);
         assert_eq!(meta.tolerance, 20);
         assert!(meta.layer.text.is_none());
+        assert!(meta.feather, "the feather defaults on when the request omits it");
+        let meta: WandMeta = serde_json::from_str(
+            r#"{"width":2,"height":1,"transform":{"x":0,"y":0,"scaleX":1,"scaleY":1,"rotation":0},
+                "seed":[1.5,0.5],"tolerance":20,"feather":false}"#,
+        )
+        .unwrap();
+        assert!(!meta.feather);
         let meta: CutMaskMeta = serde_json::from_str(
             r#"{"width":2,"height":1,"transform":{"x":0,"y":0,"scaleX":1,"scaleY":1,"rotation":0},
                 "mask":{"x":0,"y":0,"width":2,"height":1},"mode":"erase"}"#,

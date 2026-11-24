@@ -498,6 +498,16 @@ function buildEditor(): HTMLElement {
     tolerance = value;
     toleranceInput.blur();
   });
+  // The wand's 1-px feather, on by default (owner decision 2026-11-24): a
+  // checkbox beside the tolerance; it applies from the next fill on.
+  let feathered = true;
+  const featherInput = el("input", { type: "checkbox", "aria-label": "Wand feathering" }) as HTMLInputElement;
+  featherInput.checked = true;
+  featherInput.title = "Soften the wand selection's edge by half a pixel; uncheck it for hard edges";
+  featherInput.addEventListener("change", () => {
+    feathered = featherInput.checked;
+    featherInput.blur();
+  });
   // The message-line text of a model download in progress, null when none
   // runs: Save's disabled tooltip and a mid-download Ctrl+S say it (SPEC §6,
   // §2: a disabled control shows its reason).
@@ -563,6 +573,7 @@ function buildEditor(): HTMLElement {
       cutButton,
       pasteButton,
       el("label", { class: "editor-side" }, "Tolerance ", toleranceInput, " %"),
+      el("label", { class: "editor-side" }, featherInput, " Feather"),
     ),
     el(
       "span",
@@ -1377,7 +1388,7 @@ function buildEditor(): HTMLElement {
   async function fillWand(press: WandPress, atTolerance: number): Promise<void> {
     const id = ++press.fills;
     try {
-      const mask = await wandSelect(press.image, press.transform, press.gesture.seed, atTolerance);
+      const mask = await wandSelect(press.image, press.transform, press.gesture.seed, atTolerance, feathered);
       if (press.fills !== id) return; // a newer fill superseded this one
       press.filled = atTolerance;
       const current = session;
@@ -1845,6 +1856,7 @@ function buildEditor(): HTMLElement {
     removeBackgroundButton.title = removeReason ?? removeBackgroundTitle;
     brushSizeInput.disabled = busy;
     toleranceInput.disabled = busy;
+    featherInput.disabled = busy;
     // Text tool (SPM-9): the controls show the first selected text layer's
     // style, else the next new text's.
     const texts = current.selectedTexts;

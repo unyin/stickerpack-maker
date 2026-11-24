@@ -351,7 +351,9 @@ stickers, Missing stickers, and the thumbnail.
     tools — from the clicked sample; the fill is contiguous, stopping at the first
     non-matching pixel, and the mask carries a 1-px feather (half coverage on its
     boundary), so erasing up to manga ink lines leaves no razor cut through the
-    anti-aliased band. A selection that runs to the layer's own edge stays fully covered
+    anti-aliased band. The Feather checkbox beside Tolerance switches the feather
+    off for hard edges; it is on by default (owner decision 2026-11-24). A selection
+    that runs to the layer's own edge stays fully covered
     there, so erasing a background to the panel's edge leaves no faint half-covered line
     along it. A click-drag sets the tolerance live, with a readout beside the pointer (up
     increases, down decreases — the warp strength's own convention), re-filling the layer

@@ -238,12 +238,19 @@ export const WAND_HEADER = "x-wand-select";
 /**
  * Select the colour-similar contiguous region around a click (SPM-22):
  * Rust flood-fills the layer and returns its coverage mask — 255 inside,
- * 128 on the 1-px feather ring — cropped to the selected bounds and in the
- * layer's own pixel grid. A fully transparent or out-of-layer click is
- * refused.
+ * 128 on the 1-px feather ring, or hard edges throughout with `feathered`
+ * false (the Feather checkbox, on by default; owner decision
+ * 2026-11-24) — cropped to the selected bounds and in the layer's own
+ * pixel grid. A fully transparent or out-of-layer click is refused.
  */
-export async function wandSelect(image: RgbaImage, transform: Transform, seed: Point, tolerance: number): Promise<WandMask> {
-  const meta = { width: image.width, height: image.height, transform, seed: [seed.x, seed.y], tolerance };
+export async function wandSelect(
+  image: RgbaImage,
+  transform: Transform,
+  seed: Point,
+  tolerance: number,
+  feathered: boolean,
+): Promise<WandMask> {
+  const meta = { width: image.width, height: image.height, transform, seed: [seed.x, seed.y], tolerance, feather: feathered };
   const frame = await invokeRaw("editor_wand_select", bytesOf(image), WAND_HEADER, meta);
   return decodeWandFrame(frame);
 }
