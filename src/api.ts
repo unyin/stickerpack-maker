@@ -7,6 +7,12 @@ import { open } from "@tauri-apps/plugin-dialog";
 export type LibraryStatus = "unconfigured" | "ready" | "invalid";
 
 /**
+ * Emoji style the app draws with (SPM-17). Mirrors the serde-lowercase
+ * EmojiStyle enum in src-tauri/src/config.rs exactly.
+ */
+export type EmojiStyle = "android" | "twemoji" | "windows" | "custom";
+
+/**
  * Library marker file name. Must stay in sync with DB_FILE_NAME in
  * src-tauri/src/library.rs — the Rust core looks for exactly this name.
  */
@@ -16,6 +22,10 @@ export interface AppState {
   libraryPath: string | null;
   libraryStatus: LibraryStatus;
   libraryError: string | null;
+  /** The persisted emoji style (SPM-17); rendered choices in src/emoji-style.ts. */
+  emojiStyle: EmojiStyle;
+  /** The stored custom emoji font path, or null; only the Custom style uses it. */
+  customEmojiFontPath: string | null;
 }
 
 export function getAppState(): Promise<AppState> {
@@ -35,6 +45,42 @@ export function createLibrary(path: string): Promise<AppState> {
 /** Re-point at another intact Library (database included). */
 export function repointLibrary(path: string): Promise<AppState> {
   return invoke<AppState>("repoint_library", { path });
+}
+
+/**
+ * Choose the emoji style and persist it (SPM-17). With "custom", pass the
+ * freshly picked font file's path; the file stays where it is and is only
+ * read from there. A non-custom style keeps a stored custom path, so
+ * switching back to Custom needs no re-pick.
+ */
+export function setEmojiStyle(
+  style: EmojiStyle,
+  customPath?: string,
+): Promise<AppState> {
+  return invoke<AppState>("set_emoji_style", { style, customPath });
+}
+
+/**
+ * The custom emoji font file's bytes, for a FontFace in the webview
+ * (SPM-17). The Rust side refuses non-font suffixes, missing files and
+ * oversized files.
+ */
+export function readCustomEmojiFont(path: string): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>("read_custom_emoji_font", { path });
+}
+
+/**
+ * File picker for the custom emoji font (SPM-17): real font containers only.
+ * Returns the selected file path, or null when the user cancels.
+ */
+export async function pickEmojiFont(): Promise<string | null> {
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    title: "Choose an emoji font file",
+    filters: [{ name: "Font file", extensions: ["ttf", "otf", "woff2"] }],
+  });
+  return typeof selected === "string" ? selected : null;
 }
 
 /** Native folder picker. Returns null when the user cancels. */

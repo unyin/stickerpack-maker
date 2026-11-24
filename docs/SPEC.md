@@ -133,7 +133,18 @@ stickers, Missing stickers, and the thumbnail.
   Every space is stripped when it is saved and the count ignores spaces. Beside the box: a
   small square icon-only **copy** button and the live 1–20 count; the count warning shows
   below (owner decisions 2026-11-21). Emoji are drawn with the colour emoji font first, never
-  as monochrome text glyphs (owner decision 2026-11-22; SPM-17 makes the style selectable).
+  as monochrome text glyphs (owner decision 2026-11-22). The emoji font is a Settings choice
+  (SPM-17, owner decisions 2026-11-21): **Android** — bundled Noto Color Emoji (SIL OFL 1.1),
+  the default, covering emoji the installed Segoe UI Emoji lacks (e.g. 🫵, Unicode 15);
+  **Twemoji** — bundled, artwork CC-BY 4.0 with the credit shown in Settings and the licence
+  texts shipped beside the fonts; **Windows** — the system's Segoe UI Emoji, nothing bundled;
+  **custom font file** — a user-picked .ttf/.otf/.woff2, read from where it is and never shipped;
+  a custom file that is missing, not a font, or refused by the app's embedded web engine (some
+  fonts Windows itself renders are rejected inside the app — not a bug drawable around) falls
+  back to Android with a message in Settings.
+  The choice changes every emoji in the app without a restart (one font-family stack on the
+  emoji fields' shared variable, re-measuring the Emoji String box), and persists in the app
+  config next to the Library path.
 - Actions: **Edit** first asks **Edit / Replace… / Cancel** (Cancel is the safe default):
   Edit opens the flattened image in the Editor, Replace runs the Replace flow below (owner
   decision 2026-11-21). A session opened with Edit remembers that sticker: saving it

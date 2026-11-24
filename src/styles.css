@@ -29,8 +29,31 @@
   --font-ui: system-ui, "Segoe UI", sans-serif;
   /* Emoji fields put a colour emoji font FIRST: with the text font first,
      Windows draws text-default emoji (☺ ❤ ✌ ...) as monochrome Segoe UI
-     Symbol glyphs (owner, 2026-11-22). SPM-17 switches the style here. */
-  --font-emoji: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", var(--font-ui);
+     Symbol glyphs (owner, 2026-11-22). The DEFAULT style is Android: the
+     bundled Noto font alias above (SPM-17, owner decision 2026-11-21). This
+     static value is the first-paint and no-Tauri default; src/emoji-style.ts
+     overrides it at runtime (boot + Settings) with the chosen style's stack.
+     The per-style stacks and this fallback must stay in step with
+     EMOJI_STYLE_STACKS in src/emoji-style.ts. */
+  --font-emoji: "SPM Noto Color Emoji", "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", var(--font-ui);
+}
+
+/* The bundled emoji fonts (SPM-17), internal family aliases so a font
+   installed on the user's system under the upstream name never shadows or is
+   shadowed unpredictably. URL paths are Vite public/ paths, identical in dev
+   and in the package (public/ -> dist/ -> Tauri's frontendDist). Aliases are
+   referenced by --font-emoji above and by src/emoji-style.ts; provenance and
+   licences: public/fonts/README.md. font-display: block so emoji fields wait
+   briefly for the real font instead of flashing monochrome text glyphs. */
+@font-face {
+  font-family: "SPM Noto Color Emoji";
+  src: url("/fonts/Noto-COLRv1.ttf") format("truetype");
+  font-display: block;
+}
+@font-face {
+  font-family: "SPM Twemoji";
+  src: url("/fonts/Twemoji_COLRv1.ttf") format("truetype");
+  font-display: block;
 }
 
 /* Dark tokens (SPM-14). src/theme.ts sets data-theme on <html>: the stored
@@ -262,7 +285,12 @@ button:has(> .icon) {
   gap: 6px;
 }
 
-.theme-select {
+/* The Settings dropdowns (Appearance theme, Emoji font). The emoji select
+   reuses the exact look the owner approved for the theme one (owner, from
+   the SPM-17 test, 2026-11-24: "the same design as the Appearance
+   dropdown"). */
+.theme-select,
+.emoji-style-select {
   font: inherit;
   background: var(--panel);
   color: var(--text);

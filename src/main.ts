@@ -1,6 +1,7 @@
 import "./styles.css";
 import "./dialog.css";
 import { getAppState } from "./api";
+import { applyEmojiStyle } from "./emoji-style";
 import { renderShell } from "./shell";
 import { initTheme } from "./theme";
 import { renderFirstRun } from "./views/first-run";
@@ -22,6 +23,10 @@ async function boot(): Promise<void> {
     if (state.libraryStatus === "unconfigured") {
       renderFirstRun(root, () => void boot());
     } else {
+      // The persisted emoji style (SPM-17), before any view can render
+      // emoji; a broken custom file falls back to Android with a problem
+      // shown in Settings (applyEmojiStyle never throws).
+      await applyEmojiStyle(state.emojiStyle, state.customEmojiFontPath);
       renderShell(root, state, () => void boot());
     }
   } catch (err) {
