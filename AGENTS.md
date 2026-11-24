@@ -22,7 +22,7 @@ Always run the `review-cycle` skill on a change, until both axes converge, befor
 
 ### Review-cycle sub-agent models (OpenCode harness)
 
-Pin model AND effort variant explicitly on every `review-cycle` spawn — a bare model ID leaves effort at its default. Reviewer sub-agents (both axes, every round): `opencode-go/glm-5.3#high` — no review round needs max (owner, 2026-11-23: the earlier same-day max/high pinning was itself an oversight, the effort change being meant from the start). Implementer sub-agent (applies the fixes): `console-mistral/deepseek-v4-1-flash-1017#low` — DeepSeek V4.1 Flash on the Mistral provider, low effort (owner, 2026-11-23: replaces the GLM-5.3 stand-in; the org's EU/US-only hosting block does not apply through the Mistral provider).
+Pin model AND effort variant explicitly on every `review-cycle` spawn — a bare model ID leaves effort at its default. Reviewer sub-agents (both axes, every round): `opencode-go/glm-5.3#high` — no review round needs max (owner, 2026-11-23: the earlier same-day max/high pinning was itself an oversight, the effort change being meant from the start). Implementer sub-agent (applies the fixes): `mistral/deepseek-v4-1-flash-1017#low` — DeepSeek V4.1 Flash on the Mistral provider, low effort (owner, 2026-11-23: replaces the GLM-5.3 stand-in; the org's EU/US-only hosting block does not apply through the Mistral provider).
 
 ### Icons
 
