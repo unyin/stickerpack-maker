@@ -307,7 +307,9 @@ test("a compose request sends the grid, its contributions and the masks' coverag
     transform: t,
     contributions: [
       { kind: "mask", op: "add", transform: t, x: 1, y: 2, width: 2, height: 1 },
-      { kind: "poly", op: "subtract", feather: false, points: polygon },
+      // A polygon crosses as [x, y] pairs (cutImage's wire form), never as
+      // the model's {x, y} Points: serde's [f32; 2] refuses a map.
+      { kind: "poly", op: "subtract", feather: false, points: [[0, 0], [6, 0], [6, 4]] },
       { kind: "mask", op: "subtract", transform: { ...t, rotation: 90 }, x: 4, y: 0, width: 1, height: 1 },
     ],
   });

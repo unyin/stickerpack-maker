@@ -211,12 +211,21 @@ export function decodeTextFrame(frame: ArrayBuffer): TextRender {
 export const CUT_LAYER_HEADER = "x-cut-layer";
 
 /**
+ * The wire form of a polygon: cut.rs and compose.rs take theirs as
+ * Vec<[f32; 2]> pairs, while the model's Point is {x, y}; every conversion
+ * to the wire is here.
+ */
+function wirePolygon(polygon: readonly Point[]): [number, number][] {
+  return polygon.map((p) => [p.x, p.y]);
+}
+
+/**
  * Cut a selection (a polygon in document pixels) out of a raster layer in
  * Rust (SPM-9): the layer with a hole, and the cutout with its top-left in
  * the layer's own pixel grid. Rust refuses a selection with nothing visible.
  */
 export async function cutImage(image: RgbaImage, transform: Transform, polygon: readonly Point[]): Promise<CutResult> {
-  const meta = { width: image.width, height: image.height, transform, polygon: polygon.map((p) => [p.x, p.y]) };
+  const meta = { width: image.width, height: image.height, transform, polygon: wirePolygon(polygon) };
   const frame = await invokeRaw("editor_cut_layer", bytesOf(image), CUT_LAYER_HEADER, meta);
   return decodeCutFrame(frame, image.width, image.height);
 }
@@ -332,7 +341,10 @@ export async function composeSelection(
   const body = new Uint8Array(length);
   let offset = 0;
   const wire = contributions.map((contribution) => {
-    if (contribution.kind === "poly") return contribution;
+    // The wire contract chose Vec<[f32; 2]> pairs for polygons.
+    if (contribution.kind === "poly") {
+      return { ...contribution, points: wirePolygon(contribution.points) };
+    }
     body.set(contribution.mask.coverage, offset);
     offset += contribution.mask.coverage.length;
     return { kind: "mask", op: contribution.op, transform: contribution.transform, ...maskPlace(contribution.mask) };
@@ -347,7 +359,7 @@ export async function composeSelection(
  * whole pixels, exactly what Cut's hole leaves.
  */
 export async function eraseRegion(image: RgbaImage, transform: Transform, polygon: readonly Point[]): Promise<RgbaImage> {
-  const meta = { width: image.width, height: image.height, transform, polygon: polygon.map((p) => [p.x, p.y]), mode: "erase" };
+  const meta = { width: image.width, height: image.height, transform, polygon: wirePolygon(polygon), mode: "erase" };
   const frame = await invokeRaw("editor_cut_layer", bytesOf(image), CUT_LAYER_HEADER, meta);
   return decodeFrame(frame);
 }
