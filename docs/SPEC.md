@@ -345,29 +345,50 @@ stickers, Missing stickers, and the thumbnail.
     2026-11-22). A closed lasso with no area clears the selection.
   - The **Wand** (SPM-22, owner decisions 2026-11-24) selects the colour-similar pixels
     around a click: the target follows the effects tools (the selected image layer, else
-    the base image) and the click also selects it, so Cut and Delete act on what was
-    clicked. A pixel matches when it is visible and no RGB channel drifts more than the
-    tolerance — a percent of full range, default 20, in the Tolerance field beside the
-    tools — from the clicked sample; the fill is contiguous, stopping at the first
+    the base image) and the click also selects it. A pixel matches when it is visible and
+    no RGB channel drifts more than the tolerance — a percent of full range, default 20, in
+    the Tolerance field beside the tools — from the clicked sample; the fill is contiguous,
+    stopping at the first
     non-matching pixel, and the mask carries a 1-px feather (half coverage on its
     boundary), so erasing up to manga ink lines leaves no razor cut through the
     anti-aliased band. The Feather checkbox beside Tolerance switches the feather
-    off for hard edges; it is on by default (owner decision 2026-11-24). A selection
-    that runs to the layer's own edge stays fully covered
-    there, so erasing a background to the panel's edge leaves no faint half-covered line
-    along it. A click-drag sets the tolerance live, with a readout beside the pointer (up
-    increases, down decreases — the warp strength's own convention), re-filling the layer
+    off for hard edges; it is on by default (owner decision 2026-11-24) and governs every
+    contribution a selection is built from, below. A selection that runs to the layer's own
+    edge stays fully covered there, so erasing a background to the panel's edge leaves no
+    faint half-covered line along it. A click-drag sets the tolerance live, with a readout
+    beside the pointer (up increases, down decreases — the warp strength's own convention),
+    re-filling the layer
     in coarse steps as it changes (a performance choice, not a promise of any particular
-    step). A plain click replaces the selection; on the same layer Shift adds the clicked
-    region and Alt removes one (with both held, Shift wins) — a selection is session state,
-    so Undo cannot take a region back — and a click on another layer starts fresh,
-    whatever the modifiers. The region draws like the others (a dashed outline, one loop
-    per boundary of the blob) and dies with any edit or undo (its mask is bound to its
-    layer's pixels). Cut lifts it into a floating layer like a Rectangle/Lasso cut, so it
-    keeps Cut's one-selected-layer rule (the click selects the target; picking another
-    layer blocks Cut until the region is dropped); Delete always follows the region's own
-    target (below). A fully transparent or out-of-layer click, and a text layer or several
+    step). A plain click replaces the selection; with a selection drawn, Shift adds the
+    clicked region to it and Alt removes it (with both held, Shift wins) — a selection is
+    session state, so Undo cannot take a region back. The region draws like the others (a
+    dashed outline, one loop per boundary of the merged area) and dies with any edit or
+    undo. A fully transparent or out-of-layer click, and a text layer or several
     selected layers, say why in the message line and change nothing.
+  - **The selection composes across the tools** (SPM-23, owner decisions 2026-11-24): a
+    selection is one floating area, independent of the layer or the tool that built it — a
+    stack of contributions, each tagged add or subtract: a wand fill in the grid it was
+    filled in (with that layer's transform), or a Rectangle/Lasso polygon in document
+    pixels. Shift and Alt compose whatever is drawn onto whatever is already there: the
+    modifier is read at release for Rectangle, at close for Lasso (Enter, double-click and
+    release-on-start each read their own event's Shift/Alt), and at press for the Wand;
+    with no selection drawn, every modifier acts as a plain draw. Cut and Delete resolve
+    the target at press: the ONE SELECTED IMAGE LAYER the selection touches — the
+    Rectangle/Lasso rule made universal, whichever tool or layers built the selection (no
+    layer, or several, says to select the one image layer; a selection that touches none
+    says so; there is no cross-target refusal). The merge runs in the target layer's own
+    pixel grid, so a polygon cuts exactly as a plain Rectangle/Lasso does and a wand fill
+    applied to its own layer moves the very same pixels (only a fill carried to another
+    layer resamples, softly); the dashed outline shows the merged area, holes included. A
+    composed selection inherits the wand's lifetime — any edit or undo drops it — while a
+    plain unmodified Rectangle/Lasso stays plain geometry in document pixels and survives
+    edits, its whole-pixel Cut/Delete unchanged. The Feather checkbox governs a polygon
+    contribution's boundary too (soft when on, hard when off). Three wand flows change with
+    the unified rule (owner decisions 2026-11-24): a wand region with another layer
+    selected now cuts or erases from that selected layer, where the selection touches it;
+    with no or several layers selected Delete is refused with the select-one-image-layer
+    reason; and Shift + wand-click on another layer adds that region to the selection
+    instead of starting fresh.
   - **Cut** works on exactly one selected image layer that the selection touches (its
     tooltip says why not). The selected pixels (whole pixels whose centres lie inside the
     selection; a lasso that crosses itself leaves the overlap out) move into a new floating
@@ -376,11 +397,12 @@ stickers, Missing stickers, and the thumbnail.
     cutout is trimmed to its visible pixels; a selection holding no visible pixels cuts
     nothing. After a cut the cutout is selected and the Move tool is back, so it can be
     dragged and resized at once. Text layers are not cut (merge them into an image first).
-    Delete erases a drawn selection's pixels from the layer it belongs to (owner decision
-    2026-11-24, amending the 2026-11-21 rule that Delete never touched pixels): whole
-    pixels for a Rectangle/Lasso selection, the wand's feathered coverage for a wand
-    region, keeping the layer's restore source so Restore brings them back, as ONE undo
-    step; with no selection drawn it deletes the selected layers, never pixels. Ctrl+X
+    Delete erases a drawn selection's pixels from the one selected image layer it touches
+    (owner decisions 2026-11-24, amending the 2026-11-21 rule that Delete never touched
+    pixels): whole pixels for a plain Rectangle/Lasso selection, the merged coverage for a
+    composed one (a wand fill's feathered mask, a polygon's rasterised boundary), keeping
+    the layer's restore source so Restore brings them back, as ONE undo step; with no
+    selection drawn it deletes the selected layers, never pixels. Ctrl+X
     runs Cut (lifting the
     selection to a new layer, not to the clipboard; when Cut is blocked it shows the
     tooltip's reason in the message line), and there is no Ctrl+C (owner decision

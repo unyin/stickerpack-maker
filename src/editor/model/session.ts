@@ -70,7 +70,7 @@ export class EditorSession {
     const next = operation(this.doc);
     if (next === this.doc) return;
     this.history.commit(next);
-    this.dropWandRegion();
+    this.dropFloatingRegion();
     this.pruneSelection();
     this.notify();
   }
@@ -78,7 +78,7 @@ export class EditorSession {
   undo(): void {
     if (!this.history.canUndo) return;
     this.history.undo();
-    this.dropWandRegion();
+    this.dropFloatingRegion();
     this.pruneSelection();
     this.notify();
   }
@@ -86,7 +86,7 @@ export class EditorSession {
   redo(): void {
     if (!this.history.canRedo) return;
     this.history.redo();
-    this.dropWandRegion();
+    this.dropFloatingRegion();
     this.pruneSelection();
     this.notify();
   }
@@ -123,12 +123,13 @@ export class EditorSession {
   }
 
   /**
-   * A wand region is bound to its target layer's pixels (its mask lives in
-   * that grid), so any document change drops it; rect and lasso regions
-   * are plain geometry and survive (SPM-22).
+   * A composed region is a floating area built from wand fills (each bound
+   * to its layer's pixels) and polygons (SPM-23), so any document change
+   * drops it; a plain rect or lasso region is unanchored geometry and
+   * survives (SPM-22's wand rule, generalized).
    */
-  private dropWandRegion(): void {
-    if (this.selectedRegion?.kind === "wand") this.selectedRegion = null;
+  private dropFloatingRegion(): void {
+    if (this.selectedRegion?.kind === "compose") this.selectedRegion = null;
   }
 
   private notify(): void {

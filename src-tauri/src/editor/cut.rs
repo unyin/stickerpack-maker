@@ -80,7 +80,7 @@ pub enum CutMode {
 
 /// For each row of a `width` x `height` grid, the pixel spans whose centres
 /// are inside `polygon` (even-odd), as half-open [start, end) ranges.
-fn spans(polygon: &[Point], width: u32, height: u32) -> Vec<Vec<(u32, u32)>> {
+pub(super) fn spans(polygon: &[Point], width: u32, height: u32) -> Vec<Vec<(u32, u32)>> {
     let mut rows = vec![Vec::new(); height as usize];
     for (y, row) in rows.iter_mut().enumerate() {
         let cy = y as f32 + 0.5;

@@ -6,8 +6,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
 import type { Effect, EffectResult } from "./model/effects";
 import { layerInput, textStyleOf, type CropInput, type Doc, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
+import type { Contribution } from "./model/region";
 import type { WandMask } from "./model/wand";
-
 import { IMPORT_EXTENSIONS } from "../shared/import-extensions";
 import type { SaveFormat, SaveOutcome, SaveTarget } from "./save";
 
@@ -305,6 +305,38 @@ export async function eraseMask(image: RgbaImage, transform: Transform, mask: Wa
   const meta = { width: image.width, height: image.height, transform, mask: maskPlace(mask), mode: "erase" };
   const frame = await invokeRaw("editor_cut_mask", bytesWithMask(image, mask), CUT_MASK_HEADER, meta);
   return decodeFrame(frame);
+}
+
+/** Header carrying a compose request's grid (size and transform) and its contributions; mirrors COMPOSE_MASK_HEADER. */
+export const COMPOSE_MASK_HEADER = "x-compose-mask";
+
+/**
+ * Merge a floating selection's contributions into one grid's coverage mask
+ * in Rust (SPM-23): the target layer's own grid when Cut or Delete applies
+ * the selection, the document's for the dashed-outline preview. The wire
+ * form of a wand contribution carries the mask's place instead of its
+ * bytes; the coverage travels as the raw body, concatenated in order.
+ * Response: the merged mask, cropped to the covered bounds — a zero-size
+ * mask when nothing is covered.
+ */
+export async function composeSelection(
+  width: number,
+  height: number,
+  transform: Transform,
+  contributions: readonly Contribution[],
+): Promise<WandMask> {
+  let length = 0;
+  for (const contribution of contributions) if (contribution.kind === "wand") length += contribution.mask.coverage.length;
+  const body = new Uint8Array(length);
+  let offset = 0;
+  const wire = contributions.map((contribution) => {
+    if (contribution.kind === "poly") return contribution;
+    body.set(contribution.mask.coverage, offset);
+    offset += contribution.mask.coverage.length;
+    return { kind: "mask", op: contribution.op, transform: contribution.transform, ...maskPlace(contribution.mask) };
+  });
+  const frame = await invokeRaw("editor_compose_mask", body, COMPOSE_MASK_HEADER, { width, height, transform, contributions: wire });
+  return decodeWandFrame(frame);
 }
 
 /**

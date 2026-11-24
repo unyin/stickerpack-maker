@@ -5,6 +5,7 @@
 //! interactive model, history and live brushes live in the webview.
 
 pub mod crop;
+pub mod compose;
 pub mod cut;
 pub mod effects;
 pub mod encode;

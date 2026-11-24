@@ -1,6 +1,7 @@
 // The magic-wand selection's pure rules (SPM-22, owner decisions 2026-11-24):
-// the tolerance's range and drag, the Shift/Alt mask combination, the
-// outline trace, the blockers, and the session's wand-region invalidation.
+// the tolerance's range and drag, the outline trace, and the session's
+// floating-selection invalidation. The composition across tools (SPM-23) is
+// covered in tests/editor-compose.test.ts.
 import { expect, test } from "bun:test";
 import type { RgbaImage } from "../src/editor/model/image";
 import { startCanvas, STICKER } from "../src/editor/model/constraints";
@@ -16,10 +17,8 @@ import {
   type TextStyle,
 } from "../src/editor/model/document";
 import { EditorSession } from "../src/editor/model/session";
-import { rectRegion, regionBounds, type WandRegion } from "../src/editor/model/region";
+import { contributionsOf, rectRegion, regionBounds, type ComposedRegion } from "../src/editor/model/region";
 import {
-  anyCovered,
-  combineMasks,
   moveWandGesture,
   refillStepOf,
   startWandGesture,
@@ -44,9 +43,13 @@ function mask(x: number, y: number, width: number, height: number, coverage: num
   return { x, y, width, height, coverage: new Uint8Array(coverage) };
 }
 
-/** A wand region on the base layer of `doc`, drawn on an identity transform. */
-function wandRegion(doc: Doc, m: WandMask): WandRegion {
-  return { kind: "wand", targetId: doc.layers[0].id, mask: m, outlines: traceOutlines(m, IDENTITY) };
+/** A one-fill floating selection on the base layer of `doc`, placed where that layer is drawn. */
+function wandRegion(doc: Doc, m: WandMask): ComposedRegion {
+  return {
+    kind: "compose",
+    contributions: [{ kind: "wand", op: "add", transform: doc.layers[0].transform, mask: m }],
+    outlines: traceOutlines(m, doc.layers[0].transform),
+  };
 }
 
 test("tolerances are whole percents within the range", () => {
@@ -64,27 +67,6 @@ test("a plain click replaces, Shift adds, Alt subtracts, and Shift wins over Alt
   expect(wandModeFor(true, false)).toBe("add");
   expect(wandModeFor(false, true)).toBe("subtract");
   expect(wandModeFor(true, true)).toBe("add");
-});
-
-test("combining masks takes the stronger coverage and unions the bounds", () => {
-  const base = mask(0, 0, 2, 1, [255, 0]);
-  const fill = mask(1, 0, 2, 1, [128, 255]);
-  // Adding: the overlap keeps the stronger coverage.
-  expect(combineMasks(base, fill, "add")).toEqual(mask(0, 0, 3, 1, [255, 128, 255]));
-  // Subtracting: the fill's coverage is removed outright, floored at nothing.
-  expect(combineMasks(base, fill, "subtract")).toEqual(mask(0, 0, 3, 1, [255, 0, 0]));
-  // Subtracting removes the fill's coverage outright: a region subtracted
-  // from itself empties completely, feather ring included.
-  expect(combineMasks(mask(0, 0, 1, 1, [128]), mask(0, 0, 1, 1, [128]), "subtract").coverage[0]).toBe(0);
-  expect(combineMasks(mask(0, 0, 1, 1, [255]), mask(0, 0, 1, 1, [128]), "subtract").coverage[0]).toBe(127);
-  // Replacing, or combining with nothing, is the fill alone.
-  expect(combineMasks(base, fill, "replace")).toBe(fill);
-  expect(combineMasks(null, fill, "subtract")).toBe(fill);
-});
-
-test("a mask that covers nothing is not a selection", () => {
-  expect(anyCovered(mask(0, 0, 1, 1, [255]))).toBe(true);
-  expect(anyCovered(mask(0, 0, 1, 1, [0]))).toBe(false);
 });
 
 test("a drag sets the tolerance vertically and clamps it to the range", () => {
@@ -155,18 +137,21 @@ test("the wand mask frame decodes its place, size and coverage", () => {
   expect(() => decodeWandFrame(frame.slice(0, 17))).toThrow("coverage bytes");
 });
 
-test("Cut lifts a wand selection from its own target, whoever is selected", () => {
+test("a plain wand click now needs the one selected image layer it touches, like every selection", () => {
+  // Corner change (b), owner decision 2026-11-24: no layer selected refuses.
   const doc = newDocument(image(10, 10), "base", STICKER_CANVAS);
   const base = doc.layers[0].id;
-  // The base layer sits centred on the canvas; its rectangles start there.
   const at = doc.layers[0].transform;
   const region = wandRegion(doc, mask(0, 0, 4, 4, new Array(16).fill(255)));
-  // The click selected the target, so Cut runs.
-  expect(cutBlocker(doc, [base], region)).toBeNull();
-  // Another layer selected: the wand selection does not belong to it.
-  const withOther = addRasterLayer(doc, image(10, 10), "pasted", { ...IDENTITY, x: 0, y: 0 });
-  expect(cutBlocker(withOther, [withOther.layers[1].id], region)).toBe("The selection does not touch the selected layer.");
   expect(cutBlocker(doc, [], region)).toBe("Select the one image layer to cut from.");
+  expect(eraseBlocker(doc, [], region)).toBe("Select the one image layer to erase from.");
+  // Its own layer selected: both run.
+  expect(cutBlocker(doc, [base], region)).toBeNull();
+  expect(eraseBlocker(doc, [base], region)).toBeNull();
+  // Corner change (a): another selected layer the selection does not touch is refused.
+  const withOther = addRasterLayer(doc, image(10, 10), "pasted", { ...IDENTITY, x: 200, y: 200 });
+  expect(cutBlocker(withOther, [withOther.layers[1].id], region)).toBe("The selection does not touch the selected layer.");
+  expect(eraseBlocker(withOther, [withOther.layers[1].id], region)).toBe("The selection does not touch the selected layer.");
   // Rect/Lasso selections keep their own rules (SPM-9).
   const rect = rectRegion({ x: at.x, y: at.y }, { x: at.x + 4, y: at.y + 4 })!;
   expect(cutBlocker(doc, [base], rect)).toBeNull();
@@ -175,33 +160,24 @@ test("Cut lifts a wand selection from its own target, whoever is selected", () =
   );
 });
 
-test("Delete erases a drawn selection from the layer it belongs to", () => {
+test("a text layer has no pixels to erase, as it has none to cut", () => {
   const doc = newDocument(image(10, 10), "base", STICKER_CANVAS);
-  const base = doc.layers[0].id;
   const at = doc.layers[0].transform;
-  // A wand selection needs no layer selected: its target is its own.
-  expect(eraseBlocker(doc, [], wandRegion(doc, mask(0, 0, 4, 4, new Array(16).fill(255))))).toBeNull();
-  // A Rectangle/Lasso erases from the one selected image layer it touches.
-  expect(eraseBlocker(doc, [base], rectRegion({ x: at.x, y: at.y }, { x: at.x + 4, y: at.y + 4 }))).toBeNull();
-  expect(eraseBlocker(doc, [], rectRegion({ x: at.x, y: at.y }, { x: at.x + 4, y: at.y + 4 }))).toBe(
-    "Select the one image layer to erase from.",
-  );
-  expect(eraseBlocker(doc, [base], rectRegion({ x: 2000, y: 2000 }, { x: 2004, y: 2004 }))).toBe(
-    "The selection does not touch the selected layer.",
-  );
-  // A text layer has no pixels to erase, as it has none to cut.
   const hi: TextStyle = { text: "hi", fontFamily: "Arial", fontSize: 50, color: "#ff0000", outline: null };
   const rendered: TextRender = {
     image: image(60, 50),
     metrics: { originX: 2, originY: 0, ascent: 40, descent: 10, lineHeight: 60 },
   };
   const withText = addTextLayer(doc, hi, rendered, { ...IDENTITY, x: at.x, y: at.y });
-  expect(eraseBlocker(withText, [withText.layers[1].id], rectRegion({ x: at.x, y: at.y }, { x: at.x + 4, y: at.y + 4 }))).toBe(
+  const textId = withText.layers[1].id;
+  const region = wandRegion(doc, mask(0, 0, 4, 4, new Array(16).fill(255)));
+  expect(cutBlocker(withText, [textId], region)).toContain("Text layers can't be cut");
+  expect(eraseBlocker(withText, [textId], region)).toBe(
     "Text layers have no pixels to erase: merge the text into an image layer first.",
   );
 });
 
-test("a wand region dies with any document change; a rectangle's survives", () => {
+test("a floating selection dies with any document change; a rectangle's survives", () => {
   const session = new EditorSession(newDocument(image(4, 4), "base", STICKER_CANVAS));
   const base = session.doc.layers[0].id;
   const region = wandRegion(session.doc, mask(0, 0, 2, 2, [255, 255, 255, 255]));
@@ -217,8 +193,17 @@ test("a wand region dies with any document change; a rectangle's survives", () =
   session.setRegion(rect);
   session.apply((doc) => setLayerImage(doc, base, image(4, 4)));
   expect(session.region).toBe(rect);
-  // Undo reaches back past both edits: a wand region would not survive it.
+  // Undo reaches back past both edits: a floating selection would not survive it.
   session.setRegion(region);
   session.undo();
+  expect(session.region).toBeNull();
+  // The stack a plain rectangle contributes to is floating too (SPM-23).
+  const composed = {
+    kind: "compose" as const,
+    contributions: contributionsOf(rect, true),
+    outlines: [rect.points],
+  };
+  session.setRegion(composed);
+  session.redo();
   expect(session.region).toBeNull();
 });

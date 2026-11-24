@@ -6,13 +6,15 @@
 // effect tools (outline, fuzzy glow, warp/bulge); SPM-7 the background
 // removal and its Erase/Restore refine brushes; SPM-10 the save pipeline
 // (Save…, Ctrl+S); SPM-12 the Thumbnail mode sessions the Pack Manager's
-// thumbnail slot opens; SPM-22 the magic-wand selection.
+// thumbnail slot opens; SPM-22 the magic-wand selection; SPM-23 the selection
+// composing across the three selection tools.
 import "../editor/editor.css";
 import { baseName } from "../api";
 import {
   applyEffect,
   backgroundModelStatus,
   cancelBackgroundDownload,
+  composeSelection,
   cropImages,
   cutImage,
   downloadBackgroundModel,
@@ -36,8 +38,6 @@ import {
 } from "../editor/api";
 import { backgroundTarget, refineLayerPixels } from "../editor/model/background";
 import {
-  anyCovered,
-  combineMasks,
   moveWandGesture,
   NOTHING_TO_SELECT_OUTSIDE,
   NOTHING_TO_SELECT_TRANSPARENT,
@@ -46,10 +46,8 @@ import {
   TOLERANCE,
   toleranceProblem,
   traceOutlines,
-  wandModeFor,
   wandReadout,
   type WandGesture,
-  type WandMask,
   type WandMode,
 } from "../editor/model/wand";
 import { downloadProgressText, megabytes } from "../editor/view/download-text";
@@ -113,9 +111,11 @@ import {
   setTextStyles,
   textStyleOf,
   type CropAction,
+  type CutResult,
   type Doc,
   type OutlineStyle,
   type Point,
+  type RasterLayer,
   type Rect,
   type ResizeSide,
   type TextLayer,
@@ -124,7 +124,17 @@ import {
   type Transform,
 } from "../editor/model/document";
 import type { RgbaImage } from "../editor/model/image";
-import type { Region } from "../editor/model/region";
+import {
+  contributionsOf,
+  NOTHING_TO_CUT,
+  NOTHING_TO_ERASE,
+  wandCommitMode,
+  type Contribution,
+  type ContributionOp,
+  type PolyContribution,
+  type Region,
+  type WandContribution,
+} from "../editor/model/region";
 import { readoutStatus, startCanvas, STICKER, THUMBNAIL, TEXT_FONT_SIZE, TEXT_OUTLINE_WIDTH, type ConstraintSet } from "../editor/model/constraints";
 import {
   DEFAULT_FONT_SIZE,
@@ -498,12 +508,14 @@ function buildEditor(): HTMLElement {
     tolerance = value;
     toleranceInput.blur();
   });
-  // The wand's 1-px feather, on by default (owner decision 2026-11-24): a
-  // checkbox beside the tolerance; it applies from the next fill on.
+  // The selection's 1-px feather, on by default (owner decision 2026-11-24):
+  // a checkbox beside the tolerance. It governs every contribution a
+  // selection is built from — a wand fill, and since SPM-23 a Rectangle or
+  // Lasso polygon composed onto one — from the next one on.
   let feathered = true;
-  const featherInput = el("input", { type: "checkbox", "aria-label": "Wand feathering" }) as HTMLInputElement;
+  const featherInput = el("input", { type: "checkbox", "aria-label": "Selection feathering" }) as HTMLInputElement;
   featherInput.checked = true;
-  featherInput.title = "Soften the wand selection's edge by half a pixel; uncheck it for hard edges";
+  featherInput.title = "Soften the selection's edge by half a pixel; uncheck it for hard edges";
   featherInput.addEventListener("change", () => {
     feathered = featherInput.checked;
     featherInput.blur();
@@ -788,6 +800,7 @@ function buildEditor(): HTMLElement {
     stage.onEditText((id) => editText(id));
     stage.onBrush({ press: beginWarp, move: continueWarp, release: endWarp });
     stage.onWand({ press: beginWand, move: continueWand, release: endWand });
+    stage.onCompose({ compose: composeShape });
     stage.setBrushSize(brushSize);
     stage.onBrushBlocked((reason) => say(reason));
     stage.onPickBlocked((reason) => say(reason));
@@ -1091,17 +1104,27 @@ function buildEditor(): HTMLElement {
     refresh();
   }
 
-  /** The layer a drawn selection acts on: the wand's own target, else the one selected layer. */
-  function regionTargetId(region: Region, selection: readonly string[]): string {
-    return region.kind === "wand" ? region.targetId : selection[0];
+  /**
+   * The cut a selection takes from one raster layer (SPM-9; the wand since
+   * SPM-22; composed since SPM-23): a plain Rectangle/Lasso moves its whole
+   * pixels, while a floating selection merges into the layer's own grid
+   * first — the apply is authoritative there, the document-grid preview was
+   * display only — so a wand fill is used where it was drawn and a polygon
+   * rasterises like a plain one's.
+   */
+  async function cutFor(source: RasterLayer, region: Region): Promise<CutResult> {
+    if (region.kind !== "compose") return cutImage(source.image, source.transform, region.points);
+    const mask = await composeSelection(source.image.width, source.image.height, source.transform, region.contributions);
+    if (mask.width === 0 || mask.height === 0) throw new Error(NOTHING_TO_CUT);
+    return liftMask(source.image, source.transform, mask);
   }
 
   /**
-   * Cut (SPM-9, the wand since SPM-22): the selected pixels of the cut
-   * selection's layer move into a new floating layer at the same spot, as
-   * ONE undo step; the pixel work is Rust's. The selection is used up, and
-   * the Move tool comes back so the cutout can be dragged and resized at
-   * once.
+   * Cut (SPM-9, the wand since SPM-22, composed since SPM-23): the selected
+   * pixels of the cut selection's layer move into a new floating layer at
+   * the same spot, as ONE undo step; the pixel work is Rust's. The selection
+   * is used up, and the Move tool comes back so the cutout can be dragged
+   * and resized at once.
    */
   async function cutSelection(): Promise<void> {
     const current = session;
@@ -1111,16 +1134,10 @@ function buildEditor(): HTMLElement {
       current,
       { doing: "cutting", done: "cut" },
       async (doc) => {
-        // A wand selection lifts from the layer it was clicked on; a
-        // Rectangle/Lasso from the one selected image layer.
-        const id = regionTargetId(region, current.selection);
-        const source = doc.layers[layerIndex(doc, id)];
+        // The blockers gated exactly one selected image layer: Cut lifts from it.
+        const source = doc.layers[layerIndex(doc, current.selection[0])];
         if (source.kind !== "raster") return null;
-        const cut =
-          region.kind === "wand"
-            ? await liftMask(source.image, source.transform, region.mask)
-            : await cutImage(source.image, source.transform, region.points);
-        return { source, cut };
+        return { source, cut: await cutFor(source, region) };
       },
       ({ source, cut }, doc) => {
         const id = nextLayerId(doc);
@@ -1308,12 +1325,42 @@ function buildEditor(): HTMLElement {
   let wand: WandPress | null = null;
 
   /**
-   * A wand press begins (owner decisions 2026-11-24): the target follows
-   * the effects tools (the selected image layer, else the base image) and
-   * becomes the layer selection, so Cut and Delete act on what the click
-   * selected. A plain click replaces the selection; on the same layer
-   * Shift adds the clicked region and Alt subtracts it. A click on another
-   * layer starts fresh, whatever the modifiers.
+   * Merge a floating selection's contributions over the document and draw
+   * its merged outline (SPM-23): the commit every composition shares — a
+   * wand click's add/subtract and a Rectangle/Lasso draw's. A merge that
+   * covers nothing clears the selection (a subtract that emptied it).
+   */
+  async function composeDoc(current: EditorSession, contributions: readonly Contribution[]): Promise<void> {
+    const merged = await composeSelection(current.doc.width, current.doc.height, IDENTITY, contributions);
+    if (merged.width === 0 || merged.height === 0) {
+      current.setRegion(null);
+      return;
+    }
+    current.setRegion({ kind: "compose", contributions, outlines: traceOutlines(merged, IDENTITY) });
+  }
+
+  /**
+   * A Rectangle/Lasso draw released with Shift or Alt over an existing
+   * selection (SPM-23): the polygon joins the selection's stack, which is
+   * merged again over the document for its dashed outline.
+   */
+  function composeShape(op: ContributionOp, points: readonly Point[]): void {
+    const current = session;
+    if (!current || busy) return;
+    const region = current.region;
+    if (!region) return; // the stage only composes onto a selection already drawn
+    const contribution: PolyContribution = { kind: "poly", op, feather: feathered, points };
+    void run(() => composeDoc(current, [...contributionsOf(region, feathered), contribution]));
+  }
+
+  /**
+   * A wand press begins (owner decisions 2026-11-24; composed across tools
+   * since SPM-23): the target follows the effects tools (the selected image
+   * layer, else the base image) and becomes the layer selection, so Cut and
+   * Delete act on what the click selected. A plain click replaces the
+   * selection; with a selection drawn, Shift adds the clicked region to it
+   * and Alt subtracts it — whatever tool or layer built it. With no
+   * selection on the canvas every modifier acts as a plain click.
    */
   function beginWand(at: Point, mods: { shift: boolean; alt: boolean }): void {
     const current = session;
@@ -1334,8 +1381,8 @@ function buildEditor(): HTMLElement {
       say(NOTHING_TO_SELECT_TRANSPARENT);
       return;
     }
-    const region = current.region?.kind === "wand" && current.region.targetId === layer.id ? current.region : null;
-    const mode: WandMode = region ? wandModeFor(mods.shift, mods.alt) : "replace";
+    const region = current.region;
+    const mode = wandCommitMode(region, mods);
     if (current.selection.length !== 1 || current.selection[0] !== layer.id) current.select(layer.id);
     say("");
     wand = {
@@ -1343,7 +1390,7 @@ function buildEditor(): HTMLElement {
       image: layer.image,
       transform: layer.transform,
       mode,
-      base: region?.mask ?? null,
+      base: region ? contributionsOf(region, feathered) : [],
       gesture: startWandGesture(at, tolerance),
       filled: tolerance,
       fills: 0,
@@ -1382,8 +1429,12 @@ function buildEditor(): HTMLElement {
 
   /**
    * Fill from the press's clicked spot at `tolerance` and commit what its
-   * mode leaves. The last fill wins (a drag may request several), and a
-   * fill whose target's pixels changed underneath is dropped.
+   * mode leaves (SPM-23): a replacing click stores its fill as a
+   * one-contribution floating selection (today's own mask, no merge round
+   * trip); an adding or subtracting click appends the live fill to the
+   * press's snapshot and merges the stack over the document. The last fill
+   * wins (a drag may request several), and a fill whose target's pixels
+   * changed underneath is dropped.
    */
   async function fillWand(press: WandPress, atTolerance: number): Promise<void> {
     const id = ++press.fills;
@@ -1397,17 +1448,13 @@ function buildEditor(): HTMLElement {
         say("The layers changed while selecting; nothing was selected. Try again.");
         return;
       }
-      const combined = press.mode === "replace" ? mask : combineMasks(press.base, mask, press.mode);
-      if (!anyCovered(combined)) {
-        current.setRegion(null); // a subtract that emptied the selection
+      const fill: WandContribution = { kind: "wand", op: "add", transform: press.transform, mask };
+      if (press.mode === "replace") {
+        current.setRegion({ kind: "compose", contributions: [fill], outlines: traceOutlines(mask, press.transform) });
         return;
       }
-      current.setRegion({
-        kind: "wand",
-        targetId: press.layerId,
-        mask: combined,
-        outlines: traceOutlines(combined, press.transform),
-      });
+      const contributions: Contribution[] = [...press.base, { ...fill, op: press.mode }];
+      await composeDoc(current, contributions);
     } catch (error) {
       say(errorMessage(error));
     }
@@ -1669,10 +1716,12 @@ function buildEditor(): HTMLElement {
   }
 
   /**
-   * Erase the drawn selection's pixels in Rust (SPM-22): the wand's
-   * feathered mask from its own target, a Rectangle/Lasso's whole pixels
-   * from the one selected image layer. One undo step; the layer's restore
-   * source is kept, so Restore brings the pixels back.
+   * Erase the drawn selection's pixels in Rust (SPM-22, composed since
+   * SPM-23): a floating selection merges into the one selected image layer's
+   * own grid first (a wand fill used where it was drawn, a polygon
+   * rasterised like a plain one's) and erases from its coverage, while a
+   * plain Rectangle/Lasso erases its whole pixels. One undo step; the
+   * layer's restore source is kept, so Restore brings the pixels back.
    */
   async function eraseSelection(): Promise<void> {
     const current = session;
@@ -1683,18 +1732,28 @@ function buildEditor(): HTMLElement {
       current,
       { doing: "erasing", done: "erased" },
       async (doc) => {
-        const source = doc.layers[layerIndex(doc, regionTargetId(region, current.selection))];
+        const source = doc.layers[layerIndex(doc, current.selection[0])];
         if (source.kind !== "raster") return null;
-        return region.kind === "wand"
-          ? eraseMask(source.image, source.transform, region.mask)
-          : eraseRegion(source.image, source.transform, region.points);
+        return { id: source.id, hole: await eraseFor(source, region) };
       },
-      (hole) => {
-        const id = regionTargetId(region, current.selection);
+      ({ id, hole }) => {
         current.apply((d) => refineLayerPixels(d, id, hole));
         current.setRegion(null);
       },
     );
+  }
+
+  /**
+   * The hole a selection leaves in one raster layer (SPM-22, composed since
+   * SPM-23): a floating selection merges into the layer's own grid first and
+   * each covered pixel keeps the uncovered share of its alpha; a plain
+   * Rectangle/Lasso erases its whole pixels, exactly what Cut's hole leaves.
+   */
+  async function eraseFor(source: RasterLayer, region: Region): Promise<RgbaImage> {
+    if (region.kind !== "compose") return eraseRegion(source.image, source.transform, region.points);
+    const mask = await composeSelection(source.image.width, source.image.height, source.transform, region.contributions);
+    if (mask.width === 0 || mask.height === 0) throw new Error(NOTHING_TO_ERASE);
+    return eraseMask(source.image, source.transform, mask);
   }
 
   function moveSelected(step: number): void {
@@ -1940,7 +1999,7 @@ function buildEditor(): HTMLElement {
     // A colour pick in progress takes Esc first (SPM-8, CMT-296), then a
     // lasso in progress takes Enter, Esc and Backspace (SPM-9) - the most
     // recent mode cancels first - and only then the Editor's own Esc runs.
-    if (stage?.handlePickKey(e.key) || stage?.handleLassoKey(e.key)) {
+    if (stage?.handlePickKey(e.key) || stage?.handleLassoKey(e.key, { shift: e.shiftKey, alt: e.altKey })) {
       e.preventDefault();
       return;
     }
@@ -2033,7 +2092,7 @@ interface WarpInProgress {
   gesture: WarpGesture;
 }
 
-/** A wand press being filled (SPM-22): what it selects from, and its drag. */
+/** A wand press being filled (SPM-22; composed since SPM-23): what it selects from, and its drag. */
 interface WandPress {
   readonly layerId: string;
   /** The target's pixels when the press began; every fill runs on this snapshot. */
@@ -2041,8 +2100,8 @@ interface WandPress {
   readonly transform: Transform;
   /** How the click combines with the selection already on the canvas. */
   readonly mode: WandMode;
-  /** The selection's mask the press combines with (null for a replacing click). */
-  readonly base: WandMask | null;
+  /** The selection's contributions the press composes onto (empty for a replacing click). */
+  readonly base: readonly Contribution[];
   gesture: WandGesture;
   /** The tolerance of the last committed fill. */
   filled: number;
