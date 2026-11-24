@@ -143,7 +143,9 @@ stickers, Missing stickers, and the thumbnail.
   fonts Windows itself renders are rejected inside the app — not a bug drawable around) falls
   back to Android with a message in Settings.
   The choice changes every emoji in the app without a restart (one font-family stack on the
-  emoji fields' shared variable, re-measuring the Emoji String box), and persists in the app
+  emoji fields' shared variable, re-measuring the Emoji String box; since SPM-20, Editor
+  text layers' emoji follow the same choice — the Rust text renderer draws them in colour
+  from the style's chain), and persists in the app
   config next to the Library path.
 - Actions: **Edit** first asks **Edit / Replace… / Cancel** (Cancel is the safe default):
   Edit opens the flattened image in the Editor, Replace runs the Replace flow below (owner
@@ -485,9 +487,22 @@ stickers, Missing stickers, and the thumbnail.
     gives up focus so Ctrl+Z, Delete, Esc and Ctrl+V work at once (typing in the size field
     is not intercepted).
   - Text is laid out and rasterised in Rust (left-aligned lines, the font's own line
-    spacing, kerning; no ligature shaping and no fallback font: characters the font
-    lacks show as whatever the font draws for them, often a box, sometimes nothing (owner
-    decision 2026-11-21: left as is)), and the canvas
+    spacing, kerning). Since SPM-20 (owner decision 2026-11-22, superseding the
+    2026-11-21 leave-as-is call) a character the chosen font lacks is no longer lost: it
+    falls back per character — the fixed preference list first (Segoe UI, Arial, Microsoft
+    YaHei, Yu Gothic, and the usual Linux faces), then any installed font whose cmap
+    covers it — drawn at the same font size on the chosen font's line metrics; only a
+    character no installed font covers draws the chosen font's tofu. An
+    emoji-presentation character (or any character followed by VS16) draws IN COLOUR from
+    the emoji style's font chain (the §5 setting), never as a monochrome outline — a
+    chain font that only outlines it is skipped — while plain digits and other
+    text-presentation characters never leave the text font. Emoji runs (ZWJ sequences,
+    flags, keycaps) apply the emoji font's own plain GSUB ligatures; there is still no
+    general shaping (SPM-9's line, now explicit), and a joiner nothing consumes draws
+    nothing. Limits (owner decision 2026-11-24): a custom emoji font the Rust parser
+    cannot colour-paint (woff2, or CBDT/sbix/SVG-emoji bytes) still renders in the DOM
+    but the canvas falls back to the bundled Noto; woff2 decoding and bitmap blitting
+    are parked for v2. The canvas
     shows exactly that rendering, so the view, merge, Crop, the sizing tools and the save
     agree on its pixels and its box. Resizing a text layer scales it (it stays
     text, and is drawn sharp at its size when merged or saved); its font size field keeps

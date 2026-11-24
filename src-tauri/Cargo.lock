@@ -4049,6 +4049,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tempfile",
  "tiny-skia",
+ "ttf-parser",
  "unicode-segmentation",
  "ureq",
  "webp",

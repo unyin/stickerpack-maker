@@ -60,9 +60,16 @@ impl EffectMeta {
     /// The target layer from the request body. A text layer takes no bytes:
     /// it is rasterised in Rust at its transform (sharp at any scale), as an
     /// unscaled image placed on whole document pixels.
-    pub fn decode_layer(&self, body: &[u8], fonts: &fontdb::Database) -> Result<LayerInput, String> {
+    pub fn decode_layer(
+        &self,
+        body: &[u8],
+        fonts: &fontdb::Database,
+        emoji: &super::emoji::EmojiFonts,
+    ) -> Result<LayerInput, String> {
         let mut rest = body;
-        let layer = decode_layer(&self.layer, &mut rest, |spec, t| aligned_input(rasterise_placed(fonts, spec, t)?))?;
+        let layer = decode_layer(&self.layer, &mut rest, |spec, t| {
+            aligned_input(rasterise_placed(fonts, emoji, spec, t)?)
+        })?;
         finish_body(rest)?;
         Ok(layer)
     }
@@ -223,6 +230,7 @@ fn draw_behind(pixels: &mut [u8], mask: &GrayImage, color: [u8; 3], opacity: f32
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::emoji::EmojiFonts;
 
     /// A `size` x `size` transparent image with an opaque `[r, g, b]` square
     /// covering pixels `from..to` on both axes.
@@ -379,9 +387,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(meta.effect, Effect::Glow { color: "#ff0000".into(), radius: 12.0, softness: 0.5, opacity: 0.8 });
-        let layer = meta.decode_layer(&[0; 8], &fontdb::Database::new()).unwrap();
+        let layer = meta.decode_layer(&[0; 8], &fontdb::Database::new(), &EmojiFonts::empty()).unwrap();
         assert_eq!((layer.image.width, layer.image.height), (2, 1));
-        assert!(meta.decode_layer(&[0; 7], &fontdb::Database::new()).is_err());
+        assert!(meta.decode_layer(&[0; 7], &fontdb::Database::new(), &EmojiFonts::empty()).is_err());
     }
 
     #[test]
@@ -396,7 +404,7 @@ mod tests {
             super::super::test_font::FAMILY
         ))
         .unwrap();
-        let layer = meta.decode_layer(&[], &fonts).unwrap();
+        let layer = meta.decode_layer(&[], &fonts, &EmojiFonts::empty()).unwrap();
         assert_eq!((layer.transform.scale_x, layer.transform.x.fract()), (1.0, 0.0));
         let out = apply(&layer, &meta.effect).unwrap();
         assert_eq!(out.transform.scale_x, 1.0);

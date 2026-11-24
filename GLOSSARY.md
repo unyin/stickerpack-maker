@@ -32,6 +32,10 @@ _Avoid_: tile, picture (when meaning a pack member)
 The 1–20 emoji assigned to a sticker, which Telegram uses for search and suggestions.
 _Avoid_: emoji set, tags
 
+**Emoji Style**:
+The Settings choice of which emoji font the app draws with — Android (bundled Noto), Twemoji, Windows (system Segoe), or a custom font file. Governs the DOM and, since SPM-20, text layers on the canvas too.
+_Avoid_: emoji theme (the theme is a separate, frontend-only preference)
+
 **Thumbnail**:
 A pack's separate representative image, exactly 100×100 px; not a sticker, with no position in the pack and no emoji.
 _Avoid_: cover, cover image

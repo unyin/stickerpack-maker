@@ -17,7 +17,7 @@ use serde::Deserialize;
 use super::encode::{encode_within, EncodeOutcome, SaveFormat};
 use super::layers::{decode_layer, finish_body, LayerMeta};
 use super::placement::{check_window, from_pixmap, place_layers, render_window, LayerInput, LayerTransform};
-use super::text::rasterise_window;
+use super::text::{rasterise_window, TextWindow};
 use super::Rgba;
 use crate::limits::{KB, STICKER_MAX_KB, STICKER_SIDE, THUMBNAIL_MAX_KB, THUMBNAIL_SIDE};
 
@@ -68,8 +68,14 @@ pub struct SaveDoc {
 }
 
 /// Split a save request's body into placeable layers. A text layer is
-/// rasterised into the canvas window and arrives aligned at (0, 0).
-pub fn split_save_layers(doc: &SaveDoc, body: &[u8], fonts: &Database) -> Result<Vec<LayerInput>, String> {
+/// rasterised into the canvas window (with the style's emoji chain, SPM-20)
+/// and arrives aligned at (0, 0).
+pub fn split_save_layers(
+    doc: &SaveDoc,
+    body: &[u8],
+    fonts: &Database,
+    emoji: &super::emoji::EmojiFonts,
+) -> Result<Vec<LayerInput>, String> {
     check_window(doc.width, doc.height, "canvas")?;
     let mut rest = body;
     let layers = doc
@@ -77,7 +83,8 @@ pub fn split_save_layers(doc: &SaveDoc, body: &[u8], fonts: &Database) -> Result
         .iter()
         .map(|m| {
             decode_layer(m, &mut rest, |spec, t| {
-                let image = rasterise_window(fonts, spec, t, 0, 0, doc.width, doc.height)?;
+                let window = TextWindow { x: 0, y: 0, width: doc.width, height: doc.height };
+                let image = rasterise_window(fonts, emoji, spec, t, window)?;
                 Ok(LayerInput { image, transform: LayerTransform::IDENTITY })
             })
         })
@@ -106,19 +113,21 @@ pub fn render_for_save(
     doc: &SaveDoc,
     body: &[u8],
     fonts: &Database,
+    emoji: &super::emoji::EmojiFonts,
     format: SaveFormat,
     max_kilobytes: u64,
 ) -> Result<EncodeOutcome, String> {
     if let Some(problem) = set.size_problem(doc.width, doc.height) {
         return Err(format!("Not saved: {problem}."));
     }
-    let layers = split_save_layers(doc, body, fonts)?;
+    let layers = split_save_layers(doc, body, fonts, emoji)?;
     let image = flatten(&layers, doc.width, doc.height)?;
     encode_within(&image, format, (max_kilobytes * KB) as usize)
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::emoji::EmojiFonts;
     use super::super::encode::tests::noise;
     use super::super::merge::merge;
     use super::super::placement::LayerTransform;
@@ -200,7 +209,7 @@ mod tests {
         ))
         .unwrap();
         let body = [255u8; 40 * 40 * 4];
-        let layers = split_save_layers(&doc, &body, &fonts).unwrap();
+        let layers = split_save_layers(&doc, &body, &fonts, &EmojiFonts::empty()).unwrap();
         assert_eq!((layers[1].image.width, layers[1].image.height), (40, 40));
         let out = flatten(&layers, 40, 40).unwrap();
         assert_eq!(px(&out, 20, 10), [255, 0, 0, 255]);
@@ -212,11 +221,11 @@ mod tests {
     fn the_body_must_match_the_layers() {
         let fonts = Database::new();
         let doc = SaveDoc { width: 2, height: 2, layers: vec![raster_meta(1, 1, 0.0, 0.0)] };
-        assert!(split_save_layers(&doc, &[0; 4], &fonts).is_ok());
-        assert!(split_save_layers(&doc, &[0; 3], &fonts).is_err());
-        assert!(split_save_layers(&doc, &[0; 5], &fonts).is_err());
+        assert!(split_save_layers(&doc, &[0; 4], &fonts, &EmojiFonts::empty()).is_ok());
+        assert!(split_save_layers(&doc, &[0; 3], &fonts, &EmojiFonts::empty()).is_err());
+        assert!(split_save_layers(&doc, &[0; 5], &fonts, &EmojiFonts::empty()).is_err());
         let empty = SaveDoc { width: 0, height: 2, layers: vec![] };
-        assert!(split_save_layers(&empty, &[], &fonts).is_err());
+        assert!(split_save_layers(&empty, &[], &fonts, &EmojiFonts::empty()).is_err());
         assert!(flatten(&[], 2, 2).unwrap_err().contains("nothing"));
     }
 
@@ -249,10 +258,10 @@ mod tests {
     fn a_wrong_size_is_refused_before_anything_is_encoded() {
         let fonts = Database::new();
         let (doc, body) = raster_doc(STICKER_SIDE - 1, 4);
-        let err = render_for_save(ConstraintSet::Sticker, &doc, &body, &fonts, SaveFormat::Png, STICKER_MAX_KB).unwrap_err();
+        let err = render_for_save(ConstraintSet::Sticker, &doc, &body, &fonts, &EmojiFonts::empty(), SaveFormat::Png, STICKER_MAX_KB).unwrap_err();
         assert!(err.starts_with("Not saved:"), "{err}");
         let (doc, body) = raster_doc(THUMBNAIL_SIDE, THUMBNAIL_SIDE + 1);
-        assert!(render_for_save(ConstraintSet::Thumbnail, &doc, &body, &fonts, SaveFormat::Webp, THUMBNAIL_MAX_KB).is_err());
+        assert!(render_for_save(ConstraintSet::Thumbnail, &doc, &body, &fonts, &EmojiFonts::empty(), SaveFormat::Webp, THUMBNAIL_MAX_KB).is_err());
     }
 
     #[test]
@@ -264,7 +273,7 @@ mod tests {
         ] {
             let (doc, body) = raster_doc(w, h);
             for format in [SaveFormat::Png, SaveFormat::Webp] {
-                match render_for_save(set, &doc, &body, &fonts, format, set.max_kilobytes()).unwrap() {
+                match render_for_save(set, &doc, &body, &fonts, &EmojiFonts::empty(), format, set.max_kilobytes()).unwrap() {
                     EncodeOutcome::Fits(out) => {
                         assert!(out.bytes.len() <= set.max_bytes());
                         let back = image::load_from_memory(&out.bytes).unwrap();

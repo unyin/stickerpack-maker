@@ -56,14 +56,24 @@ pub fn finish_body(rest: &[u8]) -> Result<(), String> {
 
 /// Split the concatenated RGBA body of a merge request into layers, using
 /// each raster layer's declared size. The body must be exactly the sum of
-/// sizes. Text layers take no bytes: each is rasterised with `fonts` at its
-/// transform into the whole pixels it covers, and becomes an aligned
-/// (integer-translated) raster input, so compositing copies it exactly.
-pub fn split_layers(meta: &[LayerMeta], body: &[u8], fonts: &Database) -> Result<Vec<LayerInput>, String> {
+/// sizes. Text layers take no bytes: each is rasterised with `fonts` (and
+/// the style's emoji chain, SPM-20) at its transform into the whole pixels
+/// it covers, and becomes an aligned (integer-translated) raster input, so
+/// compositing copies it exactly.
+pub fn split_layers(
+    meta: &[LayerMeta],
+    body: &[u8],
+    fonts: &Database,
+    emoji: &super::emoji::EmojiFonts,
+) -> Result<Vec<LayerInput>, String> {
     let mut rest = body;
     let layers = meta
         .iter()
-        .map(|m| decode_layer(m, &mut rest, |spec, t| aligned_input(rasterise_placed(fonts, spec, t)?)))
+        .map(|m| {
+            decode_layer(m, &mut rest, |spec, t| {
+                aligned_input(rasterise_placed(fonts, emoji, spec, t)?)
+            })
+        })
         .collect::<Result<Vec<_>, _>>()?;
     finish_body(rest)?;
     Ok(layers)
@@ -77,6 +87,7 @@ pub(super) fn aligned_input(placed: PlacedImage) -> Result<LayerInput, String> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::emoji::EmojiFonts;
     use super::super::merge::merge;
     use super::*;
 
@@ -94,12 +105,12 @@ mod tests {
             LayerMeta { width: 2, height: 1, transform: LayerTransform { x: 5.0, ..LayerTransform::IDENTITY }, text: None },
         ];
         let body: Vec<u8> = (0..12).collect();
-        let layers = split_layers(&meta, &body, &fonts).unwrap();
+        let layers = split_layers(&meta, &body, &fonts, &EmojiFonts::empty()).unwrap();
         assert_eq!(layers[0].image.pixels, vec![0, 1, 2, 3]);
         assert_eq!(layers[1].image.pixels, (4..12).collect::<Vec<u8>>());
         assert_eq!(layers[1].transform.x, 5.0);
-        assert!(split_layers(&meta, &body[..11], &fonts).is_err());
-        assert!(split_layers(&meta, &[body.clone(), vec![0]].concat(), &fonts).is_err());
+        assert!(split_layers(&meta, &body[..11], &fonts, &EmojiFonts::empty()).is_err());
+        assert!(split_layers(&meta, &[body.clone(), vec![0]].concat(), &fonts, &EmojiFonts::empty()).is_err());
     }
 
     #[test]
@@ -115,7 +126,7 @@ mod tests {
         ))
         .unwrap();
         let body = [255u8; 100 * 100 * 4];
-        let layers = split_layers(&meta, &body, &fonts).unwrap();
+        let layers = split_layers(&meta, &body, &fonts, &EmojiFonts::empty()).unwrap();
         assert_eq!((layers[1].image.width, layers[1].image.height), (60, 100));
         let merged = merge(&layers).unwrap();
         assert_eq!((merged.x, merged.y, merged.image.width, merged.image.height), (0, 0, 100, 100));
@@ -124,6 +135,6 @@ mod tests {
         assert_eq!(pixel(&merged, 19, 10), [255, 255, 255, 255]);
         assert_eq!(pixel(&merged, 60, 50), [255, 255, 255, 255]);
         // A text layer whose font is missing is refused, not skipped.
-        assert!(split_layers(&meta, &body, &Database::new()).unwrap_err().contains("not installed"));
+        assert!(split_layers(&meta, &body, &Database::new(), &EmojiFonts::empty()).unwrap_err().contains("not installed"));
     }
 }
