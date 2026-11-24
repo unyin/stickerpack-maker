@@ -636,6 +636,19 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
   (owner, 2026-11-22: rare combination, not worth fixing now).
 
 ### v2 parking lot (UX)
+- Emoji font library: the app keeps its own `fonts/` folder (inside the app-config
+  directory), copies a picked custom emoji font into it, and lists the copies as regular
+  entries in the Settings Emoji font dropdown (add/remove, pick-once-reuse-forever) — the
+  app's copy survives whatever happens to the original file, and the broken-font-at-boot
+  fallback becomes near-impossible to hit. Parked to keep v1's scope (owner, 2026-11-24:
+  raised during the SPM-17 Windows test; inverting SPM-17's store-the-path-not-a-copy
+  decision is the point). The owner expects much of the v2 list to slip to v3.
+- Emoji `.ttc` font files: Chromium's FontFace refuses whole TTC collections, but the
+  app's Rust read could unwrap the container (tiny `ttcf` header parse) and hand the
+  webview the emoji member (match "Emoji" in the name table, else the first) before the
+  engine sees the bytes — small, pure, testable; the inner font still must pass the engine
+  (parked next to the library idea, owner, 2026-11-24; the picker filter and the read
+  guard would gain `.ttc`).
 - Double-click shortcuts (e.g. double-click a sticker to open the Editor).
 - Right-click context menu mirroring the detail panel's commands.
 - Click-and-hold a sticker to activate Reorder mode.
