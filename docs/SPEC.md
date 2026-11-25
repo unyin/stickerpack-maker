@@ -231,9 +231,9 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   last. The Open in explorer button shows only the "opens in another program" icon, named for
   assistive technology "Open #N in explorer", with the tooltip "Open in explorer — Show this
   file in File Explorer, selected" (§2, §4). The copy button and its feedback are the detail
-  panel's (✓ and a green tint on success, red on failure; see below).
-- **Ready to go live.** While the pack is ready, the header **Upload…** button turns green (a
-  `--success-*` border and text tint, no fill, no change of size) and its tooltip's description
+  panel's (✓ and a green tone on success, a red tone on failure; see Pack-level, Tones).
+- **Ready to go live.** While the pack is ready, the header **Upload…** button takes the
+  success tone (a soft green fill with its border and text; Pack-level, Tones; no change of size) and its tooltip's description
   becomes "Upload… — Ready to go live: every sticker has its file and 1–20 emoji", so colour is
   never the only signal (owner decisions 2026-11-25). Ready means all of: at least 1 sticker; at
   most 120; no sticker Missing; every Emoji String counted as the app counts (spaces ignored)
@@ -287,6 +287,31 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   whatever font Windows draws. The header stays on one line at the 1100px window minimum
   (owner decisions 2026-11-25). Those two buttons, and no other, take 12px of side padding
   instead of the app-wide 18px, to make that fit.
+- **The Live badge** is a solid green fill (`--live-bg`, one value in both themes, so nothing
+  changes between themes) with the same dark text (`--accent-text`) as before, loud on purpose;
+  Draft stays the quiet grey badge. It applies in the pack header and the Pack list alike (one
+  shared badge), and the reserved width above is unchanged. The text is 6.1:1 on the fill; the
+  fill against the page is 2.5:1 on `--bg` and 2.7:1 on `--panel` in light (dark 6.8:1, 6.1:1), the
+  same as the old blue badge (~2.6:1), not pushed higher so it does not turn heavy (owner
+  decisions 2026-11-25).
+- **The reserved notification area.** The pack view's red message line and its banners (the
+  over-120 warning, the Missing summary, the dismissible info notice, the "Not added:" list) share
+  ONE area above the sticker grid. It is a fixed height that always fits two single-line notices
+  (2 x (line + padding + border) + the gap + the scroller padding, written as a calc in
+  `.pm-notices`), never grows and never collapses when empty, so the grid's top edge never moves
+  when a notice appears or is dismissed (the Editor's reserved message row, §6, is the
+  precedent). Past two notices, or with a long "Not added:" list, it scrolls inside itself; Tab
+  to a Dismiss scrolls it into view, and a few pixels of padding keep focus rings unclipped. The
+  message line still has no close and stays until replaced; the dismissible banners keep the X
+  and Dismiss (owner decisions 2026-11-25). The Pack list is not part of this.
+- **Tones.** One shared style per tint, so a colour edit propagates: `.tone-success` (a soft
+  `--success-bg` fill, `--success-border`, `--success-text`) and `.tone-danger` (the `--danger-*`
+  trio). In this change they style the copy button's success flash (green) and failure flash
+  (soft red, with a fill now), toggled for the flash as before, and the ready **Upload…**. Text
+  on the fills is at least 4.5:1 and the borders at least 3:1 on the page and panel, in both
+  themes. On hover a toned button keeps its fill (`button.secondary:hover` would wipe the tint)
+  and darkens its border to the text colour. The other tinted controls move onto these later (§9,
+  Unified tone styles) (owner decisions 2026-11-25).
 - **Bulk import**: drag-drop multiple images onto a pack, or pick them with Add images. Same
   validity rule as drop-in — valid files added as-is in natural filename order ("sticker2"
   before "sticker10"), because Windows hands dropped files over in its own drag order, not
@@ -966,6 +991,11 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
   engine sees the bytes — small, pure, testable; the inner font still must pass the engine
   (parked next to the library idea, owner, 2026-11-24; the picker filter and the read
   guard would gain `.ttc`).
+- Unified tone styles: tokens are central today, but each consumer re-composes them in its own
+  selector (`button.danger`, the `.banner` rule, the warn banners and flags, the reorder tiles,
+  the input `.warn` state, the message line). v2 moves every tinted control onto shared tone
+  classes (the `.tone-success` and `.tone-danger` of §5 are the start), so one edit propagates
+  app-wide (owner decision 2026-11-25).
 - Double-click shortcuts (e.g. double-click a sticker to open the Editor).
 - Right-click context menu mirroring the detail panel's commands.
 - Click-and-hold a sticker to activate Reorder mode.
