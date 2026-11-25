@@ -266,22 +266,20 @@ button.danger {
 }
 
 /* Tones (owner decisions 2026-11-25): ONE style per tint, so a colour edit
-   propagates to every consumer. Add the class to a button or a box; the fill,
-   boundary and text come from the tokens. The button selector ties with
+   propagates to every consumer. Add the class to a button; the fill,
+   boundary and text come from the tokens. The selector ties with
    button.secondary and comes after it, so the tone wins. Hover keeps the fill
    (button.secondary:hover would swap in --bg and wipe the tint, and a flash or
    the ready Upload… must stay readable) and darkens the boundary to the text
    colour instead, which keeps >= 3:1. Only the copy button and Upload… use
    these so far; the other tinted controls are v2 (SPEC §9, Unified tone
    styles). */
-.tone-success,
 button.tone-success {
   background: var(--success-bg);
   border-color: var(--success-border);
   color: var(--success-text);
 }
 
-.tone-danger,
 button.tone-danger {
   background: var(--danger-bg);
   border-color: var(--danger-border);
@@ -300,7 +298,11 @@ button.tone-danger:hover {
 
 /* Disabled look for every button. It comes after the button.primary,
    button.secondary and button.danger rules on purpose: same specificity,
-   so the later rule's cursor wins. The :hover override stops a disabled button reacting. */
+   so the later rule's cursor wins. The :hover override stops a disabled button reacting.
+   Order matters: button.secondary:disabled:hover (0,3,1) would beat a tone's
+   fill, so a toned button must never be disabled while toned. The view
+   guarantees that by clearing the tone class when it disables the button
+   (pack-view.ts, the Upload… ready toggle). Keep this rule order. */
 button:disabled {
   opacity: 0.6;
   cursor: default;

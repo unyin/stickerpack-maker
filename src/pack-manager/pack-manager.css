@@ -300,12 +300,21 @@
    scroll inside it (Tab to a Dismiss scrolls it into view). The 5px padding is
    the house pattern for a scroll container: it clips at its padding edge, so
    the 4px focus ring of a child on the edge would be cut off (CMT-282, see
-   dialog.css); the equal negative margin keeps the visual spacing. */
-.pm-notices {
+   dialog.css); the equal negative margin keeps the visual spacing.
+
+   The banner metrics are defined on .pm, so every banner (here and in the
+   detail panels) and the height calc below read the same values: one edit
+   moves both. INVARIANT: every banner child (X button, Dismiss link, message
+   line) must stay no taller than --notice-line, or a single-line banner
+   outgrows the reserved height. */
+.pm {
   --notice-line: 20px;
   --notice-pad-y: 8px;
   --notice-border: 1px;
   --notice-gap: 6px;
+}
+
+.pm-notices {
   --notice-ring: 5px;
   box-sizing: border-box;
   flex: none;
@@ -332,7 +341,7 @@
 .pm-banners {
   display: flex;
   flex-direction: column;
-  gap: var(--notice-gap, 6px);
+  gap: var(--notice-gap);
   flex: none;
 }
 
@@ -342,8 +351,8 @@
   gap: 12px;
   justify-content: space-between;
   flex-wrap: wrap;
-  padding: var(--notice-pad-y, 8px) 12px;
-  line-height: var(--notice-line, 20px);
+  padding: var(--notice-pad-y) 12px;
+  line-height: var(--notice-line);
   border-radius: 8px;
   font-size: 14px;
 }
@@ -360,7 +369,7 @@
 .pm-banner-warn {
   background: var(--warn-bg);
   color: var(--warn-text);
-  border: 1px solid var(--warn-border);
+  border: var(--notice-border) solid var(--warn-border);
 }
 
 .pm-banner-warn button.pm-link {
@@ -378,12 +387,30 @@
    so it matches in the info and warning banners and in both themes. */
 .pm-banner-close {
   flex: none;
+  box-sizing: border-box;
+  width: var(--notice-line);
+  height: var(--notice-line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
-  padding: 2px;
+  padding: 0;
   color: inherit;
   cursor: pointer;
   border-radius: 4px;
+}
+
+.pm-banner-close .icon {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* The Dismiss link: a box exactly one line tall, whatever the font. */
+.pm-banner > button.pm-link {
+  box-sizing: border-box;
+  height: var(--notice-line);
+  line-height: var(--notice-line);
 }
 
 .pm-banner-close:focus-visible {
@@ -394,7 +421,7 @@
 .pm-banner-info {
   background: var(--panel);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: var(--notice-border) solid var(--border);
 }
 
 .pm-body {

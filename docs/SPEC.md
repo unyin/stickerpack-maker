@@ -137,8 +137,8 @@ stickers, Missing stickers, and the thumbnail.
 - **Emoji String**: inline editable box of four rows of five that shows all 20 emoji at once
   (type, or Win+. for the Windows emoji panel); past 20 it grows a row instead of scrolling.
   Every space is stripped when it is saved and the count ignores spaces. Beside the box: a
-  small square icon-only **copy** button (a successful copy shows ✓ with a green border and
-  icon, `--success-*`, no fill, the red failure tint's mirror, here and in the Upload list:
+  small square icon-only **copy** button (a successful copy shows ✓ with a soft green fill,
+  border and icon, `--success-*`, the red failure tint's mirror, here and in the Upload list:
   owner decision 2026-11-25) and the live 1–20 count; the count warning shows
   below (owner decisions 2026-11-21). Emoji are drawn with the colour emoji font first, never
   as monochrome text glyphs (owner decision 2026-11-22). The emoji font is a Settings choice
