@@ -292,16 +292,24 @@ pass.
     manipulates layers (**Move up**, **Move down**, **Merge selected**) (owner decision
     2026-11-25). CMT-193's move of Add image as layer into the Layers panel lands here. The
     list displays **stack-bottom-first** and is **bottom-anchored**: the base image sits at the
-    box's bottom edge nearest the action buttons, newer layers rise above it, so adding a
-    layer fills fresh space and existing rows never shift, and the box caps at **seven rows**,
-    scrolling internally beyond (owner ruling, from the Windows test, 2026-11-25 — no more
-    than 7 layers expected).
+    box's bottom edge nearest the action buttons, newer layers rise above it, so
+    rows keep their flow positions — nothing reorders — and the box caps at
+    **seven rows**, scrolling internally beyond (owner ruling, from the Windows
+    test, 2026-11-25 — no more than 7 layers expected). The selected layer's row
+    is revealed on every render: adds auto-select their new layer, so a layer
+    added past the cap always scrolls into view; an out-of-view selection
+    scrolls to it; a fully-visible selection never nudges; and revealing the
+    Layers tab lands on the focused row (owner ruling, from the Windows test,
+    2026-11-25).
   - **Actions**: a READ-ONLY list of every undoable document action, oldest first, with a
     current-position marker. It prefills with **twenty zebra-striped lines** — empty decorative
     rows filling to twenty — the history's view wanting size where the stack only needs its
     rows (owner ruling, from the Windows test, 2026-11-25). Its scroll **tracks the current
     action**: the current row is kept in view, never nudged when already visible, and a tab
-    reveal lands on the current row. The history records a human-readable label IN-BAND at
+    reveal lands on the current row. The box ends at its twenty rows' height
+    with plain panel below it — no stretching to the window bottom (owner
+    ruling, from the Windows test, 2026-11-25) — giving way at the 600px window
+    minimum like the Layers box. The history records a human-readable label IN-BAND at
     apply() time (`{state, label}` entries). The selection's own steps (SPM-23) nest under a
     Select entry and vanish with the trail's rules — the next document action clears them —
     and the memory budget can drop the oldest entries. Clickable jump-to-state is a PLANNED
