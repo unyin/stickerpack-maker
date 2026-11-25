@@ -54,6 +54,7 @@ import {
   type SelectionState,
 } from "../model/selection";
 import { emojiCountWarning, emojiWarning } from "../model/emoji";
+import { UPLOAD_LIST_TITLE, uploadListBlocker } from "../model/upload-list";
 import { importOrder } from "../model/import-order";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { dialogOpen } from "../../dialog";
@@ -65,10 +66,12 @@ import {
   editChoiceDialog,
   invalidFileDialog,
   sendDialog,
+  reservedLabel,
   statusBadge,
   stickerChoiceDialog,
   thumbnailSourceDialog,
 } from "./dialogs";
+import { openUploadList } from "./upload-list";
 import { aggregatePanel, detailPanel, emptyPanel, thumbnailPanel, type PanelActions } from "./panels";
 import { previewImage, Previews } from "./previews";
 import { cancelReorderDrag, startReorderDrag, type ReorderDragHost } from "./reorder-drag";
@@ -119,6 +122,8 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   const shortNote = el("span", { class: "muted pm-lock-note" });
   const badgeHost = el("span", {});
   const statusButton = el("button", { class: "secondary", type: "button" }) as HTMLButtonElement;
+  // Right of the status button (owner, 2026-11-25); works in Draft and Live.
+  const uploadButton = el("button", { class: "secondary", type: "button" }, "Upload list…") as HTMLButtonElement;
   const backButton = el("button", { class: "secondary", type: "button", title: "Back to the list of packs" }, "← Pack list") as HTMLButtonElement;
   const reorderButton = el("button", { class: "secondary pm-toggle", type: "button", "aria-pressed": "false" }, "Reorder") as HTMLButtonElement;
   const refreshButton = el("button", { class: "secondary", type: "button", title: "Check the pack folder for files changed outside the app" }, icon("refresh"), "Refresh") as HTMLButtonElement;
@@ -137,7 +142,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     backButton,
     el("label", { class: "pm-header-field" }, el("span", { class: "field-label" }, "Title"), titleInput),
     el("label", { class: "pm-header-field pm-short-field" }, el("span", { class: "pm-field-head" }, el("span", { class: "field-label" }, "Short Name"), shortNote), shortInput),
-    el("div", { class: "pm-header-status" }, badgeHost, statusButton),
+    el("div", { class: "pm-header-status" }, badgeHost, statusButton, uploadButton),
   );
   // Reorder last: its label changes ("Done reordering"), so nothing may come after it (owner, 2026-11-22).
   const toolbar = el("div", { class: "pm-toolbar", role: "toolbar" }, refreshButton, addButton, stickerCount, revealButton, reorderButton);
@@ -226,6 +231,11 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       view = { ...view, pack: await setPackStatus(packId, toLive ? "live" : "draft") };
     }),
   );
+  uploadButton.addEventListener("click", () => {
+    // Someone done reordering may click it at once: it ends Reorder first (owner, 2026-11-25).
+    if (mode === "reorder") setMode("normal");
+    void openUploadList(view, previews, { saveEmoji: persistEmoji });
+  });
   backButton.addEventListener("click", () => host.back());
   revealButton.addEventListener("click", () => void run(() => revealPack(packId)));
 
@@ -339,6 +349,23 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     notice = "Thumbnail deleted.";
   }
 
+  /**
+   * Save a sticker's Emoji String into the Library and the view; resolves with
+   * the stored string (the core strips every space), rejects with the reason.
+   * Shared by the detail panel and the Upload list.
+   */
+  async function persistEmoji(sticker: StickerView, emojiString: string): Promise<string> {
+    const saved = await setEmojiString(sticker.id, emojiString);
+    view = {
+      ...view,
+      stickers: view.stickers.map((x) =>
+        x.id === saved.id ? { ...x, emojiString: saved.emojiString, emojiWarning: emojiCountWarning(saved.emojiString) } : x,
+      ),
+    };
+    render(); // the tiles' flags and the detail panel follow the edit
+    return saved.emojiString;
+  }
+
   const actions: PanelActions = {
     // Edit first asks Edit / Replace / Cancel (owner decision 2026-11-21).
     edit: (s) =>
@@ -369,17 +396,11 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     // The Rust LibraryLock serializes it with that action.
     saveEmoji: async (s, emojiString) => {
       try {
-        const saved = await setEmojiString(s.id, emojiString);
-        view = {
-          ...view,
-          stickers: view.stickers.map((x) =>
-            x.id === saved.id ? { ...x, emojiString: saved.emojiString, emojiWarning: emojiCountWarning(saved.emojiString) } : x,
-          ),
-        };
+        await persistEmoji(s, emojiString);
       } catch (err) {
         message.textContent = errorMessage(err);
+        render();
       }
-      render();
     },
     revealThumbnail: () => void run(() => revealThumbnail(packId)),
     editThumbnail: () => void run(() => editThumbnail()),
@@ -580,9 +601,9 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     shortInput.title = live ? SHORT_NAME_LOCKED : "Editable while Draft; renames the pack folder";
     shortNote.textContent = live ? "🔒 Locked" : ""; // short label (owner, 2026-11-22); the tooltip has the reason
     shortNote.title = live ? SHORT_NAME_LOCKED : ""; // the full reason, even if the note is ever cut off
-    badgeHost.replaceChildren(statusBadge(pack.status));
-    // Labels match the dialogs they open ("Go Live?" / "Revert to Draft?").
-    statusButton.textContent = live ? "Revert to Draft" : "Go Live";
+    badgeHost.replaceChildren(statusBadge(pack.status, true));
+    // Labels match the dialogs they open ("Go Live?" / "Revert to Draft?"); each reserves the other's width.
+    statusButton.replaceChildren(live ? reservedLabel("Revert to Draft", "Go Live") : reservedLabel("Go Live", "Revert to Draft"));
     statusButton.title = live
       ? "The pack does not exist on Telegram (unlocks the Short Name)"
       : "The pack now exists on Telegram (locks the Short Name)";
@@ -594,6 +615,9 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     stickerCount.textContent = stickerCountText(view.stickers.length);
     root.classList.toggle("reorder", reorder);
     for (const b of [refreshButton, addButton, revealButton, statusButton, backButton]) b.disabled = busy;
+    const uploadBlocker = uploadListBlocker(view.stickers.length);
+    uploadButton.disabled = busy || uploadBlocker !== null;
+    uploadButton.title = uploadBlocker ?? UPLOAD_LIST_TITLE;
     titleInput.disabled = busy;
     if (busy) shortInput.disabled = true;
 

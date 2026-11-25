@@ -232,6 +232,25 @@
   min-height: 38px;
 }
 
+/* A label that keeps the width of the longer of two (dialogs.ts reservedLabel):
+   the other label sits in the same grid cell, invisible, so the Draft/Live badge
+   ("Draft"/"Live") and the status button ("Go Live"/"Revert to Draft") keep one
+   width and Upload list… beside them never moves when the status toggles (owner,
+   2026-11-25). Measured by the browser in the font actually drawn, so no pixel
+   width to get wrong with Windows fonts. */
+.pm-reserve {
+  display: inline-grid;
+  justify-items: center;
+}
+
+.pm-reserve > * {
+  grid-area: 1 / 1;
+}
+
+.pm-reserve-twin {
+  visibility: hidden;
+}
+
 .pm-toolbar {
   display: flex;
   align-items: center;
@@ -775,4 +794,185 @@
 
 .pm .message {
   margin: 0;
+}
+
+/* ---- Upload list dialog (SPM-21; frame: src/dialog.css) ---- */
+
+/* The frame's body scrolls as a whole; here only the list scrolls, so the
+   notes above it and Close below stay in view. Preferred width --ul-w is set
+   from the measured emoji glyph (upload-list.ts) and capped at the viewport:
+   the emoji column is the one that shrinks, so nothing overflows sideways. */
+.app-dialog.ul-dialog {
+  width: min(var(--ul-w, 720px), calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+}
+
+.app-dialog.ul-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.ul-dialog .app-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+}
+
+.ul-note {
+  font-size: 13px;
+}
+
+.ul-note.warn {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border: 1px solid var(--warn-border);
+}
+
+.ul-error:empty {
+  display: none;
+}
+
+.ul-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 6px 4px 4px; /* room for the focus rings */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  scrollbar-gutter: stable;
+}
+
+/* One fixed-height row (owner, 2026-11-25): 88px border-box = 2px border, 6px
+   padding and a 72px content box, which holds the emoji box exactly. The emoji
+   column is the only flexible one. The first column fits "#120". */
+.ul-entry {
+  flex: none;
+  height: 88px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 38px 56px 38px 38px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  min-width: 0;
+  padding: 6px 10px;
+  background: var(--panel);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+}
+
+.ul-entry > * {
+  min-width: 0;
+}
+
+.ul-entry.missing {
+  border-style: dashed;
+  border-color: var(--warn-border);
+}
+
+.ul-entry.thumb {
+  background: var(--bg);
+  border-style: dashed;
+}
+
+.ul-entry.thumb.missing {
+  border-color: var(--warn-border);
+}
+
+.ul-entry .pm-pos {
+  align-self: center;
+  white-space: nowrap;
+}
+
+.ul-entry .pm-tile-img,
+.ul-entry .pm-missing-art {
+  width: 56px;
+  height: 56px;
+}
+
+.ul-entry .pm-missing-art {
+  font-size: 11px;
+}
+
+.ul-thumb-note {
+  align-self: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.ul-copy-cell {
+  display: flex;
+}
+
+/* The shared 38px icon buttons. The disabled-hover rule in styles.css pads
+   0 20px, which would squeeze the icon out of a 38px box. */
+.ul-entry .ul-open,
+.ul-entry .pm-copy {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.ul-entry .ul-open.secondary:disabled:hover {
+  padding: 0;
+}
+
+/* The fixed two-row emoji box: fluid width, never resizes, scrolls inside
+   past 20 emoji. 72px = the row's content box; two lines of 22px at 1.25 plus
+   the box's padding and border fit it. The detail panel's measured, fixed
+   width does not apply here. */
+.ul-emoji-wrap {
+  display: block;
+}
+
+.ul-entry .pm-emoji-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 72px;
+  display: block;
+  font-size: 22px;
+  line-height: 1.25;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* The preview is a drag handle (owner, 2026-11-25): grab cursor and a hover
+   outline, only when its file is there. Missing keeps the default cursor. */
+.ul-prev {
+  display: block;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  outline: 1px solid transparent;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+}
+
+.ul-prev.draggable {
+  cursor: grab;
+}
+
+.ul-prev.draggable:active {
+  cursor: grabbing;
+}
+
+.ul-prev.draggable:hover {
+  outline-color: var(--accent-ink);
+}
+
+.ul-prev .pm-tile-img {
+  display: block;
 }

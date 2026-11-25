@@ -32,8 +32,22 @@ import {
 import { confirmChoice, openDialog, type DialogHandle } from "../../dialog";
 import { previewImage, type Previews } from "./previews";
 
-export function statusBadge(status: Pack["status"]): HTMLElement {
-  return el("span", { class: `pm-badge pm-badge-${status}` }, statusLabel(status));
+/** `reserve`: keep the width of the other status's label too (the pack header; see reservedLabel). */
+export function statusBadge(status: Pack["status"], reserve = false): HTMLElement {
+  const label = statusLabel(status);
+  return el("span", { class: `pm-badge pm-badge-${status}` }, reserve ? reservedLabel(label, statusLabel(status === "live" ? "draft" : "live")) : label);
+}
+
+/**
+ * A label that keeps the width of the longer of two (owner, 2026-11-25: the
+ * Draft/Live badge and its button never move what follows them in the pack
+ * header). The other label is laid over the shown one in the same grid cell,
+ * invisible and hidden from assistive technology, so the element is as wide as
+ * the longer of the two in whatever font the system draws, with no magic pixel
+ * width to break on Windows.
+ */
+export function reservedLabel(shown: string, other: string): HTMLElement {
+  return el("span", { class: "pm-reserve" }, el("span", {}, shown), el("span", { class: "pm-reserve-twin", "aria-hidden": "true" }, other));
 }
 
 /**
