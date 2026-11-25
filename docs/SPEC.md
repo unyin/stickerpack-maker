@@ -22,19 +22,25 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 - Background removal runs offline via ONNX with a one-time model download. ONNX runs in Rust
   (`ort`, ONNX Runtime linked statically) with the ISNet general-use model (ADR-0006).
 - Difficult implementation choices get ADRs and detailed task breakdowns.
-- **UI conventions** (owner decisions 2026-11-21, 2026-11-22):
+- **UI conventions** (owner decisions 2026-11-21, 2026-11-22, 2026-11-25):
   - Every two-option confirmation in the app (deletes, Draft/Live, invalid import, creating
     a Library) uses the one shared in-app dialog: the safe choice is the default (focused,
     primary), and Esc and closing choose the safe option. Buttons read action first, safe
     choice last (one exception: the "even WEBP is too large" question, §6 Save). Forms
     that collect input (New pack, Send to pack) are not confirmations: their submit button
     stays primary.
-  - Disabled controls look disabled (faded) and still show their reason as a tooltip.
+  - Disabled controls look disabled (faded).
+  - Every control's tooltip reads **Name (Shortcut) — one-line description**; when the control
+    is disabled, the blocker reason replaces the description entirely, so the tooltip still
+    says what is missing (owner decision 2026-11-25).
   - Every message that stays until dismissed has an **X** close button on its left as well as
     **Dismiss** on its right; both do the same (owner decision 2026-11-22). The red message
     line (errors and blocked-action reasons, in the Editor and the Pack Manager) is not such a
     message: it stays until the next command replaces or clears it, and has neither (owner
-    decision 2026-11-22).
+    decision 2026-11-22; reaffirmed 2026-11-25). In the Editor it sits in a reserved row under
+    the toolbar with a fixed minimum height that never collapses — the old collapse-when-empty
+    behaviour is gone, so the interface never jumps when a message appears or disappears
+    (§6 Layout); no overlay redesign, no close buttons (owner decision 2026-11-25).
 
 ## 3. Domain model
 
@@ -227,6 +233,91 @@ stickers, Missing stickers, and the thumbnail.
 
 ## 6. Editor
 
+### Layout: top row, panels, status strip (SPM-15)
+The Editor's frame is one top row, a reserved message row, a left tools panel, the canvas, a
+right tabbed panel and a bottom status strip. The record below is the agreed design for this
+pass.
+
+- **One top row** (the Editor toolbar), left to right: **Undo**, **Redo** | **Fit in 512**,
+  **Cover 512**, **Long side 512** | the free-resize cluster, reading as one sentence —
+  **[Long/Short] side [N] px Resize** | **Guide**, **Crop to {size}** | a flexible spacer |
+  **Save…**, **Close**. Thin vertical rules divide neighbouring groups, exactly 8px from the
+  controls on both sides (owner decision 2026-11-25). Undo, Redo, Save… and Close become icons
+  in a later pass; the seven renamed sizing and crop controls stay text (owner decision
+  2026-11-25). The row holds its one line from the window's 1100px minimum up (Window, below).
+- **The reserved message row** sits under the top row: fixed minimum height, never collapsed
+  (§2; the CMT-290 canvas jump).
+- **A bottom status strip**: the live readout (Crop and sizing, below) on the left; on the
+  right, in this order, the zoom level, the **Reset view** button and the unsaved-changes dot
+  (owner decision 2026-11-25 — Reset view sits in the status cluster, never floating at the
+  canvas/panel boundary).
+- **A left tabbed tools panel (192px)**: browser-style tab leaves stuck on the panel's top
+  edge and protruding past it over the canvas until the icon pass. The tabs:
+  - **Select**: Move, Rectangle, Lasso, Wand; the Tolerance and Feather fields; the contextual
+    actions Cut and Paste.
+  - **Paint**: Erase, Restore, Warp; the Brush field; Remove background, which stays
+    conceptually with its brushes (owner decision 2026-11-25), with Cancel download beside it
+    while the model downloads.
+  - **Effects**: Outline and Glow.
+  - **Text**: Add text, Edit text and the six text style controls — the CMT-366 resolution:
+    text-outline styling lives under Text, the Outline EFFECT tool under Effects.
+  - Tool **settings live in the panel under their tool**: Warp's strength and radius while
+    Warp is active, Outline's or Glow's controls with Apply/Cancel while that effect is active
+    (Layers and tools, below). The horizontal effect bar is **retired**: its appearing and
+    disappearing used to shift the canvas, the CMT-290 disease, and a change inside the panel
+    never moves it. Sliders stay wheel-scrollable with direct-entry fields (2026-11-23
+    decision), narrower for the panel (owner decision 2026-11-25).
+- **Panel switching** (owner decision 2026-11-25): a tab click shows its category and stays
+  there; ANY tool activation — its button, its shortcut, or the automatic return to Move after
+  Cut, Apply or a discarded preview — surfaces that tool's category; opening text editing (Add
+  text, Edit text, a double-click on a text layer) surfaces Text and the panel goes back to the
+  active tool when the edit ends, because the panel follows the active editing surface, not
+  just the pointer tool. Selecting or deselecting layers never switches — text layers
+  included, the owner dropped the auto-switch — and neither do undo/redo, saving, or a view
+  change.
+- **Single-key tool shortcuts**, active only while no text field or typing overlay has focus
+  (like Delete and Ctrl+Z today): **V** Move, **R** Rectangle, **L** Lasso, **W** Wand,
+  **E** Erase, **Shift+E** Restore, **B** Warp, **O** Outline, **G** Glow, **T** activates the
+  Text category. The bindings sit in a changeable data-driven table; a rebinding UI is parked
+  for v2 (§9). The existing modified shortcuts (Ctrl+Z/Y/X/V/S, Delete, Esc) are unchanged.
+- **A right panel (240px)** with tabs **Layers / Actions / Emoji**:
+  - **Layers**: the layer list in a bounding box; the action buttons BELOW the box's bottom
+    edge, a two-column grid — the left column changes the stack's size (a tall **Add image as
+    layer…**, its ellipsis marking the picker dialog, over **Delete**), the right column
+    manipulates layers (**Move up**, **Move down**, **Merge selected**) (owner decision
+    2026-11-25). CMT-193's move of Add image as layer into the Layers panel lands here.
+  - **Actions**: a READ-ONLY list of every undoable document action, oldest first, with a
+    current-position marker. The history records a human-readable label IN-BAND at apply()
+    time (`{state, label}` entries). The selection's own steps (SPM-23) nest under a Select
+    entry and vanish with the trail's rules — the next document action clears them — and the
+    memory budget can drop the oldest entries. Clickable jump-to-state is a PLANNED LATER
+    promotion, not v1 (owner adopted the labels-now/read-only-now plan, 2026-11-25).
+  - **Emoji**: a typed text box, with a fixed five-row height that never resizes, for the
+    session's sticker Emoji String — the anti-jump rule; an internal scrollbar is the overflow
+    safety valve only. When the session edits an origin sticker, edits commit IMMEDIATELY on
+    Enter or blur: pack metadata, neither an undo step nor a dirtying change. For a fresh
+    image the typed emoji is STAGED and assigned to whatever sticker the image becomes at save
+    (the save dialog's "without emoji" hint changes accordingly, Save below). A gone origin
+    disables the box with its reason. Validation is warn-only 1–20 with empty allowed, as
+    everywhere (§7). In Thumbnail mode the tab is HIDDEN (owner decision 2026-11-25 — parity
+    for geometry, honesty for content: buttons-in-rows stay visible-when-disabled, but a tab
+    to content that does not exist in the mode may not show). The Editor view is built once
+    and cached, so the tab's visibility must be recomputed from the session's mode on every
+    refresh; the Windows live test must check that swapping Thumbnail → Sticker does not leave
+    the tab hidden for stickers (owner's live-test note, 2026-11-25).
+- **Both modes keep identical GEOMETRY** in the top row, the panels and the strip (owner
+  decision 2026-11-20, CMT-72): Thumbnail mode greys out **Long side 100** in place, visible
+  and disabled with its reason (Save, below). The ONE exception is the Emoji tab's hiding
+  above (owner decision 2026-11-25).
+- **Window**: the app opens at **1350×1000** by default (was 1200×800; owner decision
+  2026-11-25 — it fits a 1080p work area), and its minimum width becomes **1100px** (was 900;
+  owner decision 2026-11-25 — the agreed minimum for the one-row toolbar).
+- **Implementation notes** for this pass: **Close** gains the app's danger colour treatment
+  (owner decision 2026-11-25), with a boundary that passes the project's 3:1 UI rule in BOTH
+  themes — the `--danger-border` token measured 2.70:1 on `--bg` in dark, the same class of fix
+  primary buttons got with `--accent-ink`; and the save dialog's clipped focus outline on
+  **New pack…** (CMT-282) is fixed here.
+
 ### Import and canvas
 - Source formats: .jpg, .jpeg, .jfif, .png, .webp.
 - The canvas starts square at the active constraint set's side: **512×512** for stickers,
@@ -247,15 +338,17 @@ stickers, Missing stickers, and the thumbnail.
   a 512×512 box for stickers, 100×100 for thumbnails. Fixed at canvas center; never
   draggable/resizable; drawn **above all layers** so it stays visible when layers cover the
   canvas.
-  Drag the image to choose what survives. The overlay is **on by default** and the **Crop
-  box** button shows or hides it (owner decision 2026-11-20); the toggle hides the canvas
-  outline too, one toggle for both, while the checkerboard still shows where the canvas is
-  (owner decision 2026-11-21). The box is the set's side,
+  Drag the image to choose what survives. The overlay is **on by default** and the **Guide**
+  button shows or hides it (owner decision 2026-11-20; renamed 2026-11-25 from Crop box, a
+  name that read as if clicking it would crop); the toggle hides the canvas outline too, one
+  toggle for both, while the checkerboard still shows where the canvas is (owner decision
+  2026-11-21). The box is the set's side,
   **capped at the canvas size on each axis**, so it is never larger than the canvas: a
   512×439 canvas gets a 512×439 box (owner decision 2026-11-20). It follows the canvas size,
   staying centred; when the canvas and box sides differ by an odd number, its top-left is
-  rounded down to a whole pixel, so it always covers whole pixels. The Crop button names
-  the actual box size (e.g. **Crop to 512×439**) (owner confirmed 2026-11-21).
+  rounded down to a whole pixel, so it always covers whole pixels. The **Crop** button keeps
+  its dynamic label naming the actual guide size (e.g. **Crop to 512×512**, or
+  **Crop to 512×439** on a cropped canvas) (owner confirmed 2026-11-21; naming 2026-11-25).
 - **Crop** is destructive: everything outside the box (512×512 for stickers, 100×100 for
   thumbnails, capped at the canvas size as above) is discarded; the canvas size stays as it
   is (owner decision 2026-11-20).
@@ -281,21 +374,24 @@ stickers, Missing stickers, and the thumbnail.
 - Sizing tools (whole image, aspect preserved, transparency padding where relevant). "Whole
   image" = everything on the canvas treated as one layer, exactly like selecting every layer
   and resizing them together (owner decision 2026-11-20). Sides below are Sticker mode's;
-  Thumbnail mode uses 100 for tools 1, 2 and 4 (see Save):
-  1. **Fit to 512×512**: scale the whole image so its longest side is 512, set the canvas to
+  Thumbnail mode uses 100 for tools 1, 2 and 4, so they read **Fit in 100**, **Cover 100** and
+  **Long side 100** (see Save):
+  1. **Fit in 512**: scale the whole image so its longest side is 512, set the canvas to
      512×512 and centre the image; the user can then reposition it, and the rest is
      transparent padding.
-  2. **Longest side 512**: scale the whole image so its longest side is 512, then set
+  2. **Long side 512**: scale the whole image so its longest side is 512, then set
      the canvas to the scaled image's size in whole pixels (no padding).
-  3. **Free resize**: scale the whole image so its longest or shortest side (a choice beside
-     the field, owner request 2026-11-21) is the entered value, a whole number of pixels from
-     1 to 2000. The canvas size does not change; the image keeps its
+  3. **Free resize**, which reads as one sentence in the top row: a side-kind select with the
+     options **Long** and **Short**, the static text "side", the px number field, the static
+     text "px", then **Resize** (owner decision 2026-11-25). It scales the whole image so its
+     longest or shortest side (owner request 2026-11-21) is the entered value, a whole number
+     of pixels from 1 to 2000. The canvas size does not change; the image keeps its
      centre where it was.
-  4. **Fill 512×512**: Fill is to Fit what CSS cover is to contain (owner request
+  4. **Cover 512**: Cover is to Fit what CSS cover is to contain (owner request
      2026-11-21): scale the whole image so its shortest side is 512, set the canvas to
      512×512 and centre the image. Spillover outside the canvas is KEPT (non-destructive):
      the user drags the image to choose which part shows; Save clips the rest (§Save), and
-     Crop is available if wanted. Enabled in both modes (**Fill 100×100** in Thumbnail mode):
+     Crop is available if wanted. Enabled in both modes (**Cover 100** in Thumbnail mode):
      the result always meets either constraint set.
 - Only sizing tools 1, 2 and 4 change the canvas size (owner decision 2026-11-20; tool 4,
   2026-11-21). Nothing else
@@ -451,7 +547,7 @@ stickers, Missing stickers, and the thumbnail.
   selected; text layers are not warped (merge them into an image first), and with several
   layers selected it says to select one. Each press places ONE bulge, which magnifies the
   pixels around the press point in place (meme style), within its radius (owner decision
-  2026-11-22): a click uses the bar's strength and radius (radius in on-screen document
+  2026-11-22): a click uses the panel's strength and radius (radius in on-screen document
   px); a press-drag keeps the bulge at the press point and sets its **radius** to the
   pointer's distance from it, live, with the ring following; holding **Shift** during the
   drag sets the **strength** instead, which follows the pointer's vertical movement — up
@@ -461,7 +557,7 @@ stickers, Missing stickers, and the thumbnail.
   jumps. Shift is read from each
   pointer event (held, not tapped), and may already be down at the press. A readout
   beside the pointer shows "Radius N px" or "Strength N%". A drag's final radius and
-  strength become the bar's values. The layer keeps its size and transform (one piece);
+  strength become the panel's values. The layer keeps its size and transform (one piece);
   each press is one undo step on release. (Shrinking/pinch is parked for v3.)
 - **Background removal**: one-click offline ONNX auto removal + manual refine brush. Details
   (SPM-7, ADR-0006; owner decisions 2026-11-22):
@@ -480,9 +576,9 @@ stickers, Missing stickers, and the thumbnail.
     line, with a **Cancel download** button beside Remove background while it runs. It is
     checked against a pinned checksum and kept in the app data folder; after that removal
     never uses the network. A failed download says why in the red line and changes nothing.
-  - **Erase** and **Restore** are canvas tools beside Move, Rectangle and Lasso. They paint on
-    the same layer Remove background would use: Erase makes pixels transparent, Restore
-    paints back the layer's pixels from before its first background removal or Erase
+  - **Erase** and **Restore** are canvas tools in the Paint category, with Warp (§Layout).
+    They paint on the same layer Remove background would use: Erase makes pixels transparent,
+    Restore paints back the layer's pixels from before its first background removal or Erase
     stroke. The brush is round with a one-pixel soft edge, sized in canvas px (**Brush**
     field, 1–500, default 40), with its outline at the pointer; going over a spot again in
     the same stroke does not erase it further. Each finished stroke is one undo step.
@@ -501,11 +597,11 @@ stickers, Missing stickers, and the thumbnail.
     not an undo step.
     Normal blending only (owner decision 2026-11-21). The preview is drawn by Rust with
     Apply's own code, so the preview is the result (ADR-0008).
-  - The bar's sliders take more than dragging (owner decision 2026-11-23): scrolling the
+  - The settings sliders take more than dragging (owner decision 2026-11-23): scrolling the
     mousewheel over one steps its value by 1 within its range (hover is enough, up
     increases, nothing else scrolls), and the value shown beside each slider is an
     editable field — a typed whole number commits on Enter or blur, clamped into the
-    range; invalid or empty reverts, and Esc reverts and blurs. The Warp bar's sliders
+    range; invalid or empty reverts, and Esc reverts and blurs. The Warp panel's sliders
     work the same way.
   - Every colour picker in the Editor (outline, glow and text) has an eyedropper beside
     it (owner decision 2026-11-23; canvas-only per CMT-296: the browser EyeDropper API
@@ -541,7 +637,7 @@ stickers, Missing stickers, and the thumbnail.
     them as one). A text layer gets the effect too, split since SPM-18: **Outline** sets
     the layer's outline style instead — the preview is the restyled text and Apply commits
     it as one undo step, the layer staying editable text at the same place, with no
-    conversion note, the bar's width staying document px and being converted into the
+    conversion note, the panel's width field staying document px and being converted into the
     style's own px on commit (divided by the layer's scale), so its on-screen reach is the
     same at any layer scale, within the style's whole-px rounding, as on a raster layer —
     a conversion below 1 own px lands the smallest real outline, never none (0 stays the
@@ -562,9 +658,12 @@ stickers, Missing stickers, and the thumbnail.
   - The font list is the system's installed families, shown in a font picker where each
     name is drawn in its own typeface and typing filters the list (names starting with
     the typed text first); arrow keys move, Enter or a click picks, Esc or leaving the
-    field keeps the current font (owner decision 2026-11-22); a session's first text uses Impact
-    when installed (else a common sans, else the first family). Size is a whole number of
-    px within the range in src/shared/limits.json (1–1000); default 64 px, black. The
+    field keeps the current font (owner decision 2026-11-22); its open list is WIDER than its
+    closed field, so long names stay readable while scrolling, with truncation after a pick
+    allowed — scoped to the font picker only, the pack picker unchanged (owner decision
+    2026-11-25); a session's first text uses Impact when installed (else a common sans, else
+    the first family). Size is a whole number of px within the range in
+    src/shared/limits.json (1–1000); default 64 px, black. The
     outline controls (SPM-18, owner decision 2026-11-22, SPM-8 grilling R2-Q11) sit with
     them: an outline colour picker and an outline width, a whole number of px from 0 to
     the range in src/shared/limits.json (0–100); 0 means no outline — also how an outline
@@ -642,8 +741,12 @@ stickers, Missing stickers, and the thumbnail.
     The field starts on the pack open in the Pack Manager, else the last pack saved into
     this session, else empty. When a pack is already chosen, the dialog opens with focus on
     **Save**, so Enter saves at once; otherwise in the pack field. The format starts on the
-    session's last save's (PNG the first time); the PNG/WEBP choice is a two-way toggle (its
-    look is for the SPM-15 pass).
+    session's last save's (PNG the first time). The PNG/WEBP choice is a **segmented
+    control** (owner decision 2026-11-25, the SPM-15 pass; the reference is
+    vizgpt.ai/tools/telegram-sticker-resizer's "Output format" selector): one horizontal
+    rectangle split into two halves labelled **PNG** and **WEBP**, the active half tinted (a
+    fill swap, not a sliding thumb), with a real two-radio group underneath carrying the
+    keyboard and screen-reader behaviour.
   - **Saving an edited sticker** (owner decision 2026-11-22): a session opened with the Pack
     Manager's Edit remembers that sticker. Its save dialog starts with two options at the
     top: **Replace #N in <pack>** (the default; N and the pack as they are now, even after
@@ -699,11 +802,13 @@ stickers, Missing stickers, and the thumbnail.
     the encoded bytes (KB = 1024 bytes). Saving a thumbnail (Thumbnail mode's target, the
     pack's thumbnail slot) comes with Thumbnail mode (SPM-12); the Rust checks already
     cover the thumbnail constraint set.
-- The live readout shows how far the canvas is off the constraint set. **Fit** and **Fill**
-  fix it in one click in both modes; **Longest side** also does in Sticker mode.
-- In Thumbnail mode **Longest side** is greyed out (visible but disabled, with the reason in
-  its tooltip: a thumbnail must be exactly 100×100, so use Fit), so the toolbar looks the same
-  in both modes (owner decision 2026-11-20).
+- The live readout shows how far the canvas is off the constraint set. **Fit in 512** and
+  **Cover 512** fix it in one click in both modes; **Long side 512** also does in Sticker mode.
+- In Thumbnail mode **Long side 100** is greyed out (visible but disabled, with the reason in
+  its tooltip: a thumbnail must be exactly 100×100, so use Fit in 100), so the top row, the
+  panels and the status strip keep identical geometry in both modes (owner decision
+  2026-11-20; geometry line 2026-11-25). The one exception is the Emoji tab, hidden in
+  Thumbnail mode (§Layout).
 - Closing the editor with unsaved changes warns first. Unfinished, non-conforming work
   cannot be parked — there is deliberately no scratch/draft save location. Closing a CLEAN
   session whose origin sticker no longer exists (deleted, sent away with Move, or the
@@ -714,8 +819,8 @@ stickers, Missing stickers, and the thumbnail.
   same, and a session without an origin (a plain file) never warns.
 - Thumbnail mode is the same editor with a canvas that starts at 100×100 (instead of
   512×512) and the thumbnail constraint set. Sizing tools 1, 2 and 4 take their side from
-  the active constraint set: in Thumbnail mode they are **Fit to 100×100**, **Fill 100×100** and
-  **Longest side 100** (greyed out, see above) (owner decision 2026-11-20); free resize is the
+  the active constraint set: in Thumbnail mode they are **Fit in 100**, **Cover 100** and
+  **Long side 100** (greyed out, see above) (owner decision 2026-11-20); free resize is the
   same in both modes.
 
 ## 7. Constraints quick reference
@@ -776,13 +881,17 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 - Trash/recovery area for deleted stickers.
 - Bulk emoji-set: rejected as unnecessary — not planned.
 - Editor: every edge of the selection box is grabbable for resizing, not just the corners.
-- Editor: custom canvas resizing (in v1 only Fit, Fill and Longest side change the canvas).
+- Editor: custom canvas resizing (in v1 only Fit in, Cover and Long side change the canvas).
 - Drag and drop an image file to open it in the Editor.
 - Editor: Crop could also drop a layer that crosses the box edge when its part inside the
   box is fully transparent. In v1 such a layer is kept; only layers entirely outside the box
   are discarded (owner, 2026-11-21: may revisit).
-- Editor: a "Convert text to image" tool, so a text layer can be edited with pixel tools
-  (e.g. Cut) without merging it onto another layer first (owner, 2026-11-21).
+- Editor: a manual text-to-image conversion button, so a text layer can be edited with pixel
+  tools (e.g. Cut) without merging it onto another layer first (owner, 2026-11-21). When it is
+  built it lives in the Text category, not the action grid — its subject is one text layer,
+  like Edit text; it changes neither the stack count nor the layer order, and it mirrors the
+  effects' Apply commit; the Rust rasterisation machinery already exists through Glow on text
+  and a Crop crossing a text layer (owner, 2026-11-25).
 - Editor: real clipboard for Cut/Copy: Ctrl+C copies the selected pixels (or the selected
   layer) to the system clipboard as PNG, Ctrl+X does the same and leaves a transparent
   hole, so stickers can be copied between sessions and apps (owner, 2026-11-21).
