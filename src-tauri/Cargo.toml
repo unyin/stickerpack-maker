@@ -59,6 +59,12 @@ sha2 = "0.10"
 # libwebp compiled from vendored C and linked statically (no DLL to ship).
 webp = { version = "0.3", default-features = false }
 
+# Native file drag-out of the Upload list (SPM-21): CrabNebula's `drag`,
+# OLE DoDragDrop with a CF_HDROP file list on Windows (the v1 target). Not
+# built elsewhere: see src/drag_commands.rs.
+[target.'cfg(windows)'.dependencies]
+drag = "2.1.1"
+
 [dev-dependencies]
 tempfile = "3"
 
