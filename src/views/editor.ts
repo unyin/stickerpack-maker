@@ -130,6 +130,7 @@ import {
   contributionsOf,
   NOTHING_TO_CUT,
   NOTHING_TO_ERASE,
+  mergeSelection,
   wandCommitMode,
   type ComposedRegion,
   type Contribution,
@@ -1544,7 +1545,7 @@ function buildEditor(): HTMLElement {
    * The cut a selection takes from one raster layer (SPM-9; the wand since
    * SPM-22; composed since SPM-23): a plain Rectangle/Lasso moves its whole
    * pixels, while a floating selection merges into the layer's own grid
-   * first — the apply is authoritative there, the document-grid preview was
+   * first — the apply is authoritative there, the preview grid was
    * display only — so a wand fill is used where it was drawn and a polygon
    * rasterises like a plain one's.
    */
@@ -1771,21 +1772,9 @@ function buildEditor(): HTMLElement {
   let wand: WandPress | null = null;
 
   /**
-   * Merge a floating selection's contributions over the document (SPM-23):
-   * the dashed outline's source, in document pixels; null when the stack
-   * covers nothing (a subtract that emptied it).
-   */
-  async function mergedSelection(current: EditorSession, contributions: readonly Contribution[]): Promise<ComposedRegion | null> {
-    const merged = await composeSelection(current.doc.width, current.doc.height, IDENTITY, contributions);
-    return merged.width === 0 || merged.height === 0
-      ? null
-      : { kind: "compose", contributions, outlines: traceOutlines(merged, IDENTITY) };
-  }
-
-  /**
    * A Rectangle/Lasso draw released with Shift or Alt over an existing
    * selection (SPM-23): the polygon joins the selection's stack, which is
-   * merged again over the document for its dashed outline, as one step.
+   * merged again over its preview grid (`mergeSelection`, SPM-24) for its dashed outline, as one step.
    * An emptied stack is a step to none, so the step-undo restores it.
    */
   function composeShape(op: ContributionOp, points: readonly Point[]): void {
@@ -1803,7 +1792,7 @@ function buildEditor(): HTMLElement {
       shape: tool === "rect" ? "rectangle" : "lasso",
     };
     const contributions = [...contributionsOf(region, feathered), contribution];
-    void run(async () => current.commitRegion(await mergedSelection(current, contributions)));
+    void run(async () => current.commitRegion(await mergeSelection(contributions, composeSelection)));
   }
 
   /**
@@ -1886,7 +1875,7 @@ function buildEditor(): HTMLElement {
    * mode leaves (SPM-23): a replacing click stores its fill as a
    * one-contribution floating selection (today's own mask, no merge round
    * trip); an adding or subtracting click appends the live fill to the
-   * press's snapshot and merges the stack over the document. The last fill
+   * press's snapshot and merges the stack over its preview grid (`mergeSelection`, SPM-24). The last fill
    * wins (a drag may request several), and a fill whose target's pixels
    * changed underneath is dropped.
    */
@@ -1918,7 +1907,7 @@ function buildEditor(): HTMLElement {
         return;
       }
       const contributions: Contribution[] = [...press.base, { ...fill, op: press.mode }];
-      const region = await mergedSelection(current, contributions);
+      const region = await mergeSelection(contributions, composeSelection);
       if (press.fills !== id) return; // a newer fill superseded this one mid-merge
       if (amend) current.amendRegion(region);
       else current.commitRegion(region);

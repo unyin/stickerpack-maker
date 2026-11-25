@@ -354,6 +354,19 @@ mod tests {
     }
 
     #[test]
+    fn a_grid_placed_past_the_canvas_keeps_what_a_document_grid_would_clip() {
+        // Pins compose, not the webview: a grid translated to negative document
+        // coordinates is honoured, which the preview grid (SPM-24) relies on. A
+        // polygon at document x -3..2 is whole on a grid at (-3, 0) ...
+        let placed = LayerTransform { x: -3.0, ..LayerTransform::IDENTITY };
+        let out = compose(&meta(placed, vec![poly(Op::Add, false, rect(-3.0, 0.0, 2.0, 2.0))]), &[]).unwrap();
+        assert_eq!((out.x, out.y, out.width, out.height), (0, 0, 5, 2));
+        // ... where the document's own grid keeps only the part inside it.
+        let out = compose(&meta(LayerTransform::IDENTITY, vec![poly(Op::Add, false, rect(-3.0, 0.0, 2.0, 2.0))]), &[]).unwrap();
+        assert_eq!((out.x, out.y, out.width, out.height), (0, 0, 2, 2));
+    }
+
+    #[test]
     fn a_feathered_polygon_rings_its_boundary_but_not_the_grid_edge() {
         // Grid 6x4 at (10, 20); the polygon covers grid x 2..5, y 1..3.
         let placed = LayerTransform { x: 10.0, y: 20.0, ..LayerTransform::IDENTITY };

@@ -18,6 +18,9 @@ import {
   contributionsOf,
   NOTHING_TO_CUT,
   NOTHING_TO_ERASE,
+  mergeSelection,
+  PREVIEW_GRID_PIXELS,
+  previewGrid,
   rectRegion,
   shapeCommit,
   regionBounds,
@@ -170,4 +173,143 @@ test("a composed selection with no pixels in the layer says so in the apply's ow
   // The webview twins of Rust's refusals for a merge that reaches no visible pixel.
   expect(NOTHING_TO_CUT).toBe("The selection holds no visible pixels of this layer; nothing was cut.");
   expect(NOTHING_TO_ERASE).toBe("The selection holds no visible pixels of this layer; nothing was erased.");
+});
+
+// ---- The preview grid covers what the stack covers, not the canvas (SPM-24) ----
+
+function rectPoly(left: number, top: number, right: number, bottom: number): Contribution {
+  const points = [
+    { x: left, y: top },
+    { x: right, y: top },
+    { x: right, y: bottom },
+    { x: left, y: bottom },
+  ];
+  return { kind: "poly", op: "add", feather: false, points };
+}
+
+test("a polygon past the canvas's right and bottom edge is covered by the preview grid", () => {
+  const grid = previewGrid([rectPoly(90.5, 40, 130.2, 75.1)]);
+  expect(grid).toEqual({ width: 41, height: 36, transform: { x: 90, y: 40, scaleX: 1, scaleY: 1, rotation: 0 } });
+});
+
+test("a polygon at negative coordinates is covered by the preview grid", () => {
+  const grid = previewGrid([rectPoly(-30.5, -10, 5, 8)]);
+  expect(grid).toEqual({ width: 36, height: 18, transform: { x: -31, y: -10, scaleX: 1, scaleY: 1, rotation: 0 } });
+});
+
+test("a wand contribution is covered by its mask box's transformed corners", () => {
+  const wand = (transform: Transform): Contribution => ({
+    kind: "wand",
+    op: "add",
+    transform,
+    mask: mask(2, 1, 4, 3, new Array(12).fill(255)),
+  });
+  // Translated and scaled: local x 2..6, y 1..4 -> document 10+4..10+12, 20+3..20+12.
+  const placed = previewGrid([wand({ x: 10, y: 20, scaleX: 2, scaleY: 3, rotation: 0 })]);
+  expect(placed).toEqual({ width: 8, height: 9, transform: { x: 14, y: 23, scaleX: 1, scaleY: 1, rotation: 0 } });
+  // Rotated 90 degrees: (u, v) -> (-v, u), so x -4..-1 and y 2..6 from the origin.
+  const turned = previewGrid([wand({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 90 })]);
+  expect(turned?.transform.x).toBe(-4);
+  expect(turned?.transform.y).toBe(2);
+  expect(turned?.width).toBe(3);
+  expect(turned?.height).toBe(4);
+});
+
+test("the preview grid is the union of every contribution, subtracts included", () => {
+  const grid = previewGrid([rectPoly(-5, 0, 10, 10), { ...rectPoly(8, 8, 40, 12), op: "subtract" }, rectPoly(0, -3, 6, 4)]);
+  expect(grid).toEqual({ width: 45, height: 15, transform: { x: -5, y: -3, scaleX: 1, scaleY: 1, rotation: 0 } });
+});
+
+test("an empty stack or a zero-area box has no preview grid", () => {
+  expect(previewGrid([])).toBeNull();
+  expect(previewGrid([rectPoly(5, 5, 5, 20)])).toBeNull();
+});
+
+test("a box over the cap coarsens by the smallest integer scale that fits", () => {
+  const side = Math.sqrt(PREVIEW_GRID_PIXELS);
+  // Exactly at the cap: no coarsening.
+  expect(previewGrid([rectPoly(0, 0, side, side)])?.transform.scaleX).toBe(1);
+  // One pixel wider: scale 2 is the smallest that fits.
+  const over = previewGrid([rectPoly(-10, 0, side - 9, side)]);
+  expect(over?.transform).toEqual({ x: -10, y: 0, scaleX: 2, scaleY: 2, rotation: 0 });
+  expect(over?.width).toBe(Math.ceil((side + 1) / 2));
+  expect(over?.height).toBe(side / 2);
+  // A huge box still ends under the cap.
+  const huge = previewGrid([rectPoly(0, 0, 40000, 30000)]);
+  expect(huge).not.toBeNull();
+  expect(huge!.width * huge!.height).toBeLessThanOrEqual(PREVIEW_GRID_PIXELS);
+  expect(huge!.transform.scaleX).toBe(huge!.transform.scaleY);
+  const smaller = Math.ceil(40000 / (huge!.transform.scaleX - 1)) * Math.ceil(30000 / (huge!.transform.scaleX - 1));
+  expect(smaller).toBeGreaterThan(PREVIEW_GRID_PIXELS);
+});
+
+/** A compose stand-in that records the grid it is asked for and returns a solid mask over all of it. */
+function recordingCompose(): { asked: { width: number; height: number; transform: Transform }[]; compose: Parameters<typeof mergeSelection>[1] } {
+  const asked: { width: number; height: number; transform: Transform }[] = [];
+  return {
+    asked,
+    compose: async (width, height, grid) => {
+      asked.push({ width, height, transform: grid });
+      return mask(0, 0, width, height, new Array(width * height).fill(255));
+    },
+  };
+}
+
+test("the outline merge is asked for a grid over the off-canvas box, not the canvas", async () => {
+  const { asked, compose } = recordingCompose();
+  await mergeSelection([rectPoly(-30, -20, -10, -5), rectPoly(500, 400, 520, 430)], compose);
+  expect(asked).toEqual([{ width: 550, height: 450, transform: { x: -30, y: -20, scaleX: 1, scaleY: 1, rotation: 0 } }]);
+});
+
+test("a composed selection wholly at negative coordinates keeps its outlines there", async () => {
+  const { compose } = recordingCompose();
+  const region = await mergeSelection([rectPoly(-30, -20, -10, -5)], compose);
+  const xs = region!.outlines.flat().map((p) => p.x);
+  const ys = region!.outlines.flat().map((p) => p.y);
+  expect([Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)]).toEqual([-30, -10, -20, -5]);
+});
+
+test("a composed selection reaching past the canvas keeps its outline there", async () => {
+  const { compose } = recordingCompose();
+  const region = await mergeSelection([rectPoly(90, 90, 140, 130)], compose);
+  const xs = region!.outlines.flat().map((p) => p.x);
+  expect(Math.max(...xs)).toBe(140);
+  expect(region!.contributions).toHaveLength(1);
+});
+
+test("a merge that covers nothing, or a stack with no area, is no region", async () => {
+  expect(await mergeSelection([rectPoly(0, 0, 10, 10)], async () => mask(0, 0, 0, 0, []))).toBeNull();
+  let called = false;
+  expect(await mergeSelection([], async () => ((called = true), mask(0, 0, 0, 0, [])))).toBeNull();
+  expect(called).toBe(false);
+});
+
+test("an infinite coordinate gives no preview grid rather than hanging", () => {
+  expect(previewGrid([rectPoly(0, 0, Infinity, 10)])).toBeNull();
+});
+
+test("a skinny box gets the smallest fitting scale", () => {
+  const grid = previewGrid([rectPoly(0, 0, 1e9, 1)]);
+  expect(grid).not.toBeNull();
+  const scale = grid!.transform.scaleX;
+  expect(grid!.width * grid!.height).toBeLessThanOrEqual(PREVIEW_GRID_PIXELS);
+  expect(Math.ceil(1e9 / (scale - 1)) * Math.ceil(1 / (scale - 1))).toBeGreaterThan(PREVIEW_GRID_PIXELS);
+});
+
+test("a box whose area overflows has no preview grid", () => {
+  expect(previewGrid([rectPoly(0, 0, 1e200, 1e200)])).toBeNull();
+});
+
+test("a box spanning one or two grid cells on a side gets the smallest fitting scale", () => {
+  const w = 1.66e13;
+  const h = 1.01e6;
+  const grid = previewGrid([rectPoly(0, 0, w, h)]);
+  expect(grid).not.toBeNull();
+  const scale = grid!.transform.scaleX;
+  expect(Math.ceil(w / scale) * Math.ceil(h / scale)).toBeLessThanOrEqual(PREVIEW_GRID_PIXELS);
+  expect(Math.ceil(w / (scale - 1)) * Math.ceil(h / (scale - 1))).toBeGreaterThan(PREVIEW_GRID_PIXELS);
+});
+
+test("a huge finite box returns promptly, with no grid past the safe-integer range", () => {
+  expect(previewGrid([rectPoly(0, 0, 1.55e61, 6.06e54)])).toBeNull();
 });

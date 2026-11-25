@@ -322,9 +322,10 @@ export const COMPOSE_MASK_HEADER = "x-compose-mask";
 /**
  * Merge a floating selection's contributions into one grid's coverage mask
  * in Rust (SPM-23): the target layer's own grid when Cut or Delete applies
- * the selection, the document's for the dashed-outline preview. The wire
- * form of a wand contribution carries the mask's place instead of its
- * bytes; the coverage travels as the raw body, concatenated in order.
+ * the selection, a grid covering the selection's own bounds for the
+ * dashed-outline preview. The wire form of a wand contribution carries the
+ * mask's place instead of its bytes; the coverage travels as the raw body,
+ * concatenated in order.
  * Response: the merged mask, cropped to the covered bounds — a zero-size
  * mask when nothing is covered.
  */
