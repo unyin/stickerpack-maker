@@ -188,53 +188,43 @@ pub fn select(layer: &LayerInput, seed: &[f32; 2], tolerance: u32, feather: bool
     let sample = [layer.image.pixels[base], layer.image.pixels[base + 1], layer.image.pixels[base + 2]];
     let max = tolerance * u32::from(u8::MAX) / 100;
 
-    // 4-connected scanline flood fill of the matching pixels. Each pixel of
-    // a row span queues the run above or below it at most once, where that
-    // run begins; a queued pixel that does not match simply fills nothing.
+    // 4-connected scanline flood fill of the matching pixels. A popped pixel
+    // that is filled already or does not match does nothing. Otherwise its
+    // row span is filled through the matching, unfilled pixels either side,
+    // and the rows above and below queue one pixel at the start of each run
+    // of matching, unfilled pixels within the span's columns — never beyond
+    // them, so the fill never crosses a diagonal gap.
     let mut filled = vec![false; width as usize * height as usize];
     let pixels = &layer.image.pixels;
+    let fillable = |filled: &[bool], x: u32, y: u32| {
+        let i = (y * width + x) as usize;
+        !filled[i] && matches(sample, max, &pixels[i * 4..])
+    };
     let mut stack = vec![(sx, sy)];
     while let Some((x, y)) = stack.pop() {
+        if !fillable(&filled, x, y) {
+            continue;
+        }
         let mut left = x;
-        while left > 0
-            && !filled[(y * width + left - 1) as usize]
-            && matches(sample, max, &pixels[((y * width + left - 1) as usize) * 4..])
-        {
+        while left > 0 && fillable(&filled, left - 1, y) {
             left -= 1;
         }
-        let mut scan = left;
-        let mut above = false;
-        let mut below = false;
-        while scan < width && matches(sample, max, &pixels[(y * width + scan) as usize * 4..]) {
-            let i = (y * width + scan) as usize;
-            filled[i] = true;
-            if y > 0 {
-                let unseen = !filled[i - width as usize];
-                if above != unseen {
-                    above = unseen;
-                    if unseen {
-                        stack.push((scan, y - 1));
-                    }
-                }
-            }
-            if y + 1 < height {
-                let unseen = !filled[i + width as usize];
-                if below != unseen {
-                    below = unseen;
-                    if unseen {
-                        stack.push((scan, y + 1));
-                    }
-                }
-            }
-            scan += 1;
+        let mut right = x;
+        while right + 1 < width && fillable(&filled, right + 1, y) {
+            right += 1;
         }
-        // A run above or below may continue past the span just filled; queue
-        // its next column too (harmless when it does not: a mismatch fills nothing).
-        if above && scan < width && !filled[(y * width + scan) as usize - width as usize] {
-            stack.push((scan, y - 1));
+        for fx in left..=right {
+            filled[(y * width + fx) as usize] = true;
         }
-        if below && scan < width && !filled[(y * width + scan) as usize + width as usize] {
-            stack.push((scan, y + 1));
+        for ny in [y.checked_sub(1), (y + 1 < height).then_some(y + 1)].into_iter().flatten() {
+            let mut in_run = false;
+            for nx in left..=right {
+                let run = fillable(&filled, nx, ny);
+                if run && !in_run {
+                    stack.push((nx, ny));
+                }
+                in_run = run;
+            }
         }
     }
 
@@ -399,17 +389,29 @@ mod tests {
         mask.coverage[(y * mask.width + x) as usize]
     }
 
+    /// Whether the unfeathered mask covers the layer pixel (x, y).
+    fn selected(mask: &WandMask, x: u32, y: u32) -> bool {
+        let (mx, my) = (i64::from(x) - i64::from(mask.x), i64::from(y) - i64::from(mask.y));
+        (0..i64::from(mask.width)).contains(&mx)
+            && (0..i64::from(mask.height)).contains(&my)
+            && cover(mask, mx as u32, my as u32) != 0
+    }
+
+    /// Paint the layer pixel (x, y) opaque `rgb`.
+    fn set(image: &mut Rgba, x: u32, y: u32, rgb: [u8; 3]) {
+        let i = ((y * image.width + x) * 4) as usize;
+        image.pixels[i..i + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+    }
+
     /// The manga shape: a white page with a vertical ink band and a gray
     /// anti-aliasing column beside it.
     fn manga() -> Rgba {
         let mut image = flat(8, 8, [255, 255, 255]);
         for y in 0..8 {
             for x in 3..5 {
-                let i = ((y * 8 + x) * 4) as usize;
-                image.pixels[i..i + 4].copy_from_slice(&[0, 0, 0, 255]); // the ink line
+                set(&mut image, x, y, [0, 0, 0]); // the ink line
             }
-            let a = ((y * 8 + 5) * 4) as usize;
-            image.pixels[a..a + 4].copy_from_slice(&[128, 128, 128, 255]); // anti-aliased band
+            set(&mut image, 5, y, [128, 128, 128]); // anti-aliased band
         }
         image
     }
@@ -597,5 +599,105 @@ mod tests {
         transparent.pixels.fill(0);
         let mask = WandMask { x: 0, y: 0, width: 2, height: 1, coverage: vec![255, 255] };
         assert_eq!(erase_mask(&layer(transparent, LayerTransform::IDENTITY), &mask).unwrap_err(), NOTHING_TO_ERASE);
+    }
+
+    #[test]
+    fn a_white_page_speckled_with_ink_is_selected_whole() {
+        // Isolated ink dots leave every white pixel 4-connected to the rest.
+        let dots = [(2, 3), (5, 3), (8, 3), (4, 4), (9, 5)];
+        let mut image = flat(12, 8, [255, 255, 255]);
+        for (x, y) in dots {
+            set(&mut image, x, y, [0, 0, 0]);
+        }
+        let mask = select(&layer(image, LayerTransform::IDENTITY), &[0.5, 0.5], 20, false).unwrap();
+        for y in 0..8 {
+            for x in 0..12 {
+                assert_eq!(selected(&mask, x, y), !dots.contains(&(x, y)), "pixel ({x},{y})");
+            }
+        }
+        assert_eq!(mask.coverage.iter().filter(|c| **c != 0).count(), 12 * 8 - dots.len());
+    }
+
+    #[test]
+    fn a_diagonal_line_of_ink_is_not_crossed() {
+        // White either side of an anti-diagonal of ink touches only corner to
+        // corner, which is not 4-connected.
+        let mut image = flat(5, 5, [255, 255, 255]);
+        for x in 0..5 {
+            set(&mut image, x, 4 - x, [0, 0, 0]);
+        }
+        let mask = select(&layer(image, LayerTransform::IDENTITY), &[0.5, 0.5], 20, false).unwrap();
+        for y in 0..5 {
+            for x in 0..5 {
+                assert_eq!(selected(&mask, x, y), x + y < 4, "pixel ({x},{y})");
+            }
+        }
+    }
+
+    #[test]
+    fn a_queued_ink_pixel_does_not_spread_left_into_a_diagonal_white() {
+        // White at (1,1) is the click; (0,0) is white too but touches it only
+        // at a corner, with ink at (1,0) and (0,1) between them.
+        let mut image = flat(2, 2, [0, 0, 0]);
+        set(&mut image, 0, 0, [255, 255, 255]);
+        set(&mut image, 1, 1, [255, 255, 255]);
+        let mask = select(&layer(image, LayerTransform::IDENTITY), &[1.5, 1.5], 20, false).unwrap();
+        assert_eq!((mask.x, mask.y, mask.width, mask.height), (1, 1, 1, 1));
+    }
+
+    #[test]
+    fn the_wand_matches_a_naive_four_connected_fill_on_noisy_images() {
+        // Deterministic pseudo-random images, a few tolerances and seeds.
+        let mut state = 12345_u32;
+        let mut next = move || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 16) as u8
+        };
+        for tolerance in [0, 10, 40] {
+            for _ in 0..6 {
+                let (w, h) = (17_u32, 11_u32);
+                let mut image = flat(w, h, [0, 0, 0]);
+                for y in 0..h {
+                    for x in 0..w {
+                        // Mostly light with scattered darker and mid pixels.
+                        let v = match next() % 8 {
+                            0 => 0,
+                            1 => 90,
+                            2 => 200,
+                            _ => 255,
+                        };
+                        set(&mut image, x, y, [v, v, v]);
+                    }
+                }
+                let (sx, sy) = (u32::from(next()) % w, u32::from(next()) % h);
+                let max = tolerance * 255 / 100;
+                let sample = px(&image, sx, sy);
+                let seed = [sample[0], sample[1], sample[2]];
+                let mut expected = vec![false; (w * h) as usize];
+                let mut stack = vec![(sx, sy)];
+                expected[(sy * w + sx) as usize] = true;
+                while let Some((x, y)) = stack.pop() {
+                    let around = [(x.wrapping_sub(1), y), (x + 1, y), (x, y.wrapping_sub(1)), (x, y + 1)];
+                    for (nx, ny) in around {
+                        let i = (ny.wrapping_mul(w).wrapping_add(nx)) as usize;
+                        if nx < w && ny < h && !expected[i] && matches(seed, max, &image.pixels[i * 4..]) {
+                            expected[i] = true;
+                            stack.push((nx, ny));
+                        }
+                    }
+                }
+                let source = layer(image, LayerTransform::IDENTITY);
+                let mask = select(&source, &[sx as f32 + 0.5, sy as f32 + 0.5], tolerance, false).unwrap();
+                for y in 0..h {
+                    for x in 0..w {
+                        assert_eq!(
+                            selected(&mask, x, y),
+                            expected[(y * w + x) as usize],
+                            "tolerance {tolerance}, seed ({sx},{sy}), pixel ({x},{y})"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

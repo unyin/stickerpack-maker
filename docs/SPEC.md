@@ -585,8 +585,8 @@ pass.
     around a click: the target follows the effects tools (the selected image layer, else
     the base image) and the click also selects it. A pixel matches when it is visible and
     no RGB channel drifts more than the tolerance — a percent of full range, default 20, in
-    the Tolerance field beside the tools — from the clicked sample; the fill is contiguous,
-    stopping at the first
+    the Tolerance field beside the tools — from the clicked sample; the fill is contiguous
+    (4-connected: pixels touching only at a corner are not joined), stopping at the first
     non-matching pixel, and the mask carries a 1-px feather (half coverage on its
     boundary), so erasing up to manga ink lines leaves no razor cut through the
     anti-aliased band. The Feather checkbox beside Tolerance switches the feather
