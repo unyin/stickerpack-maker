@@ -11,8 +11,10 @@ import { icon } from "../../icons";
 
 /** The button's meaning, as its tooltip and aria-label (owner-vetoable copy, one place). */
 const PICK_FROM_CANVAS = "Pick a colour from the canvas";
+/** The §2 tooltip's Name stem, shared with the Editor's blocked-title helper. */
+export const EYEDROPPER_STEM = "Eyedropper";
 /** The §2 tooltip: Name — description (SPEC §6 Layout). Exported so the Editor can swap in a blocker. */
-export const EYEDROPPER_TITLE = `Eyedropper — ${PICK_FROM_CANVAS}`;
+export const EYEDROPPER_TITLE = `${EYEDROPPER_STEM} — ${PICK_FROM_CANVAS}`;
 
 /**
  * An icon-only button that starts a canvas colour pick: the view wires

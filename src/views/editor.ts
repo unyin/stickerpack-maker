@@ -180,7 +180,7 @@ import { FontPicker } from "../editor/view/font-picker";
 import { EffectControls } from "../editor/view/effect-controls";
 import { shortcutLabel, shortcutOf, type ShortcutAction } from "../editor/model/shortcuts";
 import { actionList, renderActionList } from "../editor/view/actions-list";
-import { EYEDROPPER_TITLE, eyedropperButton } from "../editor/view/eyedropper";
+import { EYEDROPPER_STEM, EYEDROPPER_TITLE, eyedropperButton } from "../editor/view/eyedropper";
 import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
 import { WarpPress } from "../editor/view/warp-brush";
 import { moveWarpGesture, startWarpGesture, warpReadout, type WarpGesture } from "../editor/model/warp";
@@ -301,7 +301,10 @@ function buildEditor(): HTMLElement {
   // The free-resize side-kind choice (CMT-152). It reads as one sentence with
   // the static "side"/"px" text and the field (SPEC §6, owner 2026-11-25):
   // "[Long/Short] side [N] px Resize".
-  const sideKind = el("select", { class: "editor-side-kind", "aria-label": "Which side the entered size is" }) as HTMLSelectElement;
+  // The select's Name stem (the §2 title contract): its aria-label and the
+  // tooltip's name come from this one string.
+  const sideKindStem = "Long side";
+  const sideKind = el("select", { class: "editor-side-kind", "aria-label": sideKindStem }) as HTMLSelectElement;
   sideKind.append(
     el("option", { value: "longest" }, "Long"),
     el("option", { value: "shortest" }, "Short"),
@@ -343,7 +346,12 @@ function buildEditor(): HTMLElement {
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
+  const mergeStem = "Merge selected";
+  const mergeTitle = `${mergeStem} — Merge the selected layers into one`;
   const deleteButton = button("Delete", () => deletePressed());
+  // Delete names its shortcut: with a selection drawn it erases pixels, with
+  // none it deletes the selected layers (owner decision 2026-11-24).
+  const deleteStem = "Delete (Delete key)";
   // Cut selection tools and paste (SPM-9).
   const moveToolButton = button("Move", () => setTool("move"));
   const rectToolButton = button("Rectangle", () => setTool("rect"));
@@ -369,7 +377,8 @@ function buildEditor(): HTMLElement {
     "wand",
     "Click to select the colour-similar pixels of the selected image layer (or the base image); drag to set the tolerance; Shift adds a region, Alt removes one",
   );
-  const cutTitle = "Cut (Ctrl+X) — Move the selected pixels into a new floating layer at the same spot";
+  const cutStem = "Cut (Ctrl+X)";
+  const cutTitle = `${cutStem} — Move the selected pixels into a new floating layer at the same spot`;
   // Effect tools (SPM-8): each targets the selected layer, else the base image.
   const outlineToolButton = button("Outline", () => setTool("outline"));
   const glowToolButton = button("Glow", () => setTool("glow"));
@@ -418,30 +427,38 @@ function buildEditor(): HTMLElement {
     const id = session?.selection[0];
     if (id) editText(id);
   });
+  // The text controls' Name stems (the §2 title contract): each control's
+  // aria-label and its tooltip's name come from one string, so neither can
+  // desync from the other. The unit context lives in the description.
+  const fontStem = "Font";
+  const fontSizeStem = "Font size";
+  const textColourStem = "Text colour";
+  const textOutlineColourStem = "Text outline colour";
+  const textOutlineWidthStem = "Text outline width";
   // Font names shown in their own typeface, with type-to-search (owner, 2026-11-22).
-  const fontPicker = new FontPicker("Font");
+  const fontPicker = new FontPicker(fontStem);
   const fontSizeInput = el("input", {
     class: "editor-side-input",
     type: "number",
     min: String(TEXT_FONT_SIZE.min),
     max: String(TEXT_FONT_SIZE.max),
     step: "1",
-    "aria-label": "Font size in pixels",
+    "aria-label": fontSizeStem,
   }) as HTMLInputElement;
-  const colorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": "Text colour" }) as HTMLInputElement;
+  const colorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": textColourStem }) as HTMLInputElement;
   // The outline controls (SPM-18): a colour picker with its eyedropper and
   // a width field like the font size's. Width 0 means no outline — the
   // style's outline is null then, so 0 is also how an outline is removed.
   // The labels say "text outline" because the effect bar's own Outline
   // colour picker shares the page (hidden while the tool is off).
-  const outlineColorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": "Text outline colour" }) as HTMLInputElement;
+  const outlineColorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": textOutlineColourStem }) as HTMLInputElement;
   const outlineWidthInput = el("input", {
     class: "editor-side-input",
     type: "number",
     min: String(TEXT_OUTLINE_WIDTH.min),
     max: String(TEXT_OUTLINE_WIDTH.max),
     step: "1",
-    "aria-label": "Text outline width in pixels",
+    "aria-label": textOutlineWidthStem,
   }) as HTMLInputElement;
   // The text controls' busy/text-reason disable loop; the eyedroppers beside
   // the colour pickers enroll themselves (owner decision 2026-11-23) and
@@ -519,8 +536,9 @@ function buildEditor(): HTMLElement {
   });
   // Background removal and the refine brush (SPM-7): on the selected image layer, or the base image.
   const removeBackgroundButton = button("Remove background", () => run(removeBackground));
+  const removeBackgroundStem = "Remove background";
   const removeBackgroundTitle =
-    "Remove background — Make the background of the selected image layer (or the base image) transparent; works offline after a one-time model download";
+    `${removeBackgroundStem} — Make the background of the selected image layer (or the base image) transparent; works offline after a one-time model download`;
   const eraseToolButton = button("Erase", () => setTool("erase"));
   const restoreToolButton = button("Restore", () => setTool("restore"));
   eraseToolButton.title = toolTitle("Erase", "erase", "Paint on the selected image layer (or the base image) to make it transparent");
@@ -529,6 +547,8 @@ function buildEditor(): HTMLElement {
     "restore",
     "Paint on the selected image layer (or the base image) to bring back what was removed or erased",
   );
+  // The brush size's Name stem, shared by its aria-label and its tooltip.
+  const brushStem = "Brush";
   const brushSizeInput = el("input", {
     class: "editor-side-input",
     type: "number",
@@ -536,9 +556,9 @@ function buildEditor(): HTMLElement {
     max: String(BRUSH_SIZE.max),
     step: "1",
     value: String(BRUSH_SIZE.initial),
-    "aria-label": "Brush size",
+    "aria-label": brushStem,
   }) as HTMLInputElement;
-  brushSizeInput.title = `Brush — The brush size in canvas px (${BRUSH_SIZE.min}–${BRUSH_SIZE.max})`;
+  brushSizeInput.title = `${brushStem} — The brush size in canvas px (${BRUSH_SIZE.min}–${BRUSH_SIZE.max})`;
   let brushSize: number = BRUSH_SIZE.initial;
   brushSizeInput.addEventListener("change", () => {
     const size = Number(brushSizeInput.value);
@@ -556,6 +576,8 @@ function buildEditor(): HTMLElement {
   // The wand tool's tolerance (SPM-22): how far each colour channel may
   // drift from the clicked sample, as a percent of full range.
   let tolerance: number = TOLERANCE.initial;
+  // The tolerance's Name stem, shared by its aria-label and its tooltip.
+  const toleranceStem = "Tolerance";
   const toleranceInput = el("input", {
     class: "editor-side-input",
     type: "number",
@@ -563,9 +585,9 @@ function buildEditor(): HTMLElement {
     max: String(TOLERANCE.max),
     step: "1",
     value: String(TOLERANCE.initial),
-    "aria-label": "Tolerance",
+    "aria-label": toleranceStem,
   }) as HTMLInputElement;
-  toleranceInput.title = `Tolerance — How far each colour channel may drift from the clicked sample, in percent (${TOLERANCE.min}–${TOLERANCE.max})`;
+  toleranceInput.title = `${toleranceStem} — How far each colour channel may drift from the clicked sample, in percent (${TOLERANCE.min}–${TOLERANCE.max})`;
   toleranceInput.addEventListener("change", () => {
     const value = Number(toleranceInput.value);
     const problem = toleranceProblem(value);
@@ -583,9 +605,11 @@ function buildEditor(): HTMLElement {
   // selection is built from — a wand fill, and since SPM-23 a Rectangle or
   // Lasso polygon composed onto one — from the next one on.
   let feathered = true;
-  const featherInput = el("input", { type: "checkbox", "aria-label": "Feather" }) as HTMLInputElement;
+  // The feather's Name stem, shared by its aria-label and its tooltip.
+  const featherStem = "Feather";
+  const featherInput = el("input", { type: "checkbox", "aria-label": featherStem }) as HTMLInputElement;
   featherInput.checked = true;
-  featherInput.title = "Feather — Soften the selection's edge by half a pixel; uncheck it for hard edges";
+  featherInput.title = `${featherStem} — Soften the selection's edge by half a pixel; uncheck it for hard edges`;
   featherInput.addEventListener("change", () => {
     feathered = featherInput.checked;
     featherInput.blur();
@@ -597,14 +621,18 @@ function buildEditor(): HTMLElement {
   // Shown only while the model downloads; stays usable while everything else waits.
   const cancelDownloadButton = button("Cancel download", () => void cancelBackgroundDownload());
   cancelDownloadButton.hidden = true;
-  const textTitle =
-    "Add text — Type a new text layer in the chosen font, size and colour (Enter to finish, Shift+Enter for a new line)";
-  const editTextTitle = "Edit text — Edit the selected text layer's text (or double-click it)";
+  const addTextStem = "Add text";
+  const addTextTitle =
+    `${addTextStem} — Type a new text layer in the chosen font, size and colour (Enter to finish, Shift+Enter for a new line)`;
+  const editTextStem = "Edit text";
+  const editTextTitle = `${editTextStem} — Edit the selected text layer's text (or double-click it)`;
 
   // Tooltips follow the §2 contract: Name (Shortcut) — one-line description.
   // Sizing and crop have no single-key shortcut, so their names stand alone.
-  const undoTitle = "Undo (Ctrl+Z) — Step back: the selection's own steps first, then the document's changes";
-  const redoTitle = "Redo (Ctrl+Y) — Step forward again: the selection's own steps first, then the document's changes";
+  const undoStem = "Undo (Ctrl+Z)";
+  const undoTitle = `${undoStem} — Step back: the selection's own steps first, then the document's changes`;
+  const redoStem = "Redo (Ctrl+Y)";
+  const redoTitle = `${redoStem} — Step forward again: the selection's own steps first, then the document's changes`;
   undoButton.title = undoTitle;
   redoButton.title = redoTitle;
   const sideWord = () => (freeSide === "longest" ? "long" : "short");
@@ -612,10 +640,12 @@ function buildEditor(): HTMLElement {
     `Resize — Scale everything on the canvas together so its ${sideWord()} side is the entered size ` +
     `(1–${IMPORT_MAX_SIDE} px); the canvas size stays`;
   resizeButton.title = resizeTitle();
-  sideKind.title = "Long side — The entered size applies to the image's longest side (Short side: its shortest)";
+  sideKind.title = `${sideKindStem} — The entered size applies to the image's longest side (Short side: its shortest)`;
   resetViewButton.title = "Reset view — Zoom and centre the canvas in view (changes the view only)";
-  const upTitle = "Move up — Move the selected layer up the stack";
-  const downTitle = "Move down — Move the selected layer down the stack";
+  const upStem = "Move up";
+  const upTitle = `${upStem} — Move the selected layer up the stack`;
+  const downStem = "Move down";
+  const downTitle = `${downStem} — Move the selected layer down the stack`;
   upButton.title = upTitle;
   downButton.title = downTitle;
   boxButton.title = "Guide — Show or hide the crop guide";
@@ -911,13 +941,14 @@ function buildEditor(): HTMLElement {
   // Emoji: the session's Emoji String in a fixed five-row box (SPEC §6
   // Layout). It never resizes; its internal scrollbar is the overflow
   // safety valve only. Validation is warn-only and lands in the message row.
-  const emojiLabel = el("label", { class: "editor-emoji-label", for: "editor-emoji-input" }, "Emoji String");
+  const emojiStem = "Emoji String";
+  const emojiLabel = el("label", { class: "editor-emoji-label", for: "editor-emoji-input" }, emojiStem);
   const emojiInput = el("textarea", {
     class: "editor-emoji-input",
     id: "editor-emoji-input",
     rows: "5",
     spellcheck: "false",
-    "aria-label": "Emoji String",
+    "aria-label": emojiStem,
   }) as HTMLTextAreaElement;
   emojiInput.addEventListener("keydown", (e) => {
     // Enter commits and gives up focus, so the editor's shortcuts work at
@@ -2290,9 +2321,11 @@ function buildEditor(): HTMLElement {
     const emojiBox = emoji;
     const emojiBlock = emojiBox?.blocked ?? null;
     emojiInput.disabled = busy || emojiBox === null || emojiBlock !== null;
-    emojiInput.title = emojiBlock?.message
-      ? `Emoji String — ${emojiBlock.message}`
-      : "Emoji String — Enter or leaving the box commits it; 1–20 emoji (a warning shows past 20), empty allowed";
+    emojiInput.title = blockedTitle(
+      emojiStem,
+      emojiBlock?.message || null,
+      `${emojiStem} — Enter or leaving the box commits it; 1–20 emoji (a warning shows past 20), empty allowed`,
+    );
     if (emojiBox && document.activeElement !== emojiInput) emojiInput.value = emojiBox.value;
     const doc = current.doc;
     // The toolbar's mode-dependent labels (SPEC §6): the sizing tools take
@@ -2307,8 +2340,10 @@ function buildEditor(): HTMLElement {
     fillButton.textContent = fillName;
     longestButton.textContent = longestName;
     const sideLabel = freeSide === "longest" ? "Long" : "Short";
-    sideInput.setAttribute("aria-label", `${sideLabel} side in pixels`);
-    sideInput.title = `${sideLabel} side — The entered size in pixels (1–${IMPORT_MAX_SIDE})`;
+    // One Name stem for the field's aria-label and its tooltip (the §2 rule).
+    const sideName = `${sideLabel} side`;
+    sideInput.setAttribute("aria-label", sideName);
+    sideInput.title = `${sideName} — The entered size in pixels (1–${IMPORT_MAX_SIDE})`;
     const fitTitle =
       `${fitName} — Scale everything on the canvas together, as one image, so its longest side is ${side} px; ` +
       `the canvas becomes ${side}×${side} with transparent padding`;
@@ -2351,7 +2386,7 @@ function buildEditor(): HTMLElement {
     const cropName = `Crop to ${boxSize}`;
     cropButton.textContent = cropName;
     cropButton.disabled = busy || cropReason !== null;
-    cropButton.title = cropReason !== null ? `${cropName} — ${cropReason}` : cropTitle(boxSize);
+    cropButton.title = blockedTitle(cropName, cropReason, cropTitle(boxSize));
     boxButton.setAttribute("aria-pressed", String(showBox));
     const status = readoutStatus(doc, constraints);
     readout.textContent = status.text;
@@ -2365,13 +2400,13 @@ function buildEditor(): HTMLElement {
     saveButton.title = blockedTitle(saveStem, saveReason ?? downloadNote, saveTitle());
     undoButton.disabled = busy || !current.canUndoAny;
     undoButton.title = blockedTitle(
-      "Undo (Ctrl+Z)",
+      undoStem,
       current.canUndoAny ? null : "Nothing to step back to yet",
       undoTitle,
     );
     redoButton.disabled = busy || !current.canRedoAny;
     redoButton.title = blockedTitle(
-      "Redo (Ctrl+Y)",
+      redoStem,
       current.canRedoAny ? null : "Nothing to step forward to yet",
       redoTitle,
     );
@@ -2380,35 +2415,33 @@ function buildEditor(): HTMLElement {
     const atTop = index === doc.layers.length - 1;
     upButton.disabled = busy || !single || atTop;
     upButton.title = blockedTitle(
-      "Move up",
+      upStem,
       !single ? "Select one layer to move it" : atTop ? "The layer is already at the top" : null,
       upTitle,
     );
     downButton.disabled = busy || !single || index === 0;
     downButton.title = blockedTitle(
-      "Move down",
+      downStem,
       !single ? "Select one layer to move it" : index === 0 ? "The layer is already at the bottom" : null,
       downTitle,
     );
     mergeButton.disabled = busy || blocker !== null;
-    mergeButton.title =
-      blocker !== null ? `Merge selected — ${blocker}` : "Merge selected — Merge the selected layers into one";
+    mergeButton.title = blockedTitle(mergeStem, blocker, mergeTitle);
     deleteButton.disabled = busy || deleteReason !== null;
     const deleteTitle = current.region
-      ? "Delete (Delete key) — Erase the selection's pixels"
-      : "Delete (Delete key) — Remove the selected layers";
-    deleteButton.title = blockedTitle("Delete (Delete key)", deleteReason, deleteTitle);
+      ? `${deleteStem} — Erase the selection's pixels`
+      : `${deleteStem} — Remove the selected layers`;
+    deleteButton.title = blockedTitle(deleteStem, deleteReason, deleteTitle);
     const cutReason = cutBlocker(doc, current.selection, current.region);
     cutButton.disabled = busy || cutReason !== null;
-    cutButton.title = cutReason !== null ? `Cut (Ctrl+X) — ${cutReason}` : cutTitle;
+    cutButton.title = blockedTitle(cutStem, cutReason, cutTitle);
     pasteButton.disabled = busy;
     pasteButton.title = pasteTitle;
     // Background removal (SPM-7); the brushes say why on a press instead.
     const bgTarget = backgroundTarget(doc, current.selection);
     const removeReason = "reason" in bgTarget ? bgTarget.reason : null;
     removeBackgroundButton.disabled = busy || removeReason !== null;
-    removeBackgroundButton.title =
-      removeReason !== null ? `Remove background — ${removeReason}` : removeBackgroundTitle;
+    removeBackgroundButton.title = blockedTitle(removeBackgroundStem, removeReason, removeBackgroundTitle);
     brushSizeInput.disabled = busy;
     toleranceInput.disabled = busy;
     featherInput.disabled = busy;
@@ -2418,10 +2451,10 @@ function buildEditor(): HTMLElement {
     const shown = texts.length > 0 ? textStyleOf(texts[0]) : nextStyle;
     const textReason = textBlocker(fonts, fontsProblem);
     textButton.disabled = busy || textReason !== null;
-    textButton.title = textReason !== null ? `Add text — ${textReason}` : textTitle;
+    textButton.title = blockedTitle(addTextStem, textReason, addTextTitle);
     const editReason = editTextBlocker(textReason, doc, current.selection);
     editTextButton.disabled = busy || editReason !== null;
-    editTextButton.title = editReason !== null ? `Edit text — ${editReason}` : editTextTitle;
+    editTextButton.title = blockedTitle(editTextStem, editReason, editTextTitle);
     // The picker lists the installed fonts, plus a layer's font that is no longer installed.
     const choices = fontChoices(fonts ?? [], shown.fontFamily);
     fontPicker.setFonts(choices);
@@ -2433,22 +2466,27 @@ function buildEditor(): HTMLElement {
     outlineColorInput.value = shown.outline?.color ?? DEFAULT_OUTLINE_COLOR;
     for (const control of textControls) control.disabled = busy || textReason !== null;
     const target = texts.length > 0 ? "the selected text" : "the next text";
-    fontPicker.title = textReason !== null ? `Font — ${textReason}` : `Font — The font of ${target}`;
-    fontSizeInput.title =
-      textReason !== null
-        ? `Font size — ${textReason}`
-        : `Font size — The size of ${target} in px (${TEXT_FONT_SIZE.min}–${TEXT_FONT_SIZE.max})`;
-    colorInput.title = textReason !== null ? `Text colour — ${textReason}` : `Text colour — The colour of ${target}`;
-    outlineColorInput.title =
-      textReason !== null ? `Text outline colour — ${textReason}` : `Text outline colour — The outline colour of ${target}`;
-    outlineWidthInput.title =
-      textReason !== null
-        ? `Text outline width — ${textReason}`
-        : `Text outline width — The outline width of ${target} in px (0 for no outline)`;
+    fontPicker.title = blockedTitle(fontStem, textReason, `${fontStem} — The font of ${target}`);
+    fontSizeInput.title = blockedTitle(
+      fontSizeStem,
+      textReason,
+      `${fontSizeStem} — The size of ${target} in px (${TEXT_FONT_SIZE.min}–${TEXT_FONT_SIZE.max})`,
+    );
+    colorInput.title = blockedTitle(textColourStem, textReason, `${textColourStem} — The colour of ${target}`);
+    outlineColorInput.title = blockedTitle(
+      textOutlineColourStem,
+      textReason,
+      `${textOutlineColourStem} — The outline colour of ${target}`,
+    );
+    outlineWidthInput.title = blockedTitle(
+      textOutlineWidthStem,
+      textReason,
+      `${textOutlineWidthStem} — The outline width of ${target} in px (0 for no outline)`,
+    );
     // The two eyedroppers join the text controls' disable loop, so a disabled
     // one says the same fonts blocker (SPEC §2).
-    textEyedropper.title = blockedTitle("Eyedropper", textReason, EYEDROPPER_TITLE);
-    outlineEyedropper.title = blockedTitle("Eyedropper", textReason, EYEDROPPER_TITLE);
+    textEyedropper.title = blockedTitle(EYEDROPPER_STEM, textReason, EYEDROPPER_TITLE);
+    outlineEyedropper.title = blockedTitle(EYEDROPPER_STEM, textReason, EYEDROPPER_TITLE);
     // Explain disabled actions only once something is selected.
     layerHint.textContent = layerHintText(doc, current.selection, current.region, {
       merge: blocker,
