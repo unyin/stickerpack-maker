@@ -4,7 +4,9 @@ Status: **Accepted** — owner approval 2026-11-23, after the Windows test of th
 (including the packaging check: the app starts with no onnxruntime.dll, verified on the dev
 run, the release build and the installer) and the single-model spot-check. The owner's
 decisions of 2026-11-22 (CMT-242) are built in: rembg's release as the download host until
-the file is mirrored to the project's own release, static ONNX Runtime, ISNet general use
+the file was mirrored to the project's own release (done in SPM-19, 2026-11-25: a
+byte-identical mirror on the project's `models` release, verified by SHA-256), static
+ONNX Runtime, ISNet general use
 as the model. The owner decision of 2026-11-23 dropped the second model (ISNet anime)
 after the owner's Windows test judged it unusable: background removal is back to the single
 general model, with no model choice in the UI (colour anime is out of scope; manga will
@@ -57,11 +59,12 @@ runs in the webview.**
   - The model's first **Remove background** asks first, in the shared two-option dialog
     (SPEC §2), naming its size. **Download** fetches it; **Cancel**, the safe
     default, does nothing.
-  - The pinned source is rembg's release asset (until a later task mirrors it to the
-    project's own release; only the URL changes):
-    `https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx`,
+  - The pinned source is the project's own release asset (SPM-19, owner decision
+    2026-11-22): a byte-identical mirror of rembg's release asset, uploaded to the
+    `models` tag on `unyin/stickerpack-maker` and served from there:
+    `https://github.com/unyin/stickerpack-maker/releases/download/models/isnet-general-use.onnx`,
     SHA-256 `60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a`,
-    178,648,008 bytes.
+    178,648,008 bytes (unchanged from the rembg release: only the URL moved).
   - Rust downloads over HTTPS (`ureq`, rustls with bundled roots: no OS TLS dependency),
     reports progress to the Editor's message line, and can be cancelled. It writes
     `<file>.part`, hashes while writing, and renames it into place only when the size and
@@ -126,9 +129,10 @@ accepted the model on that basis (2026-11-22).
   (179 MB) is downloaded only by users who use it, into the app data folder, where
   uninstalling may leave it (a "remove downloaded models" setting is a possible follow-up).
   Running the model holds about its size in memory.
-- **The download host is a third party** (rembg's GitHub release) until a later task mirrors
-  the file to the project's own release: the pinned SHA-256 makes a changed file fail
-  safely, but a removed one breaks the first download.
+- **The download host is the project's own GitHub release** (SPM-19): the pinned
+  SHA-256 makes a changed file fail safely, and the asset is under this project's
+  control, so a third party removing rembg's release no longer breaks the first
+  download.
 - **Third-party notices:** ISNet (Apache-2.0) and ONNX
   Runtime (MIT) need crediting wherever
   the app lists its licences.
