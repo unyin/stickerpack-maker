@@ -16,7 +16,8 @@
 //
 // The rendered list is always ACTION_LIST_ROWS lines tall: real lines first,
 // blank striped rows filling the rest (owner, from the test, 2026-11-25), so
-// a fresh session reads as lined paper rather than a bare box.
+// a fresh session reads as lined paper rather than a bare box. The present
+// row is kept in view on every render (terminal-tail style).
 import { el } from "../../ui";
 import type { ActionTrail } from "../model/history";
 import type { Contribution, PolyContribution, Region } from "../model/region";
@@ -45,13 +46,14 @@ export interface ActionListModel {
 export const SESSION_START = "Opened image";
 
 /**
- * The list's height in rows: real lines are topped up with blank striped
- * rows to this many, so a fresh session already shows the lined-notepad
- * look (owner, from the test, 2026-11-25). Seven matches the Layers box's
- * row cap; with more real lines than this there are no blanks and the box
- * scrolls as before.
+ * The list's prefill, in rows: real lines are topped up with blank striped
+ * rows to this many, so the tab opens as a lined page rather than a bare box
+ * (owner, from the test, 2026-11-25). Twenty lines is deliberately larger
+ * than the Layers box's cap — the owner wants the history's view large,
+ * where the stack only needs the rows it has. With more real lines than this
+ * there are no blanks and the box scrolls as before.
  */
-export const ACTION_LIST_ROWS = 7;
+export const ACTION_LIST_ROWS = 20;
 
 /** The list's rows for the session's two trails: the document's, then the selection's. */
 export function actionList(trail: ActionTrail, selection: SelectionTrail): ActionListModel {
@@ -136,4 +138,26 @@ export function renderActionList(list: HTMLElement, model: ActionListModel): voi
     items.push(el("li", { class: "editor-actions-fill", "aria-hidden": "true" }));
   }
   list.replaceChildren(...items);
+  revealCurrentAction(list);
+}
+
+/**
+ * Scroll the list's box so the present row is in view (terminal-tail style;
+ * owner, from the test, 2026-11-25). Called after every render, and again
+ * when the Actions tab is shown: while the tab is hidden there is no layout
+ * to measure, so a render cannot scroll then. Scrolls only when the row is
+ * not fully visible — an already-in-view row never jitters.
+ */
+export function revealCurrentAction(list: HTMLElement): void {
+  const current = list.querySelector<HTMLElement>(".is-current");
+  const box = list.parentElement;
+  if (!current || !box) return;
+  const row = current.getBoundingClientRect();
+  const view = box.getBoundingClientRect();
+  // A sub-pixel overhang is a rounding artefact, not a hidden row: keep it
+  // in view without a scroll, so a no-op render never nudges the list.
+  const above = view.top - row.top;
+  const below = row.bottom - view.bottom;
+  if (above > 0.5) box.scrollTop = Math.floor(box.scrollTop - above);
+  else if (below > 0.5) box.scrollTop = Math.ceil(box.scrollTop + below);
 }

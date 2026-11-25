@@ -179,7 +179,7 @@ import { TextEditOverlay } from "../editor/view/text-edit";
 import { FontPicker } from "../editor/view/font-picker";
 import { EffectControls } from "../editor/view/effect-controls";
 import { shortcutLabel, shortcutOf, type ShortcutAction } from "../editor/model/shortcuts";
-import { actionList, renderActionList } from "../editor/view/actions-list";
+import { actionList, renderActionList, revealCurrentAction } from "../editor/view/actions-list";
 import { EYEDROPPER_STEM, EYEDROPPER_TITLE, eyedropperButton } from "../editor/view/eyedropper";
 import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
 import { WarpPress } from "../editor/view/warp-brush";
@@ -937,6 +937,11 @@ function buildEditor(): HTMLElement {
     el("div", { class: "editor-listbox" }, actionsList),
     el("p", { class: "editor-note muted" }, "Read-only for now: jumping to an earlier step is planned."),
   );
+  // The list is re-rendered on every session change even while its tab is
+  // hidden, where there is no layout to scroll; opening the tab runs after
+  // the tab set un-hides it, so the present row is found (owner, from the
+  // test, 2026-11-25).
+  rightTabs.buttons.actions.addEventListener("click", () => revealCurrentAction(actionsList));
 
   // Emoji: the session's Emoji String in a fixed five-row box (SPEC §6
   // Layout). It never resizes; its internal scrollbar is the overflow
