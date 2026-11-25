@@ -857,6 +857,11 @@
   min-height: 0;
   flex: 1 1 auto;
   scrollbar-gutter: stable;
+  /* Containing block for the entries' absolutely positioned .sr-only copy
+     status spans. Without it their containing block is the modal dialog, which
+     a scroll container between them and it does not clip, so they stretched the
+     dialog's own scroll area down to the last entry (a second scrollbar). */
+  position: relative;
 }
 
 /* One fixed-height row (owner, 2026-11-25): 88px border-box = 2px border, 6px
