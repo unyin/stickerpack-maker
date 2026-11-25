@@ -27,6 +27,21 @@ function isBrushTool(tool: CanvasTool): tool is BrushMode {
 }
 
 /**
+ * The label of a transform commit for the Actions panel (SPM-15): "Move
+ * layer" when the gesture only changed positions, "Resize layer" when it
+ * changed any scale or rotation too (a corner/rotation handle).
+ */
+function transformLabel(before: Doc, after: Doc, ids: readonly string[]): string {
+  for (const id of ids) {
+    const was = before.layers.find((l) => l.id === id)?.transform;
+    const now = after.layers.find((l) => l.id === id)?.transform;
+    if (!was || !now) continue;
+    if (was.scaleX !== now.scaleX || was.scaleY !== now.scaleY || was.rotation !== now.rotation) return "Resize layer";
+  }
+  return "Move layer";
+}
+
+/**
  * The warp brush's side of a press, in document px (SPM-8). `shift` is the
  * pointer event's own shiftKey, as Konva's Transformer reads it.
  */
@@ -999,7 +1014,7 @@ export class EditorStage {
     this.stroke = null;
     // The painted canvas already shows the new pixels: reuse it, no redraw.
     if (live.stroke.changed) canvases.set(live.stroke.working, live.canvas);
-    this.session.apply((doc) => finishStroke(doc, live.stroke));
+    this.session.apply(live.stroke.mode === "restore" ? "Restore" : "Erase", (doc) => finishStroke(doc, live.stroke));
     this.render(); // a stroke that changed nothing shows the layer's own canvas again
   }
 
@@ -1245,7 +1260,9 @@ export class EditorStage {
 
   /**
    * Commit moved/transformed nodes as ONE undo step: dragging or resizing
-   * several selected layers fires an event per node in the same tick.
+   * several selected layers fires an event per node in the same tick. The
+   * step's label names what the gesture did (SPM-15): a pure move, or a
+   * resize when any scale or rotation changed.
    */
   private queueTransform(id: string): void {
     const first = this.pending.size === 0;
@@ -1256,15 +1273,14 @@ export class EditorStage {
       this.pending.clear();
       // Unchanged transforms (a click without a real drag) add no step:
       // apply() skips an operation that returns the same document.
-      this.session.apply((doc: Doc) =>
-        ids.reduce((d, layerId) => {
-          const node = this.nodes.get(layerId);
-          const layer = d.layers.find((l) => l.id === layerId);
-          if (!node || !layer) return d;
-          const next = transformOf(node);
-          return sameTransform(layer.transform, next) ? d : setTransform(d, layerId, next);
-        }, doc),
-      );
+      const next = ids.reduce((d: Doc, layerId) => {
+        const node = this.nodes.get(layerId);
+        const layer = d.layers.find((l) => l.id === layerId);
+        if (!node || !layer) return d;
+        const next = transformOf(node);
+        return sameTransform(layer.transform, next) ? d : setTransform(d, layerId, next);
+      }, this.session.doc);
+      this.session.apply(transformLabel(this.session.doc, next, ids), () => next);
     });
   }
 }

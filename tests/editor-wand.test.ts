@@ -183,15 +183,15 @@ test("a floating selection dies with any document change; a rectangle's survives
   const region = wandRegion(session.doc, mask(0, 0, 2, 2, [255, 255, 255, 255]));
   session.commitRegion(region);
   // An edit that changes nothing keeps it (no history step, no drop).
-  session.apply((doc) => doc);
+  session.apply("Edit", (doc) => doc);
   expect(session.region).toBe(region);
   // Any real change drops it: the mask no longer lines up with the pixels.
-  session.apply((doc) => setLayerImage(doc, base, image(4, 4)));
+  session.apply("Edit", (doc) => setLayerImage(doc, base, image(4, 4)));
   expect(session.region).toBeNull();
   // A rectangle region is plain geometry and survives edits.
   const rect = rectRegion({ x: 0, y: 0 }, { x: 2, y: 2 })!;
   session.commitRegion(rect);
-  session.apply((doc) => setLayerImage(doc, base, image(4, 4)));
+  session.apply("Edit", (doc) => setLayerImage(doc, base, image(4, 4)));
   expect(session.region).toBe(rect);
   // Undo reaches back past both edits: a floating selection would not survive it.
   session.commitRegion(region);

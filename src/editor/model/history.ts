@@ -1,6 +1,11 @@
 // Undo/redo over immutable states (ADR-0005). States share unchanged pixel
 // buffers, so the memory budget counts each buffer once, and only buffers
 // the present state does not use: the cost of being able to go back.
+//
+// Every step carries the label of the action that produced it IN-BAND
+// (SPM-15): the Actions panel lists them, and a parallel label array could
+// desync from the states it describes. The budget drops whole entries, so a
+// dropped step takes its label with it.
 import { IMPORT_MAX_SIDE } from "./image";
 
 export interface HistoryOptions<S> {
@@ -10,6 +15,24 @@ export interface HistoryOptions<S> {
   buffersOf: (state: S) => Iterable<ArrayBufferLike>;
 }
 
+/** One state and the label of the action that produced it (null: the session's start). */
+interface Entry<S> {
+  readonly state: S;
+  readonly label: string | null;
+}
+
+/**
+ * The Actions panel's read-only list (SPEC §6 Layout, SPM-15): one label per
+ * state, oldest first, with the present's position marked. A clickable jump
+ * is a planned later promotion, deliberately not built.
+ */
+export interface ActionTrail {
+  /** Labels oldest first; null is the session's start (no action produced it). */
+  readonly labels: readonly (string | null)[];
+  /** Index of the present state in `labels`; later labels are redoable steps. */
+  readonly currentIndex: number;
+}
+
 /** Undo steps the default budget holds when each repaints a whole layer at the import cap. */
 const DEFAULT_FULL_REPAINTS = 32;
 
@@ -17,21 +40,21 @@ const DEFAULT_FULL_REPAINTS = 32;
 export const DEFAULT_HISTORY_BUDGET = DEFAULT_FULL_REPAINTS * IMPORT_MAX_SIDE * IMPORT_MAX_SIDE * 4;
 
 export class History<S> {
-  private past: S[] = [];
-  private future: S[] = [];
-  private current: S;
+  private past: Entry<S>[] = [];
+  private future: Entry<S>[] = [];
+  private current: Entry<S>;
   private saved: S;
 
   constructor(
     initial: S,
     private readonly options: HistoryOptions<S>,
   ) {
-    this.current = initial;
+    this.current = { state: initial, label: null };
     this.saved = initial;
   }
 
   get present(): S {
-    return this.current;
+    return this.current.state;
   }
 
   get canUndo(): boolean {
@@ -44,13 +67,13 @@ export class History<S> {
 
   /** Unsaved changes: the present is not the state last imported or saved. */
   get isDirty(): boolean {
-    return this.current !== this.saved;
+    return this.current.state !== this.saved;
   }
 
-  /** Make `next` the present as one undoable step; clears redo. */
-  commit(next: S): void {
+  /** Make `next` the present as one undoable step labelled `label`; clears redo. */
+  commit(label: string, next: S): void {
     this.past.push(this.current);
-    this.current = next;
+    this.current = { state: next, label };
     this.future = [];
     this.enforceBudget();
   }
@@ -71,15 +94,24 @@ export class History<S> {
 
   /** The present was just saved: it becomes the clean state. */
   markSaved(): void {
-    this.saved = this.current;
+    this.saved = this.current.state;
+  }
+
+  /**
+   * The action labels for the Actions panel (SPM-15): the whole trail,
+   * oldest first, including the steps redo can still reach.
+   */
+  actionTrail(): ActionTrail {
+    const ordered = [...this.past, this.current, ...[...this.future].reverse()];
+    return { labels: ordered.map((entry) => entry.label), currentIndex: this.past.length };
   }
 
   /** Bytes of buffers held only by undo/redo steps. */
   get retainedBytes(): number {
-    const live = new Set(this.options.buffersOf(this.current));
+    const live = new Set(this.options.buffersOf(this.current.state));
     const retained = new Set<ArrayBufferLike>();
-    for (const state of [...this.past, ...this.future]) {
-      for (const buffer of this.options.buffersOf(state)) {
+    for (const entry of [...this.past, ...this.future]) {
+      for (const buffer of this.options.buffersOf(entry.state)) {
         if (!live.has(buffer)) retained.add(buffer);
       }
     }

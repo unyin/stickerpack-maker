@@ -14,9 +14,9 @@
       {
         "label": "main",
         "title": "Stickerpack Maker",
-        "width": 1200,
-        "height": 800,
-        "minWidth": 900,
+        "width": 1350,
+        "height": 1000,
+        "minWidth": 1100,
         "minHeight": 600
       }
     ],

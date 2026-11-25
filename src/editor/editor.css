@@ -9,20 +9,50 @@
   gap: 10px;
 }
 
+/* The top row (SPEC §6 Layout): one line from the window's 1100px minimum
+   up, with the groups divided by 1px rules whose 8px margins own all the
+   spacing between groups. The window cannot go narrower (tauri.conf.json's
+   minWidth is 1100), so the row never needs to wrap. The row's buttons are
+   compact at the app's 14px type so eleven text actions fit (owner,
+   2026-11-25; the measured design). */
 .editor-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 0;
+  flex-wrap: nowrap;
+  font-size: 14px;
 }
 
+.editor-toolbar > * {
+  flex: none;
+}
+
+/* One group of controls inside the row; its own spacing only. */
 .editor-tool-group {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 8px;
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  gap: 4px;
+}
+
+/* The rule between two groups: 8px of space to the controls on both sides
+   (measured convention, owner 2026-11-25 — the old group borders gave 8px
+   left and 3px right), stretched to the row's height. */
+.editor-sep {
+  flex: none;
+  align-self: stretch;
+  width: 1px;
+  margin: 0 8px;
+  background: var(--border);
+}
+
+/* The row's own buttons: compact at the app's 14px type. The .view.editor
+   prefix out-specifies button.primary/.secondary/.danger whatever the
+   stylesheet order, so the row's padding is the announced one. */
+.view.editor .editor-toolbar button {
+  padding: 9px 4px;
+  font-size: 14px;
+  line-height: 17px;
+  white-space: nowrap;
 }
 
 .editor-side {
@@ -30,6 +60,7 @@
   align-items: center;
   gap: 4px;
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .editor-side-input {
@@ -44,20 +75,24 @@
 
 /* The free-resize side-kind choice (CMT-152), styled like the field it names. */
 .editor-side-kind {
-  padding: 6px 8px;
+  padding: 5px 3px;
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
   font: inherit;
+  font-size: 14px;
 }
 
+/* The flexible spacer: Save… and Close stay anchored to the right edge. */
 .editor-spacer {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .editor-session-actions {
   display: inline-flex;
+  align-items: center;
   gap: 8px;
 }
 
@@ -72,8 +107,14 @@
   font-size: 14px;
 }
 
-.editor-message:empty {
-  display: none;
+/* The reserved message row (SPEC §2/§6, the CMT-290 fix): the row holds its
+   height whether or not there is a line to show, so the canvas never jumps
+   when a message appears or clears. A longer message grows the row instead
+   of clipping; the old collapse-when-empty rule is gone on purpose. */
+.view.editor .editor-message {
+  margin: 0;
+  min-height: 22px;
+  line-height: 20px;
 }
 
 /* A neutral note (e.g. after Crop converted text), not an error. */
@@ -88,6 +129,196 @@
   border: 1px dashed var(--border);
   border-radius: 12px;
   background: var(--panel);
+}
+
+/* The left tabbed tools panel (SPEC §6 Layout, SPM-15 D2): 192px wide; the
+   browser-style tab leaves stuck on its top edge are part of the panel, not
+   a strip inside it. The four text leaves total wider than 192px and
+   OVERHANG the panel's right edge over the canvas — the owner-accepted state
+   until the labels become icons (owner decision 2026-11-25); the leaves are
+   deliberately not shrunk. The leaf and body styles below are shared with
+   the right Layers/Actions/Emoji panel (D3), whose three leaves fit. */
+.editor-tools {
+  flex: none;
+  width: 192px;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-tabrow {
+  position: relative;
+  z-index: 1; /* the leaves paint over the canvas, not under it */
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  padding-left: 5px;
+}
+
+.editor-tool-tab {
+  padding: 4px 6px;
+  font-size: 12.5px;
+  line-height: 16px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+}
+
+.editor-tool-tab:hover {
+  color: var(--text);
+}
+
+/* The active leaf merges into the body: no bottom border, panel background,
+   and its 1px overlap swallows the body's top border. */
+.editor-tool-tab[aria-selected="true"] {
+  position: relative;
+  z-index: 1;
+  margin-bottom: -1px;
+  padding: 7px 6px 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.editor-tools-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px;
+  /* NOT a scroll container: the font picker's open list is deliberately
+     wider than the field (a dropdown may overlay the canvas, long names stay
+     readable), and an overflow container would clip it and scroll the panel
+     sideways. Every category fits the body at the window's 600px minimum
+     height, so nothing needs to scroll here. The right panel shares this
+     body; its lists scroll inside their own boxes instead. */
+  overflow: visible;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0 8px 8px 8px;
+}
+
+/* One category, as a bordered section with a mini-heading (the mockup's
+   convention). Exactly one section is visible at a time. */
+.editor-tool-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.editor-tool-section-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* A settings block's own mini-heading (Outline settings, Warp settings…). */
+.editor-tool-subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* Tool buttons: a full-width list, because the categories read as lists in
+   the narrow panel. A pressed tool carries the app's state look here (the
+   toolbar's own rule is scoped to .editor-toolbar). */
+.editor-tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.view.editor .editor-tool-list button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13.5px;
+  text-align: left;
+}
+
+.editor-tool-list button[aria-pressed="true"] {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+/* A labelled field row in the narrow panel. Every row shares one left inset:
+   the Feather checkbox's own 4px UA margin is the source, so the rows that
+   carry fields take the same 4px (the mockup's measured convention). */
+.editor-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: 13.5px;
+}
+
+.editor-field-indent {
+  padding-left: 4px;
+}
+
+/* A visible caption for a swatch that would otherwise be ambiguous. */
+.editor-cap {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.editor-panel-sep {
+  width: 100%;
+  height: 0;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* Panel number fields: 72px, so a four-digit entry (the font size's 1000)
+   clears the spinner and every field of the category keeps one column. */
+.view.editor .editor-tools .editor-side-input {
+  width: 72px;
+  padding: 4px 6px;
+}
+
+/* The font picker fills its section instead of overflowing; its open list
+   may be wider than the field (a dropdown may overlay the canvas, and long
+   font names stay readable). */
+.view.editor .editor-tools .font-picker-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.view.editor .editor-tools .font-picker-list {
+  width: 300px;
+  max-width: none;
+}
+
+/* A slider row in the panel: the name owns its own line above the slider,
+   value field and unit (the app's one-line row would not fit 192px). */
+.editor-slider {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: 13.5px;
+}
+
+.editor-slider > .editor-slider-name {
+  flex: 1 0 100%;
+}
+
+.editor-slider input[type="range"] {
+  flex: 1 1 60px;
+  width: auto;
+  min-width: 0;
 }
 
 .editor-workspace {
@@ -106,31 +337,113 @@
   overflow: hidden;
 }
 
+/* The right tabbed panel (SPEC §6 Layout, SPM-15 D3): 240px, with the same
+   browser-style tab leaves and body as the tools panel. Layers is the
+   default; the Emoji leaf is the one place the modes' geometry differs —
+   it hides in Thumbnail mode (owner decision 2026-11-25). */
 .editor-layers {
+  flex: none;
   width: 240px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
 }
 
-.editor-layers h2 {
-  margin: 0;
-  font-size: 15px;
+/* One right-panel tab's content: a plain block under the leaves. */
+.editor-tabpanel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* A bordered box around a whole list — the layer rows, the action history.
+   Buttons that act on a list sit BELOW its box, never inside it (owner
+   decision 2026-11-25). The box scrolls on its own; the row hover swaps to
+   --panel inside, where the box's own --bg would swallow it. */
+.editor-listbox {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 .editor-layers-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow: auto;
-  flex: 1;
+  /* The stack bottom-first (owner, from the test, 2026-11-25): the DOM runs
+     base -> newest (the model's own order) and column-reverse draws the
+     first row at the box's bottom, so rows rise as layers are added — a
+     row's place in the flow never changes. The list is its own scroller so a
+     full stack keeps the SAME box bottom edge; the reversed flow starts at
+     its bottom, and the render then reveals the selected row (see
+     revealSelectedLayer), which may be above the fold. The DOM order still
+     reads base -> newest for assistive tech; only the visual order is
+     reversed, and with no focusable rows focus order is unaffected. */
+  display: flex;
+  flex-direction: column-reverse;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* The layers box: exactly SEVEN rows tall (owner, from the test,
+   2026-11-25) — the owner expects no stack to need more than seven layers.
+   Fewer layers leave the area above empty on the box's plain --bg (no
+   stripes here); more scroll inside. The 30px row is fixed rather than
+   font-derived so the cap is exact in the app's Windows UI font: 6px
+   padding + an 18px line box. */
+.editor-layers-box {
+  --editor-layer-rows: 7;
+  --editor-layer-row-h: 30px;
+  /* Seven rows plus the 6px .editor-listbox adds around them: 2px padding and
+     a 1px border per side (not the 6px row padding above). */
+  --editor-layer-box-h: calc(var(--editor-layer-rows) * var(--editor-layer-row-h) + 6px);
+  /* The cap, not a floor: at the window's 600px minimum height the box gives
+     up rows before the action grid or hint below ever overflow the panel. */
+  flex: 0 1 auto;
+  height: var(--editor-layer-box-h);
+  max-height: var(--editor-layer-box-h);
+  overflow: hidden;
+}
+
+/* The Actions box: exactly the list's prefill, TWENTY rows tall, so the box
+   ends with its content instead of stretching to the panel's bottom (owner,
+   from the second test, 2026-11-25); the plain panel background shows below
+   it. --editor-action-rows must equal ACTION_LIST_ROWS in
+   src/editor/view/actions-list.ts — the two move together. Twenty 26px rows
+   (an 18px line box plus the 8px row padding) and the 19 1px gaps between
+   them, plus the 6px .editor-listbox adds (2px padding and a 1px border per
+   side). More real rows than the prefill scroll inside, as before; at the
+   window's 600px minimum the flex cap gives way like the Layers box. */
+.editor-actions-box {
+  --editor-action-rows: 20;
+  --editor-action-row-h: 26px;
+  --editor-action-gap-h: 1px;
+  --editor-action-box-h: calc(
+    var(--editor-action-rows) * var(--editor-action-row-h) + (var(--editor-action-rows) - 1) *
+      var(--editor-action-gap-h) + 6px
+  );
+  flex: 0 1 auto;
+  height: var(--editor-action-box-h);
+  max-height: var(--editor-action-box-h);
+}
+
+/* Only the boxes above give way at the minimum height: the tips below them
+   and the Layers grid's cells keep their measured height and lines. */
+.editor-layers .editor-layer-actions,
+.editor-layers .editor-hint,
+.editor-layers .editor-note {
+  flex: none;
 }
 
 .editor-layers-list li {
+  height: var(--editor-layer-row-h);
+  line-height: 18px;
   display: flex;
   gap: 8px;
   align-items: baseline;
@@ -142,6 +455,10 @@
 
 .editor-layers-list li:hover {
   background: var(--bg);
+}
+
+.editor-listbox .editor-layers-list li:not(.selected):hover {
+  background: var(--panel);
 }
 
 .editor-layers-list li.selected {
@@ -177,19 +494,160 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The layer actions under the box, outside it (SPEC §6 Layout, owner
+   decision 2026-11-25): two equal columns, three rows. The left column
+   changes the stack's size — the tall Add image as layer… (rows 1–2) over
+   Delete; the right column manipulates layers — Move up, Move down, Merge
+   selected. Equal columns hold "Merge selected" without clipping at 240px. */
 .editor-layer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px;
+  align-items: stretch;
 }
 
-.editor-layer-actions button {
-  padding: 6px 10px;
+/* Compact cells at the panel's narrow width; the .view.editor prefix
+   out-specifies button.primary/.secondary whatever the stylesheet order. */
+.view.editor .editor-layer-actions button {
+  padding: 4px 6px;
+  font-size: 12.5px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/* The tall add button's label wraps to two lines and reads left-justified
+   inside its square-ish cell; it is a picker command, so its ellipsis is
+   part of the copy. */
+.view.editor .editor-layer-actions .editor-cell-add {
+  grid-area: 1 / 1 / 3 / 2;
+  text-align: left;
+  white-space: normal;
+}
+
+.editor-cell-delete {
+  grid-area: 3 / 1;
+}
+
+.editor-cell-up {
+  grid-area: 1 / 2;
+}
+
+.editor-cell-down {
+  grid-area: 2 / 2;
+}
+
+.editor-cell-merge {
+  grid-area: 3 / 2;
 }
 
 .editor-hint {
   margin: 0;
   font-size: 13px;
+}
+
+/* A muted note under a panel list (the Actions tab's planned-promotion
+   annotation), quieter than the hint above a control. */
+.editor-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* The Actions tab's read-only history (SPM-15 D3): oldest first, one row per
+   action, the present on the accent fill with a "current" badge. The
+   selection's steps sit indented under their Select entry. Nothing here is
+   clickable. */
+.editor-actions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+/* The row's line box is fixed, like the layers rows', so the twenty-row cap
+   is exact in any UI font: 18px + 8px padding = the box's 26px row height. */
+.editor-actions-list > li {
+  padding: 4px 8px;
+  line-height: 18px;
+  border-radius: 4px;
+}
+
+.editor-actions-list > li:nth-child(odd):not(.is-current) {
+  background: var(--panel);
+}
+
+.editor-actions-list > li.is-current {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.editor-actions-badge {
+  margin-left: 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.editor-actions-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 3px 0 0 6px;
+  padding-left: 10px;
+  list-style: none;
+  font-size: 12.5px;
+  border-left: 1px solid var(--border);
+}
+
+.editor-actions-sub li {
+  padding: 2px 0;
+}
+
+.editor-actions-empty {
+  font-style: italic;
+}
+
+/* The blank rows that top the list up to ACTION_LIST_ROWS
+   (src/editor/view/actions-list.ts owns the count): decoration only, so
+   each is aria-hidden and has no listener. Generated content gives the row
+   a real line box, so a blank line is exactly as tall as a real one and the
+   zebra rule above stripes it like any other odd row. */
+.editor-actions-fill::before {
+  content: "\00a0";
+}
+
+/* The Emoji tab's box (SPEC §6 Layout): a FIXED five-row height that never
+   follows the string — the anti-jump rule. Five 30px lines plus the 6px
+   padding and 1px border on each side are the 164px; the internal scrollbar
+   is the safety valve for a pathological entry only. */
+.editor-emoji-label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.editor-emoji-input {
+  display: block;
+  width: 100%;
+  height: 164px;
+  padding: 6px 8px;
+  line-height: 30px;
+  font-family: var(--font-emoji);
+  font-size: 22px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: none;
+  overflow-y: auto;
+}
+
+.editor-emoji-input:disabled {
+  opacity: 0.6;
 }
 
 .view.editor [hidden] {
@@ -207,7 +665,34 @@
   color: var(--danger-text);
 }
 
-/* The Crop box toggle shows its state. */
+/* The bottom status strip (SPEC §6 Layout, owner 2026-11-25): the readout on
+   the left, then the view cluster on the right — zoom, Reset view, the
+   unsaved-changes dot. One slim line, tokens only, in DOM (and so Tab) order. */
+.editor-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 14px;
+}
+
+.editor-status-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* A compact button keeps the strip one line (out-specifying button.secondary
+   whatever the stylesheet order, like the row's own rule). */
+.view.editor .editor-status button {
+  padding: 4px 10px;
+}
+
+/* The Guide toggle shows its state. */
 .editor-toolbar button[aria-pressed="true"] {
   border-color: var(--accent-ink);
   color: var(--accent-ink);
@@ -257,41 +742,29 @@
   border-radius: 6px;
 }
 
-/* The effect tools' options bar (SPM-8): under the toolbar while Outline,
-   Glow or Warp is active. */
-.editor-effect-bar {
+/* The effect tools' settings (SPM-8, mounted in the tools panel since
+   SPM-15 D2): one block per tool, under Outline/Glow in Effects and Warp in
+   Paint. The horizontal bar is retired — a change here never moves the
+   canvas (the CMT-290 disease). */
+.editor-effect-settings {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Apply and Cancel are centred in the panel body (owner revision r3). */
+.editor-effect-actions {
+  display: flex;
   flex-wrap: wrap;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
-  /* Every tool's bar has the height of the one with buttons, so switching
-     between Outline, Glow and Warp does not shift the canvas. */
-  min-height: 52px;
-  box-sizing: border-box;
+  justify-content: center;
+  gap: 6px;
 }
 
-.editor-effect-bar[hidden],
-.editor-effect-group[hidden],
-.editor-effect-bar button[hidden] {
-  display: none;
+.editor-effect-actions button {
+  padding-inline: 16px;
 }
 
-.editor-effect-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.editor-effect-group input[type="range"] {
-  width: 110px;
-}
-
-/* Fixed width, so the bar does not jump while a slider's value changes. */
+/* Fixed width, so a slider's row does not jump while its value changes. */
 .editor-effect-value {
   display: inline-block;
   min-width: 52px;
@@ -314,7 +787,17 @@
 }
 
 .editor-effect-target {
-  font-size: 14px;
+  font-size: 13.5px;
+  /* The target line (On: <layer>) WRAPS inside the 192px panel (owner,
+     from the test, 2026-11-25): a long name breaks anywhere, over as many
+     lines as it needs, and the Apply/Cancel pair below moves down — the
+     name never spills past the panel. min-width: 0 lets the flex item
+     shrink below its min-content width; overflow-wrap: anywhere shrinks
+     that width too, so even one unbroken name breaks. */
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
 }
 
 /* A colour picker and the eyedropper beside it (owner decision 2026-11-23). */
@@ -333,10 +816,64 @@
   color: var(--danger-text);
 }
 
-/* The save dialog (SPM-10): PNG / WEBP side by side. */
+/* The save dialog's PNG / WEBP choice (SPEC §6 Save, owner 2026-11-25): ONE
+   rectangle split into two halves by a 1px gap that shows the border colour
+   through — a fill swap, not a sliding thumb. The radios are still the real
+   control underneath (same name: arrow keys, Tab and the screen reader all
+   behave as a two-radio group); each half paints its radio's state.
+
+   Contrast, by construction from the tokens (both themes measured):
+   active text --accent-ink on the 12% accent tint is 4.9:1 light / 5.2:1
+   dark, and the same ink as the active half's inset rule is the >=3:1
+   boundary; inactive text --muted on --panel is 6.0:1 / 7.2:1. */
 .editor-save-format {
-  display: flex;
-  gap: 16px;
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--border);
+}
+
+.editor-format-half {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 84px;
+  padding: 7px 18px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.editor-format-half:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.editor-format-half:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+/* The inactive half's hover tint; a checked half keeps its own fill. */
+.editor-format-half:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+
+.editor-format-half:has(input:checked) {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--accent-ink);
+  font-weight: 600;
+  /* The active half's boundary at >=3:1 in both themes (the accent-ink
+     pattern primary buttons use). */
+  box-shadow: inset 0 0 0 1px var(--accent-ink);
+}
+
+/* The radios stay focusable; the visible ring is drawn on their half. */
+.editor-format-half:has(input:focus-visible) {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
 }
 
 /* The save dialog's "Replace #N / Save as a new sticker" choice (SPM-10). */

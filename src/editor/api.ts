@@ -464,10 +464,13 @@ export const SAVE_HEADER = "x-save-image";
  * Save the document (SPEC §6, SPM-10): Rust flattens what is inside the
  * canvas, encodes it as `format` within the size cap and writes it to
  * `target` through the Library core. Layers go as for merge (raster pixels
- * as the raw body, text as text). A canvas that misses the sticker
- * constraint set is refused (rejects); over the cap resolves `tooLarge`.
+ * as the raw body, text as text). `emojiString` is the Emoji String a NEW
+ * sticker gets (SPEC §6 Layout, SPM-15): the Emoji tab's staged value, ""
+ * for none; a replace and a thumbnail save ignore it, keeping the sticker's
+ * own. A canvas that misses the sticker constraint set is refused (rejects);
+ * over the cap resolves `tooLarge`.
  */
-export function saveImage(doc: Doc, format: SaveFormat, target: SaveTarget): Promise<SaveOutcome> {
+export function saveImage(doc: Doc, format: SaveFormat, target: SaveTarget, emojiString = ""): Promise<SaveOutcome> {
   const { body, meta } = encodeLayers(doc.layers.map(layerInput));
   return invokeRaw<SaveOutcome>("editor_save_image", body, SAVE_HEADER, {
     width: doc.width,
@@ -475,5 +478,6 @@ export function saveImage(doc: Doc, format: SaveFormat, target: SaveTarget): Pro
     layers: meta,
     format,
     target,
+    emojiString,
   });
 }

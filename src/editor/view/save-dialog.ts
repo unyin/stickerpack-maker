@@ -21,7 +21,10 @@ import type { ThumbnailOrigin } from "../../shared/thumbnail-origin";
 
 /**
  * The PNG/WEBP toggle row, shared by the sticker and thumbnail save dialogs:
- * one radio group plus its readers, set to `initial`.
+ * one radio group plus its readers, set to `initial`. The pair renders as a
+ * segmented control (SPEC §6 Save, owner 2026-11-25) — one rectangle split
+ * into two tinted halves — while the radios underneath stay the real control,
+ * so arrow keys, tab order and the screen-reader semantics are unchanged.
  */
 function formatRow(initial: SaveFormat): {
   row: HTMLElement;
@@ -31,9 +34,16 @@ function formatRow(initial: SaveFormat): {
   const radios = new Map<SaveFormat, HTMLInputElement>();
   const row = el("div", { class: "editor-save-format", role: "radiogroup", "aria-label": "Format" });
   for (const format of ["png", "webp"] as const) {
-    const radio = el("input", { type: "radio", name: "save-format", value: format }) as HTMLInputElement;
+    // Visually hidden but focusable: sr-only keeps the radio in the tab order
+    // and in the group; its label paints the state.
+    const radio = el("input", {
+      type: "radio",
+      name: "save-format",
+      value: format,
+      class: "sr-only",
+    }) as HTMLInputElement;
     radios.set(format, radio);
-    row.append(el("label", { class: "pm-check" }, radio, ` ${FORMAT_LABEL[format]}`));
+    row.append(el("label", { class: "editor-format-half" }, radio, FORMAT_LABEL[format]));
   }
   const setFormat = (format: SaveFormat) => {
     for (const [value, radio] of radios) radio.checked = value === format;
@@ -54,6 +64,12 @@ export interface SaveDialogOptions {
   readonly format: SaveFormat;
   /** The sticker this session edits (opened with Edit), or null. */
   readonly origin: StickerOrigin | null;
+  /**
+   * The Emoji String a new sticker would carry (the Emoji tab's value,
+   * SPM-15); "" shows the without-emoji hint. The view pass (D3) restyles
+   * this dialog; the hint's condition is data, not layout.
+   */
+  readonly emojiString: string;
   /**
    * Save with the choice. Resolve null to close the dialog, or a line to
    * show in it while it stays open (e.g. "Not saved: …"). A rejection shows
@@ -100,12 +116,13 @@ export async function saveDialog(options: SaveDialogOptions): Promise<void> {
   replaceRadio.checked = origin !== null;
   newRadio.checked = origin === null;
   const replacing = () => origin !== null && replaceRadio.checked;
+  const emojiHint = options.emojiString === "" ? "without emoji" : "with its emoji";
   const packSection = el(
     "div",
     { class: "editor-save-pack" },
     el("p", { class: "field-label" }, "Pack"),
     ...picker.elements,
-    el("p", { class: "muted pm-hint" }, "The sticker goes to the end of the pack, without emoji."),
+    el("p", { class: "muted pm-hint" }, `The sticker goes to the end of the pack, ${emojiHint}.`),
   );
 
   const { row: formatToggle, format, setFormat } = formatRow(options.format);

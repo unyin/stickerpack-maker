@@ -36,6 +36,8 @@ export interface PolyContribution {
   /** Whether the boundary takes half coverage: the Feather checkbox's setting when it was drawn. */
   readonly feather: boolean;
   readonly points: readonly Point[];
+  /** The tool that drew it, for the Actions list's name; absent falls back to the geometry (SPM-15). */
+  readonly shape?: "rectangle" | "lasso";
 }
 
 /** One piece of a floating selection, tagged add or subtract. */

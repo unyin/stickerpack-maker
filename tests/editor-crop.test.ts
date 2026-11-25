@@ -238,7 +238,7 @@ test("Crop is one undo step; undo and redo restore the layers and keep the canva
   session.select("layer-2");
   const before = session.doc;
   const plan = planCrop(before, cropBox(before, S));
-  session.apply((d) => cropLayers(d, plan, copyClips(d, plan)));
+  session.apply("Edit", (d) => cropLayers(d, plan, copyClips(d, plan)));
   const after = session.doc;
   expect(after.layers.map((l) => l.id)).toEqual(["layer-1"]);
   expect(session.selection).toEqual([]); // the discarded layer leaves the selection
@@ -302,7 +302,7 @@ test("the readout follows undo and redo of a canvas change", () => {
   const session = new EditorSession(doc);
   const seen: string[] = [];
   session.subscribe(() => seen.push(readoutText(session.doc, STICKER)));
-  session.apply((d) => scaleLongestSide(d, placedBounds(S * 2, S, d.layers[0].transform), S));
+  session.apply("Edit", (d) => scaleLongestSide(d, placedBounds(S * 2, S, d.layers[0].transform), S));
   session.undo();
   session.redo();
   expect(seen).toEqual([

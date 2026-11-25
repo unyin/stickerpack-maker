@@ -37,6 +37,7 @@ import {
   type ImageInfo,
 } from "../editor/api";
 import { backgroundTarget, refineLayerPixels } from "../editor/model/background";
+import { SessionEmoji, type EmojiStore } from "../editor/model/emoji";
 import {
   moveWandGesture,
   NOTHING_TO_SELECT_OUTSIDE,
@@ -81,7 +82,7 @@ import type { ThumbnailOrigin } from "../shared/thumbnail-origin";
 import { originNow, saveDialog, thumbnailSaveDialog } from "../editor/view/save-dialog";
 import { packMemory } from "../pack-manager/model/pack-memory";
 import { markStickerFileChanged, markThumbnailChanged } from "../pack-manager/model/changed-files";
-import { loadPackView, type Sticker } from "../pack-manager/api";
+import { loadPackView, setEmojiString, type Sticker } from "../pack-manager/api";
 import {
   anchoredTransform,
   addRasterLayer,
@@ -177,12 +178,36 @@ import type { CanvasTool } from "../editor/model/tools";
 import { TextEditOverlay } from "../editor/view/text-edit";
 import { FontPicker } from "../editor/view/font-picker";
 import { EffectControls } from "../editor/view/effect-controls";
-import { eyedropperButton } from "../editor/view/eyedropper";
+import { shortcutLabel, shortcutOf, type ShortcutAction } from "../editor/model/shortcuts";
+import { actionList, renderActionList, revealCurrentAction } from "../editor/view/actions-list";
+import { revealRow } from "../editor/view/reveal";
+import { EYEDROPPER_STEM, EYEDROPPER_TITLE, eyedropperButton } from "../editor/view/eyedropper";
 import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
 import { WarpPress } from "../editor/view/warp-brush";
 import { moveWarpGesture, startWarpGesture, warpReadout, type WarpGesture } from "../editor/model/warp";
 import { confirmChoice } from "../dialog";
 import { el, errorMessage, withMessage } from "../ui";
+
+/** The left tools panel's categories (SPEC §6 Layout): one visible at a time. */
+type ToolsPanelTab = "select" | "paint" | "effects" | "text";
+
+/**
+ * The category a tool surfaces when it is activated — its button, its
+ * shortcut, or an automatic return to Move (SPEC §6 Layout, owner decision
+ * 2026-11-25). The reverse direction does not exist: a tab click shows its
+ * category and never changes the tool.
+ */
+const TOOL_PANEL: Record<CanvasTool, ToolsPanelTab> = {
+  move: "select",
+  rect: "select",
+  lasso: "select",
+  wand: "select",
+  erase: "paint",
+  restore: "paint",
+  warp: "paint",
+  outline: "effects",
+  glow: "effects",
+};
 
 let root: HTMLElement | null = null;
 
@@ -224,6 +249,21 @@ function buildEditor(): HTMLElement {
   let thumbnailOrigin: ThumbnailOrigin | null = null;
   // Counts Library changes, so a saved note's link knows its sticker is from an old one.
   let libraryGeneration = 0;
+  // The session's Emoji String (SPEC §6 Layout, Emoji tab; SPM-15): staged for
+  // a fresh image, written through when the session edits an origin sticker.
+  // The tab's box (slice D3) reads and commits through it.
+  let emoji: SessionEmoji | null = null;
+  // The Rust side of that box: the pack view's sticker and the Pack Manager's
+  // own emoji command (set_emoji_string — reuse, not a second command).
+  const emojiStore: EmojiStore = {
+    read: async (packId, stickerId) => {
+      const view = await loadPackView(packId);
+      const sticker = view.stickers.find((s) => s.id === stickerId);
+      if (!sticker) throw new Error(`sticker ${stickerId} is not in its pack`);
+      return sticker.emojiString;
+    },
+    write: async (stickerId, emojiString) => (await setEmojiString(stickerId, emojiString)).emojiString,
+  };
 
   const message = el("p", { class: "message editor-message", role: "alert" });
   const canvasHost = el("div", { class: "editor-canvas" }) as HTMLDivElement;
@@ -235,7 +275,9 @@ function buildEditor(): HTMLElement {
   const readout = el("span", { class: "editor-readout", "aria-live": "polite" });
 
   const openButton = button("Open image", () => run(openImage), "primary");
-  const addButton = button("Add image as layer", () => run(addImageAsLayer), "primary");
+  // The ellipsis marks the image picker dialog it opens (SPEC §6 Layout, D3).
+  const addButton = button("Add image as layer…", () => run(addImageAsLayer), "primary");
+  addButton.title = "Add image as layer… — Pick an image and place it on top of the canvas at its native pixel size";
   const undoButton = button("Undo", () => {
     clearNote();
     session?.undoSelectionFirst();
@@ -248,21 +290,25 @@ function buildEditor(): HTMLElement {
   // and titles come from the active constraint set and are (re)set in
   // refresh(), which every session start runs.
   const fitButton = button("Fit", () =>
-    resizeWholeImage((doc, c) => fitToBox(doc, c, constraints.side)),
+    resizeWholeImage(`Fit in ${constraints.side}`, (doc, c) => fitToBox(doc, c, constraints.side)),
   );
-  // Sizing tool 4 (SPEC §6): Fill is to Fit what CSS cover is to contain.
-  const fillButton = button("Fill", () =>
-    resizeWholeImage((doc, c) => fillToBox(doc, c, constraints.side)),
+  // Sizing tool 4 (SPEC §6): Cover is to Fit what CSS cover is to contain.
+  const fillButton = button("Cover", () =>
+    resizeWholeImage(`Cover ${constraints.side}`, (doc, c) => fillToBox(doc, c, constraints.side)),
   );
-  const longestButton = button("Longest side", () =>
-    resizeWholeImage((doc, c) => scaleLongestSide(doc, c, constraints.side)),
+  const longestButton = button("Long side", () =>
+    resizeWholeImage(`Long side ${constraints.side}`, (doc, c) => scaleLongestSide(doc, c, constraints.side)),
   );
-  // The free-resize side-kind choice (CMT-152), instead of the old fixed
-  // "Longest side" label for the field.
-  const sideKind = el("select", { class: "editor-side-kind", "aria-label": "Which side the entered size is" }) as HTMLSelectElement;
+  // The free-resize side-kind choice (CMT-152). It reads as one sentence with
+  // the static "side"/"px" text and the field (SPEC §6, owner 2026-11-25):
+  // "[Long/Short] side [N] px Resize".
+  // The select's Name stem (the §2 title contract): its aria-label and the
+  // tooltip's name come from this one string.
+  const sideKindStem = "Long side";
+  const sideKind = el("select", { class: "editor-side-kind", "aria-label": sideKindStem }) as HTMLSelectElement;
   sideKind.append(
-    el("option", { value: "longest" }, "Longest side"),
-    el("option", { value: "shortest" }, "Shortest side"),
+    el("option", { value: "longest" }, "Long"),
+    el("option", { value: "shortest" }, "Short"),
   );
   sideKind.addEventListener("change", () => {
     freeSide = sideKind.value as ResizeSide;
@@ -278,21 +324,35 @@ function buildEditor(): HTMLElement {
     // The label is set in refresh(), from the side-kind choice.
   }) as HTMLInputElement;
   const resizeButton = button("Resize", () => freeResize());
-  const boxButton = button("Crop box", () => toggleBox());
+  const boxButton = button("Guide", () => toggleBox());
   // Labelled with the actual box size in refresh(): it is capped at the canvas.
   const cropButton = button("Crop", () => run(cropToBox));
   const resetViewButton = button("Reset view", () => stage?.fit());
-  const closeButton = button("Close", () => run(async () => void (await closeSession())));
+  // Close ends the session, so it carries the app's danger treatment (SPEC §6).
+  const closeButton = button("Close", () => run(async () => void (await closeSession())), "danger");
   const saveButton = button("Save…", () => run(saveSession), "primary");
+  const saveStem = "Save… (Ctrl+S)";
+  /**
+   * A control's title under the §2 contract: the name stem always stays and a
+   * blocker reason replaces the description; `idle` (the enabled title) shows
+   * when there is none.
+   */
+  const blockedTitle = (name: string, reason: string | null, idle: string): string =>
+    reason !== null ? `${name} — ${reason}` : idle;
   /** The Save button's idle title: what saving does in the session's mode. */
   const saveTitle = () =>
     constraints.mode === "thumbnail"
-      ? "Save the canvas as this pack's thumbnail (Ctrl+S)"
-      : "Save the canvas as a sticker in a pack (Ctrl+S)";
+      ? `${saveStem} — Save the canvas as this pack's thumbnail`
+      : `${saveStem} — Save the canvas as a sticker in a pack`;
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
+  const mergeStem = "Merge selected";
+  const mergeTitle = `${mergeStem} — Merge the selected layers into one`;
   const deleteButton = button("Delete", () => deletePressed());
+  // Delete names its shortcut: with a selection drawn it erases pixels, with
+  // none it deletes the selected layers (owner decision 2026-11-24).
+  const deleteStem = "Delete (Delete key)";
   // Cut selection tools and paste (SPM-9).
   const moveToolButton = button("Move", () => setTool("move"));
   const rectToolButton = button("Rectangle", () => setTool("rect"));
@@ -300,20 +360,34 @@ function buildEditor(): HTMLElement {
   const wandToolButton = button("Wand", () => setTool("wand"));
   const cutButton = button("Cut", () => run(cutSelection));
   const pasteButton = button("Paste", () => run(pasteFromButton));
-  moveToolButton.title = "Drag layers to move them, or empty space to pan";
-  rectToolButton.title = "Drag on the canvas to select a rectangle to cut";
-  lassoToolButton.title =
-    "Click to place points, drag to draw freehand; click the start point, double-click or press Enter to close (Backspace removes the last point or stroke, Esc cancels)";
-  wandToolButton.title =
-    "Click to select the colour-similar pixels of the selected image layer (or the base image); drag to set the tolerance; Shift adds a region, Alt removes one";
-  const cutTitle = "Move the selected pixels into a new floating layer at the same spot";
+  // Tooltips follow the §2 contract: Name (Shortcut) — one-line description
+  // (SPEC §6 Layout). The single-key tool shortcuts are the table's own.
+  const toolTitle = (name: string, action: ShortcutAction, description: string): string => {
+    const key = shortcutLabel(action);
+    return key ? `${name} (${key}) — ${description}` : `${name} — ${description}`;
+  };
+  moveToolButton.title = toolTitle("Move", "move", "Drag layers to move them, or empty space to pan");
+  rectToolButton.title = toolTitle("Rectangle", "rect", "Drag on the canvas to select a rectangle to cut");
+  lassoToolButton.title = toolTitle(
+    "Lasso",
+    "lasso",
+    "Click to place points, drag to draw freehand; click the start point, double-click or press Enter to close (Backspace removes the last point or stroke, Esc cancels)",
+  );
+  wandToolButton.title = toolTitle(
+    "Wand",
+    "wand",
+    "Click to select the colour-similar pixels of the selected image layer (or the base image); drag to set the tolerance; Shift adds a region, Alt removes one",
+  );
+  const cutStem = "Cut (Ctrl+X)";
+  const cutTitle = `${cutStem} — Move the selected pixels into a new floating layer at the same spot`;
   // Effect tools (SPM-8): each targets the selected layer, else the base image.
   const outlineToolButton = button("Outline", () => setTool("outline"));
   const glowToolButton = button("Glow", () => setTool("glow"));
   const warpToolButton = button("Warp", () => setTool("warp"));
-  outlineToolButton.title = "Outline the selected layer (or the base image): preview, then Apply";
-  glowToolButton.title = "Give the selected layer (or the base image) a fuzzy glow: preview, then Apply";
-  warpToolButton.title = "Enlarge parts of the selected layer (or the base image) with a bulge brush";
+  outlineToolButton.title = toolTitle("Outline", "outline", "Outline the selected layer (or the base image): preview, then Apply");
+  glowToolButton.title = toolTitle("Glow", "glow", "Give the selected layer (or the base image) a fuzzy glow: preview, then Apply");
+  warpToolButton.title = toolTitle("Warp", "warp", "Enlarge parts of the selected layer (or the base image) with a bulge brush");
+
   const effectControls = new EffectControls({
     change: () => refresh(),
     pick: (apply) => stage?.beginColorPick(apply),
@@ -347,37 +421,45 @@ function buildEditor(): HTMLElement {
   // A change of either discards the preview AND returns to Move (owner
   // decisions 2026-11-22, CMT-243 and after).
   let basis: EffectBasis | null = null;
-  const pasteTitle = "Paste an image from the clipboard as a new layer (Ctrl+V)";
+  const pasteTitle = "Paste (Ctrl+V) — Paste an image from the clipboard as a new layer";
   // Text tool (SPM-9): the controls style the selected text layers, or the next new text.
   const textButton = button("Add text", () => editText(null));
   const editTextButton = button("Edit text", () => {
     const id = session?.selection[0];
     if (id) editText(id);
   });
+  // The text controls' Name stems (the §2 title contract): each control's
+  // aria-label and its tooltip's name come from one string, so neither can
+  // desync from the other. The unit context lives in the description.
+  const fontStem = "Font";
+  const fontSizeStem = "Font size";
+  const textColourStem = "Text colour";
+  const textOutlineColourStem = "Text outline colour";
+  const textOutlineWidthStem = "Text outline width";
   // Font names shown in their own typeface, with type-to-search (owner, 2026-11-22).
-  const fontPicker = new FontPicker("Font");
+  const fontPicker = new FontPicker(fontStem);
   const fontSizeInput = el("input", {
     class: "editor-side-input",
     type: "number",
     min: String(TEXT_FONT_SIZE.min),
     max: String(TEXT_FONT_SIZE.max),
     step: "1",
-    "aria-label": "Font size in pixels",
+    "aria-label": fontSizeStem,
   }) as HTMLInputElement;
-  const colorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": "Text colour" }) as HTMLInputElement;
+  const colorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": textColourStem }) as HTMLInputElement;
   // The outline controls (SPM-18): a colour picker with its eyedropper and
   // a width field like the font size's. Width 0 means no outline — the
   // style's outline is null then, so 0 is also how an outline is removed.
   // The labels say "text outline" because the effect bar's own Outline
   // colour picker shares the page (hidden while the tool is off).
-  const outlineColorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": "Text outline colour" }) as HTMLInputElement;
+  const outlineColorInput = el("input", { class: "editor-color-input", type: "color", "aria-label": textOutlineColourStem }) as HTMLInputElement;
   const outlineWidthInput = el("input", {
     class: "editor-side-input",
     type: "number",
     min: String(TEXT_OUTLINE_WIDTH.min),
     max: String(TEXT_OUTLINE_WIDTH.max),
     step: "1",
-    "aria-label": "Text outline width in pixels",
+    "aria-label": textOutlineWidthStem,
   }) as HTMLInputElement;
   // The text controls' busy/text-reason disable loop; the eyedroppers beside
   // the colour pickers enroll themselves (owner decision 2026-11-23) and
@@ -455,12 +537,19 @@ function buildEditor(): HTMLElement {
   });
   // Background removal and the refine brush (SPM-7): on the selected image layer, or the base image.
   const removeBackgroundButton = button("Remove background", () => run(removeBackground));
+  const removeBackgroundStem = "Remove background";
   const removeBackgroundTitle =
-    "Make the background of the selected image layer (or the base image) transparent; works offline after a one-time model download";
+    `${removeBackgroundStem} — Make the background of the selected image layer (or the base image) transparent; works offline after a one-time model download`;
   const eraseToolButton = button("Erase", () => setTool("erase"));
   const restoreToolButton = button("Restore", () => setTool("restore"));
-  eraseToolButton.title = "Paint on the selected image layer (or the base image) to make it transparent";
-  restoreToolButton.title = "Paint on the selected image layer (or the base image) to bring back what was removed or erased";
+  eraseToolButton.title = toolTitle("Erase", "erase", "Paint on the selected image layer (or the base image) to make it transparent");
+  restoreToolButton.title = toolTitle(
+    "Restore",
+    "restore",
+    "Paint on the selected image layer (or the base image) to bring back what was removed or erased",
+  );
+  // The brush size's Name stem, shared by its aria-label and its tooltip.
+  const brushStem = "Brush";
   const brushSizeInput = el("input", {
     class: "editor-side-input",
     type: "number",
@@ -468,9 +557,9 @@ function buildEditor(): HTMLElement {
     max: String(BRUSH_SIZE.max),
     step: "1",
     value: String(BRUSH_SIZE.initial),
-    "aria-label": "Brush size in pixels",
+    "aria-label": brushStem,
   }) as HTMLInputElement;
-  brushSizeInput.title = `Brush size in canvas px (${BRUSH_SIZE.min}–${BRUSH_SIZE.max})`;
+  brushSizeInput.title = `${brushStem} — The brush size in canvas px (${BRUSH_SIZE.min}–${BRUSH_SIZE.max})`;
   let brushSize: number = BRUSH_SIZE.initial;
   brushSizeInput.addEventListener("change", () => {
     const size = Number(brushSizeInput.value);
@@ -488,6 +577,8 @@ function buildEditor(): HTMLElement {
   // The wand tool's tolerance (SPM-22): how far each colour channel may
   // drift from the clicked sample, as a percent of full range.
   let tolerance: number = TOLERANCE.initial;
+  // The tolerance's Name stem, shared by its aria-label and its tooltip.
+  const toleranceStem = "Tolerance";
   const toleranceInput = el("input", {
     class: "editor-side-input",
     type: "number",
@@ -495,9 +586,9 @@ function buildEditor(): HTMLElement {
     max: String(TOLERANCE.max),
     step: "1",
     value: String(TOLERANCE.initial),
-    "aria-label": "Wand tolerance in percent",
+    "aria-label": toleranceStem,
   }) as HTMLInputElement;
-  toleranceInput.title = `How far each colour channel may drift from the clicked sample, in percent (${TOLERANCE.min}–${TOLERANCE.max})`;
+  toleranceInput.title = `${toleranceStem} — How far each colour channel may drift from the clicked sample, in percent (${TOLERANCE.min}–${TOLERANCE.max})`;
   toleranceInput.addEventListener("change", () => {
     const value = Number(toleranceInput.value);
     const problem = toleranceProblem(value);
@@ -515,9 +606,11 @@ function buildEditor(): HTMLElement {
   // selection is built from — a wand fill, and since SPM-23 a Rectangle or
   // Lasso polygon composed onto one — from the next one on.
   let feathered = true;
-  const featherInput = el("input", { type: "checkbox", "aria-label": "Selection feathering" }) as HTMLInputElement;
+  // The feather's Name stem, shared by its aria-label and its tooltip.
+  const featherStem = "Feather";
+  const featherInput = el("input", { type: "checkbox", "aria-label": featherStem }) as HTMLInputElement;
   featherInput.checked = true;
-  featherInput.title = "Soften the selection's edge by half a pixel; uncheck it for hard edges";
+  featherInput.title = `${featherStem} — Soften the selection's edge by half a pixel; uncheck it for hard edges`;
   featherInput.addEventListener("change", () => {
     feathered = featherInput.checked;
     featherInput.blur();
@@ -529,19 +622,37 @@ function buildEditor(): HTMLElement {
   // Shown only while the model downloads; stays usable while everything else waits.
   const cancelDownloadButton = button("Cancel download", () => void cancelBackgroundDownload());
   cancelDownloadButton.hidden = true;
-  const textTitle = "Type a new text layer in the chosen font, size and colour (Enter to finish, Shift+Enter for a new line)";
-  const editTextTitle = "Edit the selected text layer's text (or double-click it)";
+  const addTextStem = "Add text";
+  const addTextTitle =
+    `${addTextStem} — Type a new text layer in the chosen font, size and colour (Enter to finish, Shift+Enter for a new line)`;
+  const editTextStem = "Edit text";
+  const editTextTitle = `${editTextStem} — Edit the selected text layer's text (or double-click it)`;
 
-  undoButton.title = "Undo (Ctrl+Z)";
-  redoButton.title = "Redo (Ctrl+Y)";
-  const resizeTitle = (kind: ResizeSide) =>
-    `Scale everything on the canvas together so its ${kind} side is the entered size (1–${IMPORT_MAX_SIDE} px); ` +
-    "the canvas size stays";
-  resizeButton.title = resizeTitle(freeSide);
-  resetViewButton.title = "Zoom and centre the canvas in view (changes the view only)";
-  boxButton.title = "Show or hide the crop box";
+  // Tooltips follow the §2 contract: Name (Shortcut) — one-line description.
+  // Sizing and crop have no single-key shortcut, so their names stand alone.
+  const undoStem = "Undo (Ctrl+Z)";
+  const undoTitle = `${undoStem} — Step back: the selection's own steps first, then the document's changes`;
+  const redoStem = "Redo (Ctrl+Y)";
+  const redoTitle = `${redoStem} — Step forward again: the selection's own steps first, then the document's changes`;
+  undoButton.title = undoTitle;
+  redoButton.title = redoTitle;
+  const sideWord = () => (freeSide === "longest" ? "long" : "short");
+  const resizeTitle = () =>
+    `Resize — Scale everything on the canvas together so its ${sideWord()} side is the entered size ` +
+    `(1–${IMPORT_MAX_SIDE} px); the canvas size stays`;
+  resizeButton.title = resizeTitle();
+  sideKind.title = `${sideKindStem} — The entered size applies to the image's longest side (Short side: its shortest)`;
+  resetViewButton.title = "Reset view — Zoom and centre the canvas in view (changes the view only)";
+  const upStem = "Move up";
+  const upTitle = `${upStem} — Move the selected layer up the stack`;
+  const downStem = "Move down";
+  const downTitle = `${downStem} — Move the selected layer down the stack`;
+  upButton.title = upTitle;
+  downButton.title = downTitle;
+  boxButton.title = "Guide — Show or hide the crop guide";
   const cropTitle = (size: string) =>
-    `Discard everything outside the ${size} box; drag the image to choose what stays. The canvas size stays`;
+    `Crop to ${size} — Discard everything outside the ${size} box; drag the image to choose what stays. The canvas size stays`;
+  closeButton.title = "Close — End the editing session; asks first while there are unsaved changes";
   sideInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") freeResize();
   });
@@ -555,91 +666,361 @@ function buildEditor(): HTMLElement {
     openButton,
   );
 
+  // A thin vertical rule between two of the top row's groups. Its 8px
+  // margins on BOTH sides own the row's spacing (owner, 2026-11-25: the old
+  // group borders gave 8px left and 3px right); the row's own gap is 0.
+  const rule = () => el("span", { class: "editor-sep", "aria-hidden": "true" });
+
+  // The top row (SPEC §6 Layout): Undo, Redo | the sizing tools | the
+  // free-resize sentence | Guide, Crop to {size} | spacer | Save…, Close.
   const toolbar = el(
     "div",
     { class: "editor-toolbar" },
-    addButton,
-    undoButton,
-    redoButton,
+    el(
+      "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Session" },
+      undoButton,
+      redoButton,
+    ),
+    rule(),
     el(
       "span",
       { class: "editor-tool-group", role: "group", "aria-label": "Size" },
-      el("span", { class: "muted" }, "Size:"),
       fitButton,
       fillButton,
       longestButton,
-      el("label", { class: "editor-side" }, sideKind, sideInput, " px"),
+    ),
+    rule(),
+    el(
+      "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Free resize" },
+      el("span", { class: "editor-side" }, sideKind, " side", sideInput, " px"),
       resizeButton,
     ),
+    rule(),
     el(
       "span",
       { class: "editor-tool-group", role: "group", "aria-label": "Crop" },
       boxButton,
       cropButton,
     ),
+    el("span", { class: "editor-spacer" }),
+    rule(),
+    el("span", { class: "editor-session-actions", role: "group", "aria-label": "Session actions" }, saveButton, closeButton),
+  );
+
+  // ---- The left tabbed tools panel (SPEC §6 Layout, SPM-15 D2) ----
+  //
+  // Browser-style tab leaves on the panel's own top edge: the active leaf
+  // merges into the body (its bottom border interrupts the body's top
+  // border, body background), the inactive leaves are shorter and dimmer on
+  // --bg. One category is visible at a time; Select is the default. The four
+  // text leaves total wider than the 192px panel and OVERHANG its right edge
+  // over the canvas — the owner-accepted state until the labels become icons
+  // (owner decision 2026-11-25); the leaves are deliberately not shrunk
+  // (editor.css carries the same note).
+  //
+  // The active tab is panel state, not tool state: a tab click shows its
+  // category and STAYS until another rule fires. Tool activations surface
+  // their category through setTool (below), and opening text editing
+  // surfaces Text (editText), so nothing else ever moves the panel.
+  type TabGroup<K extends string> = {
+    readonly buttons: Record<K, HTMLButtonElement>;
+    /** The tablist row, ready to mount. */
+    readonly row: HTMLElement;
+    /** A section for one tab, wired to its leaf; call show() once all exist. */
+    readonly section: (name: K, ...children: HTMLElement[]) => HTMLElement;
+    readonly show: (name: K) => void;
+    /** Work that needs the shown panel laid out, run after any successful show. */
+    readonly afterShow: Partial<Record<K, () => void>>;
+  };
+
+  /**
+   * One tab system's leaves and panels, shared by both side panels (SPM-15):
+   * same leaves, same aria wiring, same one-visible-category rule. Only the
+   * group names its ids ("editor-tool-…" / "editor-layer-…") and chooses its
+   * section class; the left panel's browser-style leaves are the common CSS.
+   */
+  function tabSet<K extends string>(
+    group: "tool" | "layer",
+    names: readonly K[],
+    labels: Record<K, string>,
+    tablistLabel: string,
+  ): TabGroup<K> {
+    const buttons = {} as Record<K, HTMLButtonElement>;
+    const sections = {} as Record<K, HTMLElement>;
+    const afterShow: Partial<Record<K, () => void>> = {};
+    const show = (name: K): void => {
+      for (const tab of names) {
+        buttons[tab].setAttribute("aria-selected", String(tab === name));
+        sections[tab].hidden = tab !== name;
+      }
+      afterShow[name]?.();
+    };
+    for (const name of names) {
+      buttons[name] = el(
+        "button",
+        {
+          class: "editor-tool-tab",
+          type: "button",
+          role: "tab",
+          id: `editor-${group}-tab-${name}`,
+          "aria-selected": "false",
+          "aria-controls": `editor-${group}-panel-${name}`,
+          onclick: () => show(name),
+        },
+        labels[name],
+      ) as HTMLButtonElement;
+    }
+    const row = el(
+      "div",
+      { class: "editor-tabrow", role: "tablist", "aria-label": tablistLabel },
+      ...names.map((name) => buttons[name]),
+    );
+    const section = (name: K, ...children: HTMLElement[]): HTMLElement => {
+      const panel = el(
+        "section",
+        {
+          class: group === "tool" ? "editor-tool-section" : "editor-tabpanel",
+          role: "tabpanel",
+          id: `editor-${group}-panel-${name}`,
+          "aria-labelledby": `editor-${group}-tab-${name}`,
+          hidden: true,
+        },
+        ...children,
+      );
+      sections[name] = panel;
+      return panel;
+    };
+    return { buttons, row, section, show, afterShow };
+  }
+
+  const leftTabs = tabSet(
+    "tool",
+    ["select", "paint", "effects", "text"] as const,
+    { select: "Select", paint: "Paint", effects: "Effects", text: "Text" },
+    "Tool categories",
+  );
+  leftTabs.buttons.select.title = "Select — Move and select layers, cut and paste";
+  leftTabs.buttons.paint.title = "Paint — Erase, restore and warp pixels, and remove the background";
+  leftTabs.buttons.effects.title = "Effects — Outline or glow the selected layer";
+  leftTabs.buttons.text.title = toolTitle("Text", "text-tab", "Add and style text layers");
+  const toolList = (...buttons: HTMLElement[]): HTMLElement => el("div", { class: "editor-tool-list" }, ...buttons);
+  const toolSection = (name: ToolsPanelTab, title: string, ...children: HTMLElement[]): HTMLElement =>
+    leftTabs.section(name, el("h3", { class: "editor-tool-section-title" }, title), ...children);
+
+  // Select: the four selection tools, their two fields, then Cut and Paste.
+  const selectSection = toolSection(
+    "select",
+    "Select",
+    toolList(moveToolButton, rectToolButton, lassoToolButton, wandToolButton),
+    el("label", { class: "editor-field editor-field-indent" }, "Tolerance ", toleranceInput, " %"),
+    // The checkbox's own 4px UA inset is the row convention's source: every
+    // field row takes the same 4px, so they share one left inset.
+    el("label", { class: "editor-field" }, featherInput, " Feather"),
+    el("hr", { class: "editor-panel-sep" }),
+    toolList(cutButton, pasteButton),
+  );
+
+  // Paint: the refine brushes with their size, background removal (it stays
+  // with its brushes, owner decision 2026-11-25), and Warp's settings.
+  const paintSection = toolSection(
+    "paint",
+    "Paint",
+    toolList(eraseToolButton, restoreToolButton, warpToolButton),
+    el("label", { class: "editor-field editor-field-indent" }, "Brush ", brushSizeInput, " px"),
+    toolList(removeBackgroundButton, cancelDownloadButton),
+    effectControls.warpBlock,
+  );
+
+  // Effects: the two effect tools, each one's settings beneath, then the
+  // Apply/Cancel pair centred in the panel (owner revision r3).
+  const effectsSection = toolSection(
+    "effects",
+    "Effects",
+    toolList(outlineToolButton, glowToolButton),
+    effectControls.outlineBlock,
+    effectControls.glowBlock,
+    effectControls.actions,
+  );
+
+  // Text: the two text actions and the six style controls. The two colour
+  // rows gain small visible captions because an unlabelled swatch is
+  // ambiguous once it leaves a labelled toolbar row; inputs, aria-labels and
+  // titles are the app's own.
+  const textSection = toolSection(
+    "text",
+    "Text",
+    toolList(textButton, editTextButton),
+    fontPicker.element,
+    el("label", { class: "editor-field editor-field-indent" }, "Size ", fontSizeInput, " px"),
     el(
-      "span",
-      { class: "editor-tool-group", role: "group", "aria-label": "Select and cut" },
-      moveToolButton,
-      rectToolButton,
-      lassoToolButton,
-      wandToolButton,
-      cutButton,
-      pasteButton,
-      el("label", { class: "editor-side" }, "Tolerance ", toleranceInput, " %"),
-      el("label", { class: "editor-side" }, featherInput, " Feather"),
-    ),
-    el(
-      "span",
-      { class: "editor-tool-group", role: "group", "aria-label": "Effects" },
-      outlineToolButton,
-      glowToolButton,
-      warpToolButton,
-    ),
-    el(
-      "span",
-      { class: "editor-tool-group", role: "group", "aria-label": "Background" },
-      removeBackgroundButton,
-      cancelDownloadButton,
-      eraseToolButton,
-      restoreToolButton,
-      el("label", { class: "editor-side" }, "Brush ", brushSizeInput, " px"),
-    ),
-    el(
-      "span",
-      { class: "editor-tool-group", role: "group", "aria-label": "Text" },
-      textButton,
-      editTextButton,
-      fontPicker.element,
-      el("label", { class: "editor-side" }, fontSizeInput, " px"),
+      "div",
+      { class: "editor-field editor-field-indent" },
+      el("span", { class: "editor-cap" }, "Text colour"),
       colorInput,
       textEyedropper,
+    ),
+    el(
+      "div",
+      { class: "editor-field editor-field-indent" },
+      el("span", { class: "editor-cap" }, "Outline colour"),
       outlineColorInput,
       outlineEyedropper,
-      el("label", { class: "editor-side" }, "Outline ", outlineWidthInput, " px"),
     ),
-    readout,
-    resetViewButton,
-    zoomLabel,
-    dirtyLabel,
-    el("span", { class: "editor-spacer" }),
-    // Save and Close stay together when the toolbar wraps.
-    el("span", { class: "editor-session-actions" }, saveButton, closeButton),
+    el("label", { class: "editor-field editor-field-indent" }, "Outline ", outlineWidthInput, " px"),
   );
+
+  /** Show one category; the tab leaves and the body follow. */
+  const showPanel = leftTabs.show;
+
+  const toolsPanel = el(
+    "aside",
+    { class: "editor-tools", "aria-label": "Tools" },
+    leftTabs.row,
+    el("div", { class: "editor-tools-body" }, selectSection, paintSection, effectsSection, textSection),
+  );
+  showPanel("select");
+
+  // ---- The right tabbed panel (SPEC §6 Layout, SPM-15 D3) ----
+  //
+  // The same browser-style tab leaves stuck on the panel's top edge as the
+  // tools panel (owner decision 2026-11-25): Layers is the default, Actions
+  // is a read-only history, Emoji is the session's Emoji String box. The
+  // Emoji leaf is the ONE place the modes' geometry differs — it hides in
+  // Thumbnail mode, because that mode has no sticker to hold the string
+  // (owner decision 2026-11-25). The Editor view is built once and cached,
+  // so that visibility is recomputed from `constraints.mode` on EVERY
+  // refresh(), never set once; a Thumbnail session handing off to a Sticker
+  // session must bring the leaf back (owner's live-test note). The panel
+  // goes back to Layers whenever the visible tab set changes.
+  // The Emoji leaf's last applied hidden state; null until the first session.
+  let emojiLeafHidden: boolean | null = null;
+
+  const rightTabs = tabSet(
+    "layer",
+    ["layers", "actions", "emoji"] as const,
+    { layers: "Layers", actions: "Actions", emoji: "Emoji" },
+    "Layers, actions and emoji",
+  );
+  rightTabs.buttons.layers.title =
+    "Layers — The layer stack, base at the bottom; click a row to select a layer (Ctrl-click toggles)";
+  rightTabs.buttons.actions.title = "Actions — Every undoable action this session, oldest first (read-only for now)";
+  rightTabs.buttons.emoji.title = "Emoji — The sticker's Emoji String; 1–20 emoji, empty allowed";
+  const rightSection = rightTabs.section;
+
+  // Layers: the list in its bounding box, the actions BELOW the box's bottom
+  // edge and outside it (owner decision 2026-11-25), then the hint. The grid
+  // cells are the owner's r6 split: Add (a tall, picker-opening cell across
+  // rows 1–2) over Delete on the left, Move up / Move down / Merge selected
+  // in the right column (editor.css owns the placement).
+  addButton.classList.add("editor-cell-add");
+  deleteButton.classList.add("editor-cell-delete");
+  upButton.classList.add("editor-cell-up");
+  downButton.classList.add("editor-cell-down");
+  mergeButton.classList.add("editor-cell-merge");
+  const layersSection = rightSection(
+    "layers",
+    el("div", { class: "editor-listbox editor-layers-box" }, layersList),
+    el(
+      "div",
+      { class: "editor-layer-actions", role: "group", "aria-label": "Layer actions" },
+      addButton,
+      deleteButton,
+      upButton,
+      downButton,
+      mergeButton,
+    ),
+    layerHint,
+  );
+  // The list reveals the focused layer on every render (see renderLayers);
+  // while the tab is hidden there is no layout to scroll, so the SHOW path
+  // does it too — the same pattern as the Actions tab below (owner, second
+  // test, 2026-11-25).
+  rightTabs.afterShow.layers = () => revealSelectedLayer(layersList, session?.selection.at(-1) ?? null);
+
+  // Actions: a READ-ONLY list of the document trail with the selection's
+  // steps nested under Select (see src/editor/view/actions-list.ts).
+  const actionsList = el("ol", { class: "editor-actions-list", "aria-label": "Action history" });
+  const actionsSection = rightSection(
+    "actions",
+    el("div", { class: "editor-listbox editor-actions-box" }, actionsList),
+    el("p", { class: "editor-note muted" }, "Read-only for now: jumping to an earlier step is planned."),
+  );
+  // The list is re-rendered on every session change even while its tab is
+  // hidden, where there is no layout to scroll; the reveal runs on the tab
+  // SHOW path, so any route that lands on Actions — a click today, a
+  // programmatic show later — finds the present row (owner, from the test,
+  // 2026-11-25).
+  rightTabs.afterShow.actions = () => revealCurrentAction(actionsList);
+
+  // Emoji: the session's Emoji String in a fixed five-row box (SPEC §6
+  // Layout). It never resizes; its internal scrollbar is the overflow
+  // safety valve only. Validation is warn-only and lands in the message row.
+  const emojiStem = "Emoji String";
+  const emojiLabel = el("label", { class: "editor-emoji-label", for: "editor-emoji-input" }, emojiStem);
+  const emojiInput = el("textarea", {
+    class: "editor-emoji-input",
+    id: "editor-emoji-input",
+    rows: "5",
+    spellcheck: "false",
+    "aria-label": emojiStem,
+  }) as HTMLTextAreaElement;
+  emojiInput.addEventListener("keydown", (e) => {
+    // Enter commits and gives up focus, so the editor's shortcuts work at
+    // once (the house rule); a textarea must never take a newline here.
+    if (e.key !== "Enter" || e.shiftKey) return;
+    e.preventDefault();
+    emojiInput.blur(); // the blur handler commits
+  });
+  emojiInput.addEventListener("blur", () => void commitEmoji());
+  const emojiSection = rightSection(
+    "emoji",
+    emojiLabel,
+    emojiInput,
+    el(
+      "p",
+      { class: "editor-hint muted" },
+      "1–20 emoji — a warning shows past 20; empty is allowed. The box holds five rows and never resizes.",
+    ),
+  );
+
+  /** Show one right-panel tab; its leaf and section follow. */
+  const showRightTab = rightTabs.show;
 
   const layersPanel = el(
     "aside",
-    { class: "editor-layers" },
-    el("h2", {}, "Layers"),
-    layersList,
-    el("div", { class: "editor-layer-actions" }, upButton, downButton, mergeButton, deleteButton),
-    layerHint,
+    { class: "editor-layers", "aria-label": "Layers, actions and emoji" },
+    rightTabs.row,
+    el("div", { class: "editor-tools-body" }, layersSection, actionsSection, emojiSection),
   );
+  showRightTab("layers");
 
-  const workspace = el("div", { class: "editor-workspace" }, canvasHost, layersPanel);
+  // The bottom status strip (SPEC §6 Layout, owner 2026-11-25): the live
+  // readout on the left; zoom, Reset view and the unsaved-changes dot on the
+  // right, in that order. Placement only: every behaviour is unchanged.
+  const statusRight = el(
+    "span",
+    { class: "editor-status-right", role: "group", "aria-label": "View status" },
+    zoomLabel,
+    resetViewButton,
+    dirtyLabel,
+  );
+  const statusStrip = el("div", { class: "editor-status" }, readout, statusRight);
+
+  const workspace = el("div", { class: "editor-workspace" }, toolsPanel, canvasHost, layersPanel);
   // The wheel over the typing overlay zooms the canvas like anywhere else (owner re-test 2026-11-22).
   const textOverlay = new TextEditOverlay(canvasHost, (e) => stage?.zoomAtClient(e.clientX, e.clientY, e.deltaY));
-  const view = el("section", { class: "view editor" }, toolbar, effectControls.element, message, empty, workspace);
+  const view = el(
+    "section",
+    { class: "view editor" },
+    toolbar,
+    // The reserved message row sits directly under the top row (SPEC §6).
+    message,
+    empty,
+    workspace,
+    statusStrip,
+  );
 
   /**
    * Show a line in the message area: an error or blocked-action reason in
@@ -650,6 +1031,30 @@ function buildEditor(): HTMLElement {
   function say(text: string, tone: "error" | "note" = "error", ...extra: (Node | string)[]): void {
     message.replaceChildren(text, ...extra);
     message.classList.toggle("is-note", tone === "note");
+  }
+
+  /**
+   * Commit the Emoji String box (SPEC §6 Layout): Enter or blur commits —
+   * staged for a fresh image, written straight through for an origin
+   * sticker — and the warn-only count warning shows in the message row
+   * (never a block). A blur with no change is not a command and clears
+   * nothing; a blocked box never writes.
+   */
+  async function commitEmoji(): Promise<void> {
+    const current = emoji;
+    if (!current || current.blocked || busy) return;
+    const typed = emojiInput.value;
+    if (typed === current.value) return; // nothing changed
+    try {
+      const stored = await current.commit(typed);
+      if (emoji !== current) return; // the session changed under the await
+      emojiInput.value = stored;
+      const warning = current.warning;
+      if (warning) say(warning, "note");
+      else if (message.classList.contains("is-note")) say(""); // the warning (or note) it replaced
+    } catch (err) {
+      say(errorMessage(err));
+    }
   }
 
   /**
@@ -794,6 +1199,24 @@ function buildEditor(): HTMLElement {
     constraints = set;
     origin = stickerFrom;
     thumbnailOrigin = thumbnailFrom;
+    emoji = new SessionEmoji(
+      stickerFrom
+        ? {
+            kind: "origin",
+            stickerId: stickerFrom.stickerId,
+            packId: stickerFrom.packId,
+            otherLibrary: stickerFrom.otherLibrary ?? false,
+          }
+        : { kind: "staged" },
+      emojiStore,
+    );
+    const startedEmoji = emoji;
+    // An origin sticker's string is read once; the box shows it when it
+    // arrives (a gone origin disables the box with its reason). A staged
+    // session resolves at once and paints the empty box.
+    void startedEmoji.load().then(() => {
+      if (emoji === startedEmoji) refresh();
+    });
     session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(set)));
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
@@ -829,7 +1252,7 @@ function buildEditor(): HTMLElement {
     const picked = await pickAndImport();
     if (!picked) return;
     const id = nextLayerId(current.doc);
-    current.apply((doc) => addRasterLayer(doc, picked.image, picked.name, centeredPlacement(doc, picked.image)));
+    current.apply("Add image as layer", (doc) => addRasterLayer(doc, picked.image, picked.name, centeredPlacement(doc, picked.image)));
     current.select(id);
   }
 
@@ -858,7 +1281,7 @@ function buildEditor(): HTMLElement {
       },
       ({ chosen, placed }, doc) => {
         const id = nextLayerId(doc);
-        current.apply((d) =>
+        current.apply("Merge layers", (d) =>
           mergeLayers(
             d,
             chosen.map((l) => l.id),
@@ -890,7 +1313,7 @@ function buildEditor(): HTMLElement {
         return { plan, byId: new Map(clips.map((c, i) => [c.id, images[i]])) };
       },
       ({ plan, byId }, doc) => {
-        current.apply((d) => cropLayers(d, plan, byId));
+        current.apply("Crop", (d) => cropLayers(d, plan, byId));
         const notice = cropTextNotice(doc, plan);
         if (notice) say(notice, "note");
       },
@@ -947,6 +1370,7 @@ function buildEditor(): HTMLElement {
     basis = null;
     origin = null;
     thumbnailOrigin = null;
+    emoji = null;
     // Back to the default set: the toolbar's labels and rules read it.
     constraints = STICKER;
     textOverlay.close();
@@ -980,7 +1404,7 @@ function buildEditor(): HTMLElement {
     onExhausted: (outcome: TooLarge) => void,
   ): Promise<SaveOutcome | string | null> {
     const result = await runSave(format, {
-      save: (f) => saveImage(doc, f, target),
+      save: (f) => saveImage(doc, f, target, emoji?.forSave(target.kind) ?? ""),
       offerWebp: async (outcome) => {
         const ok = await confirmWebp(pngTooLargeText(outcome));
         if (ok) setFormat("webp");
@@ -1016,6 +1440,9 @@ function buildEditor(): HTMLElement {
     const refusal = saveRefusal(stage?.strokeInProgress() ?? false, current.doc, constraints);
     if (refusal) return say(refusal);
     const doc = current.doc;
+    // The Emoji tab's value the dialog's hint reads; for an origin session a
+    // "Save as a new sticker" carries the sticker's own string (SPEC §6).
+    await emoji?.load();
     let exhausted: TooLarge | null = null;
     if (constraints.mode === "thumbnail") {
       // Thumbnail mode (SPM-12): the pack is the session's origin, already
@@ -1058,6 +1485,7 @@ function buildEditor(): HTMLElement {
         constraints,
         format: lastFormat,
         origin,
+        emojiString: emoji?.forSave("append") ?? "",
         submit: async (choice, setFormat) => {
           const { format } = choice;
           const target: SaveTarget =
@@ -1078,6 +1506,8 @@ function buildEditor(): HTMLElement {
           if (target.kind === "replace") markStickerFileChanged(outcome.sticker.id);
           // The session now edits the saved sticker: the next save replaces it (design decision 2026-11-22).
           origin = originAfterSave(outcome, packTitle);
+          // …and its Emoji String is the box's value from now on (SPEC §6 Layout, SPM-15).
+          emoji?.afterSave(outcome.sticker);
           // An Erase, Restore or Warp press could commit under this dialog; the
           // mid-stroke refusal above makes that known path impossible. The
           // check stays as defence in depth for anything unforeseen.
@@ -1103,6 +1533,10 @@ function buildEditor(): HTMLElement {
     tool = next;
     basis = session && effectKindOf(next) ? effectBasis(session.doc, session.selection) : null;
     stage?.setTool(next);
+    // EVERY tool activation surfaces its category (SPEC §6 Layout): the
+    // buttons and the single-key shortcuts both land here, and so do the
+    // automatic returns to Move after Cut, Apply and a discarded preview.
+    showPanel(TOOL_PANEL[next]);
     refresh();
   }
 
@@ -1153,7 +1587,7 @@ function buildEditor(): HTMLElement {
       },
       ({ source, cut }, doc) => {
         const id = nextLayerId(doc);
-        current.apply((d) => cutLayer(d, source.id, cut));
+        current.apply("Cut", (d) => cutLayer(d, source.id, cut));
         current.clearRegion();
         current.select(id);
         setTool("move");
@@ -1171,7 +1605,7 @@ function buildEditor(): HTMLElement {
       () => probePasted(bytes).then((info) => importWithCap(info, (scale) => importPasted(bytes, scale))),
       (image, doc) => {
         const id = nextLayerId(doc);
-        current.apply((d) => addRasterLayer(d, image, "Pasted image", centeredPlacement(d, image)));
+        current.apply("Paste image", (d) => addRasterLayer(d, image, "Pasted image", centeredPlacement(d, image)));
         current.select(id);
       },
     );
@@ -1257,7 +1691,7 @@ function buildEditor(): HTMLElement {
         },
         ({ style, render }) => {
           setTool("move"); // drops the preview first: the styled text replaces it
-          current.apply((d) => setTextStyle(d, req.layerId, style, render));
+          current.apply("Outline", (d) => setTextStyle(d, req.layerId, style, render));
         },
       );
       return;
@@ -1268,7 +1702,7 @@ function buildEditor(): HTMLElement {
       () => preview.result(req),
       (result) => {
         setTool("move"); // drops the preview first: the baked pixels replace it
-        current.apply((d) => applyEffectResult(d, req.layerId, result));
+        current.apply(kind === "glow" ? "Glow" : "Outline", (d) => applyEffectResult(d, req.layerId, result));
         const notice = effectTextNotice(layer, kind);
         if (notice) say(notice, "note");
       },
@@ -1327,7 +1761,7 @@ function buildEditor(): HTMLElement {
     // The target layer changed mid-press (e.g. Ctrl+Z): the bulge was painted on old pixels, so it is dropped.
     const stale = current.doc.layers.find((l) => l.id === layer.id) !== layer;
     if (image && stale) say("The layers changed while warping; the bulge was dropped. Try again.");
-    if (image && !stale) current.apply((d) => setLayerImage(d, layer.id, image));
+    if (image && !stale) current.apply("Warp", (d) => setLayerImage(d, layer.id, image));
     else refresh(); // no new state to redraw from, but the bar's values may have changed
   }
 
@@ -1359,7 +1793,15 @@ function buildEditor(): HTMLElement {
     if (!current || busy) return;
     const region = current.region;
     if (!region) return; // the stage only composes onto a selection already drawn
-    const contribution: PolyContribution = { kind: "poly", op, feather: feathered, points };
+    const contribution: PolyContribution = {
+      kind: "poly",
+      op,
+      feather: feathered,
+      points,
+      // The active tool names the step in the Actions list (SPM-15): the
+      // polygon alone cannot tell a lasso from a rectangle.
+      shape: tool === "rect" ? "rectangle" : "lasso",
+    };
     const contributions = [...contributionsOf(region, feathered), contribution];
     void run(async () => current.commitRegion(await mergedSelection(current, contributions)));
   }
@@ -1510,7 +1952,7 @@ function buildEditor(): HTMLElement {
           return { id: target.layer.id, image: await removeImageBackground(target.layer.image) };
         },
         ({ id, image }) => {
-          current.apply((d) => refineLayerPixels(d, id, image));
+          current.apply("Remove background", (d) => refineLayerPixels(d, id, image));
           say("");
         },
       );
@@ -1534,7 +1976,7 @@ function buildEditor(): HTMLElement {
     function reportProgress(p: DownloadProgress): void {
       downloadNote = downloadProgressText(p);
       say(downloadNote, "note");
-      saveButton.title = downloadNote;
+      saveButton.title = blockedTitle(saveStem, downloadNote, saveTitle());
     }
     reportProgress({ received: 0, total: status.sizeBytes });
     // Progress reports travel apart from the command's reply: one arriving
@@ -1560,7 +2002,7 @@ function buildEditor(): HTMLElement {
       // The model's inference wait is a generic busy action: Save shows its
       // canvas reason again (or its normal title) until run()'s closing refresh().
       const saveReason = session ? saveBlocker(session.doc, constraints) : null;
-      saveButton.title = saveReason ?? saveTitle();
+      saveButton.title = blockedTitle(saveStem, saveReason, saveTitle());
     }
   }
 
@@ -1580,6 +2022,11 @@ function buildEditor(): HTMLElement {
     if (layer && layer.kind !== "text") return;
     const style: TextStyle = layer ? textStyleOf(layer) : { ...nextStyle, text: "" };
     setTool("move");
+    // Opening text editing surfaces Text even though the pointer tool stays
+    // Move (SPEC §6 Layout): the panel follows the active editing surface.
+    // Closing the overlay puts it back wherever the tool actually is.
+    showPanel("text");
+    const panelAfterEdit = (): void => showPanel(TOOL_PANEL[tool]);
     if (layer) {
       current.select(layer.id);
       stage.setEditing(layer.id);
@@ -1603,10 +2050,14 @@ function buildEditor(): HTMLElement {
       {
         commit: (text) => {
           stage?.setEditing(null);
+          panelAfterEdit();
           if (isBlankText(text) || text === style.text) return;
           void run(() => (layer ? restyleLayers([layer.id], { text }) : addText({ ...style, text })));
         },
-        cancel: () => stage?.setEditing(null),
+        cancel: () => {
+          stage?.setEditing(null);
+          panelAfterEdit();
+        },
       },
     );
   }
@@ -1627,7 +2078,7 @@ function buildEditor(): HTMLElement {
       () => renderText(style),
       (render, doc) => {
         const id = nextLayerId(doc);
-        current.apply((d) => addTextLayer(d, style, render, centeredPlacement(d, render.image)));
+        current.apply("Add text", (d) => addTextLayer(d, style, render, centeredPlacement(d, render.image)));
         current.select(id);
       },
     );
@@ -1645,7 +2096,7 @@ function buildEditor(): HTMLElement {
         const renders = await Promise.all(styles.map((c) => renderText(c.style)));
         return styles.map((c, i) => ({ ...c, render: renders[i] }));
       },
-      (changes) => current.apply((d) => setTextStyles(d, changes)),
+      (changes) => current.apply("Restyle text", (d) => setTextStyles(d, changes)),
     );
   }
 
@@ -1678,15 +2129,17 @@ function buildEditor(): HTMLElement {
 
   /**
    * Apply a sizing tool (SPEC §6) to the whole image: everything on the
-   * canvas as one group, measured like a multi-layer selection. One undo step.
+   * canvas as one group, measured like a multi-layer selection. One undo
+   * step. `label` is the action's name for the Actions panel (SPM-15), the
+   * top row's own words: "Fit in 512", "Cover 100", "Free resize".
    */
-  function resizeWholeImage(tool: (doc: Doc, content: Rect) => Doc): void {
+  function resizeWholeImage(label: string, tool: (doc: Doc, content: Rect) => Doc): void {
     const current = session;
     if (!current || !stage || busy) return;
     const content = stage.contentBounds();
     say("");
     try {
-      current.apply((doc) => tool(doc, content));
+      current.apply(label, (doc) => tool(doc, content));
     } catch (err) {
       say(errorMessage(err));
     }
@@ -1705,7 +2158,7 @@ function buildEditor(): HTMLElement {
       say(problem);
       return;
     }
-    resizeWholeImage((doc, content) => resizeToSide(doc, content, side, freeSide));
+    resizeWholeImage("Free resize", (doc, content) => resizeToSide(doc, content, side, freeSide));
   }
 
   /** Why Delete cannot run right now: with a region drawn it erases, else it deletes layers. */
@@ -1720,7 +2173,7 @@ function buildEditor(): HTMLElement {
     const current = session;
     if (!current || busy || deleteBlocker(current.doc, current.selection)) return;
     const chosen = [...current.selection];
-    current.apply((doc) => deleteLayers(doc, chosen));
+    current.apply("Delete layers", (doc) => deleteLayers(doc, chosen));
   }
 
   /**
@@ -1763,7 +2216,7 @@ function buildEditor(): HTMLElement {
         return { id: source.id, hole: await eraseFor(source, region) };
       },
       ({ id, hole }) => {
-        current.apply((d) => refineLayerPixels(d, id, hole));
+        current.apply("Erase selection", (d) => refineLayerPixels(d, id, hole));
         current.clearRegion();
       },
     );
@@ -1784,11 +2237,30 @@ function buildEditor(): HTMLElement {
     const current = session;
     if (!current || current.selection.length !== 1) return;
     const id = current.selection[0];
-    current.apply((doc) => {
+    current.apply(step > 0 ? "Move layer up" : "Move layer down", (doc) => {
       const index = layerIndex(doc, id);
       const target = index + step;
       return target < 0 || target >= doc.layers.length ? doc : moveLayer(doc, id, target);
     });
+  }
+
+  /**
+   * Scroll the layers list so the selected row is in view (owner, second
+   * test, 2026-11-25): the stack jumps to whichever layer is focused, so a
+   * layer added past seven rows scrolls into view, and selecting an
+   * out-of-view row scrolls to it. The LAST selection is the focused one
+   * (Ctrl-click appends); no selection is a no-op, and a hidden tab's
+   * zero-size rects make it one too — the panel's afterShow hook runs it when
+   * Layers comes back.
+   */
+  function revealSelectedLayer(list: HTMLElement, id: string | null): void {
+    if (id === null) return;
+    for (const row of list.children) {
+      if (row instanceof HTMLElement && row.dataset.layerId === id) {
+        revealRow(list, row);
+        return;
+      }
+    }
   }
 
   function renderLayers(current: EditorSession): void {
@@ -1797,11 +2269,19 @@ function buildEditor(): HTMLElement {
     // no or several layers selected, so nothing is appended.
     const size = selectedLayerSize(doc, current.selection);
     layersList.replaceChildren(
-      // Top of the stack first, as layer panels read.
-      ...[...doc.layers].reverse().map((layer) => {
+      // Bottom-first, in the model's own bottom-to-top order: the base image
+      // is the BOTTOM row of the box (nearest the action grid), each newer
+      // layer stacks above it, the newest at the content's top edge. The
+      // list's CSS packs the rows to the box's bottom, so a new layer fills
+      // fresh space ABOVE (owner, from the test, 2026-11-25); the reveal
+      // below then scrolls that focused row into view.
+      ...doc.layers.map((layer) => {
         const item = el(
           "li",
-          { class: current.selection.includes(layer.id) ? "selected" : "" },
+          {
+            class: current.selection.includes(layer.id) ? "selected" : "",
+            "data-layer-id": layer.id,
+          },
           el("span", { class: "editor-layer-kind" }, layer.kind === "raster" ? "Image" : "Text"),
           el("span", { class: "editor-layer-name" }, layer.name),
         );
@@ -1816,6 +2296,7 @@ function buildEditor(): HTMLElement {
         return item;
       }),
     );
+    revealSelectedLayer(layersList, current.selection.at(-1) ?? null);
   }
 
   function refresh(): void {
@@ -1823,10 +2304,17 @@ function buildEditor(): HTMLElement {
     empty.hidden = current !== null;
     workspace.hidden = current === null;
     toolbar.hidden = current === null;
+    // The tools panel is part of the workspace: gone with no session, like it.
+    toolsPanel.hidden = current === null;
+    // The right panel too: Layers, Actions and Emoji all describe a session.
+    layersPanel.hidden = current === null;
+    // The status strip describes a session's canvas and view, so it goes with them.
+    statusStrip.hidden = current === null;
     openButton.disabled = busy;
     // The canvas tool buttons follow `tool` with or without a session, so
-    // after Close no button stays pressed on the hidden toolbar (SPM-8);
-    // the bar hides too, as its DOM is EffectControls' own.
+    // after Close no button stays pressed on the hidden top row or in the
+    // tools panel (SPM-8); the panel's effect blocks hide too (no session
+    // leaves their DOM in place).
     for (const [b, t] of [
       [moveToolButton, "move"],
       [rectToolButton, "rect"],
@@ -1843,6 +2331,7 @@ function buildEditor(): HTMLElement {
     }
     if (!current) {
       layersList.replaceChildren();
+      actionsList.replaceChildren();
       effectControls.hide();
       return;
     }
@@ -1856,24 +2345,58 @@ function buildEditor(): HTMLElement {
       basis = next;
     }
     renderLayers(current);
+    // The right panel's tab set (SPEC §6 Layout): the Emoji leaf hides in
+    // Thumbnail mode, recomputed on EVERY refresh from the session's mode —
+    // the view is built once and cached, so a Thumbnail session handing off
+    // to a Sticker session must bring the leaf back (owner's live-test
+    // note). The panel goes back to Layers whenever the set changes.
+    const emojiHidden = constraints.mode === "thumbnail";
+    if (emojiHidden !== emojiLeafHidden) {
+      emojiLeafHidden = emojiHidden;
+      rightTabs.buttons.emoji.hidden = emojiHidden;
+      showRightTab("layers");
+    }
+    // The Actions tab: the document trail and the live selection trail,
+    // rendered read-only on every change (SPM-15 D3).
+    renderActionList(actionsList, actionList(current.actionTrail(), current.selectionTrail()));
+    // The Emoji tab: what the session's box holds now. A blocked box (a gone
+    // or other-Library origin) stays visible, disabled with its reason as
+    // the tooltip (§2). The typed text wins while the box has focus.
+    const emojiBox = emoji;
+    const emojiBlock = emojiBox?.blocked ?? null;
+    emojiInput.disabled = busy || emojiBox === null || emojiBlock !== null;
+    emojiInput.title = blockedTitle(
+      emojiStem,
+      emojiBlock?.message || null,
+      `${emojiStem} — Enter or leaving the box commits it; 1–20 emoji (a warning shows past 20), empty allowed`,
+    );
+    if (emojiBox && document.activeElement !== emojiInput) emojiInput.value = emojiBox.value;
     const doc = current.doc;
     // The toolbar's mode-dependent labels (SPEC §6): the sizing tools take
     // their side from the active constraint set, and Save's idle title says
     // what saving does in this mode. The mode never changes mid-session, so
     // this is stable across refreshes.
     const side = constraints.side;
-    fitButton.textContent = `Fit to ${side}×${side}`;
-    fillButton.textContent = `Fill ${side}×${side}`;
-    longestButton.textContent = `Longest side ${side}`;
-    sideInput.setAttribute("aria-label", `${freeSide === "longest" ? "Longest" : "Shortest"} side in pixels`);
+    const fitName = `Fit in ${side}`;
+    const fillName = `Cover ${side}`;
+    const longestName = `Long side ${side}`;
+    fitButton.textContent = fitName;
+    fillButton.textContent = fillName;
+    longestButton.textContent = longestName;
+    const sideLabel = freeSide === "longest" ? "Long" : "Short";
+    // One Name stem for the field's aria-label and its tooltip (the §2 rule).
+    const sideName = `${sideLabel} side`;
+    sideInput.setAttribute("aria-label", sideName);
+    sideInput.title = `${sideName} — The entered size in pixels (1–${IMPORT_MAX_SIDE})`;
     const fitTitle =
-      `Scale everything on the canvas together, as one image, so its longest side is ${side} px; ` +
+      `${fitName} — Scale everything on the canvas together, as one image, so its longest side is ${side} px; ` +
       `the canvas becomes ${side}×${side} with transparent padding`;
     const fillTitle =
-      `Scale everything on the canvas together, as one image, so its shortest side is ${side} px; ` +
+      `${fillName} — Scale everything on the canvas together, as one image, so its shortest side is ${side} px; ` +
       `the canvas becomes ${side}×${side} and anything beyond it is kept (drag the image to choose what shows)`;
     const longestTitle =
-      `Scale everything on the canvas together so its longest side is ${side} px; the canvas becomes the image (no padding)`;
+      `${longestName} — Scale everything on the canvas together so its longest side is ${side} px; ` +
+      "the canvas becomes the image (no padding)";
     const single = current.selection.length === 1 ? current.selection[0] : null;
     const index = single ? layerIndex(doc, single) : -1;
     const blocker = mergeBlocker(current.selection);
@@ -1885,16 +2408,17 @@ function buildEditor(): HTMLElement {
     // side, when the set needs a square canvas (SPEC §6).
     const content = stage ? stage.contentBounds() : null;
     const entered = enteredSide();
-    const sizing: [HTMLButtonElement, SizeTool, string][] = [
-      [fitButton, "fit", fitTitle],
-      [fillButton, "fill", fillTitle],
-      [longestButton, "longest", longestTitle],
-      [resizeButton, "free", resizeTitle(freeSide)],
+    const sizing: { button: HTMLButtonElement; tool: SizeTool; name: string; action: string }[] = [
+      { button: fitButton, tool: "fit", name: fitName, action: fitTitle },
+      { button: fillButton, tool: "fill", name: fillName, action: fillTitle },
+      { button: longestButton, tool: "longest", name: longestName, action: longestTitle },
+      { button: resizeButton, tool: "free", name: "Resize", action: resizeTitle() },
     ];
-    for (const [button, tool, action] of sizing) {
+    for (const { button, tool, name, action } of sizing) {
       const reason = sizeToolBlocker(tool, doc, content, entered, constraints, freeSide);
       button.disabled = busy || reason !== null;
-      button.title = reason ?? action;
+      // A disabled control's blocker replaces the description, never the name (SPEC §2).
+      button.title = blockedTitle(name, reason, action);
     }
     sideInput.disabled = busy;
     sideKind.disabled = busy;
@@ -1903,9 +2427,10 @@ function buildEditor(): HTMLElement {
     const { box, blocker: cropReason } = cropState(doc);
     stage?.setCropBox(box);
     const boxSize = `${box.width}×${box.height}`;
-    cropButton.textContent = `Crop to ${boxSize}`;
+    const cropName = `Crop to ${boxSize}`;
+    cropButton.textContent = cropName;
     cropButton.disabled = busy || cropReason !== null;
-    cropButton.title = cropReason ?? cropTitle(boxSize);
+    cropButton.title = blockedTitle(cropName, cropReason, cropTitle(boxSize));
     boxButton.setAttribute("aria-pressed", String(showBox));
     const status = readoutStatus(doc, constraints);
     readout.textContent = status.text;
@@ -1916,27 +2441,51 @@ function buildEditor(): HTMLElement {
     saveButton.disabled = busy || saveReason !== null;
     // While the model downloads (the one long busy wait), the disabled Save
     // says the download's progress instead of its idle title (SPEC §2).
-    saveButton.title = saveReason ?? downloadNote ?? saveTitle();
+    saveButton.title = blockedTitle(saveStem, saveReason ?? downloadNote, saveTitle());
     undoButton.disabled = busy || !current.canUndoAny;
+    undoButton.title = blockedTitle(
+      undoStem,
+      current.canUndoAny ? null : "Nothing to step back to yet",
+      undoTitle,
+    );
     redoButton.disabled = busy || !current.canRedoAny;
-    upButton.disabled = busy || !single || index === doc.layers.length - 1;
+    redoButton.title = blockedTitle(
+      redoStem,
+      current.canRedoAny ? null : "Nothing to step forward to yet",
+      redoTitle,
+    );
+    // The stack's ends and the one-layer rule are the two blockers here
+    // (SPEC §2): each disabled arrow says which one is in the way.
+    const atTop = index === doc.layers.length - 1;
+    upButton.disabled = busy || !single || atTop;
+    upButton.title = blockedTitle(
+      upStem,
+      !single ? "Select one layer to move it" : atTop ? "The layer is already at the top" : null,
+      upTitle,
+    );
     downButton.disabled = busy || !single || index === 0;
+    downButton.title = blockedTitle(
+      downStem,
+      !single ? "Select one layer to move it" : index === 0 ? "The layer is already at the bottom" : null,
+      downTitle,
+    );
     mergeButton.disabled = busy || blocker !== null;
-    mergeButton.title = blocker ?? "Merge the selected layers into one";
+    mergeButton.title = blockedTitle(mergeStem, blocker, mergeTitle);
     deleteButton.disabled = busy || deleteReason !== null;
-    deleteButton.title =
-      deleteReason ??
-      (current.region ? "Erase the selection's pixels (Delete key)" : "Delete the selected layers (Delete key)");
+    const deleteTitle = current.region
+      ? `${deleteStem} — Erase the selection's pixels`
+      : `${deleteStem} — Remove the selected layers`;
+    deleteButton.title = blockedTitle(deleteStem, deleteReason, deleteTitle);
     const cutReason = cutBlocker(doc, current.selection, current.region);
     cutButton.disabled = busy || cutReason !== null;
-    cutButton.title = cutReason ?? cutTitle;
+    cutButton.title = blockedTitle(cutStem, cutReason, cutTitle);
     pasteButton.disabled = busy;
     pasteButton.title = pasteTitle;
     // Background removal (SPM-7); the brushes say why on a press instead.
     const bgTarget = backgroundTarget(doc, current.selection);
     const removeReason = "reason" in bgTarget ? bgTarget.reason : null;
     removeBackgroundButton.disabled = busy || removeReason !== null;
-    removeBackgroundButton.title = removeReason ?? removeBackgroundTitle;
+    removeBackgroundButton.title = blockedTitle(removeBackgroundStem, removeReason, removeBackgroundTitle);
     brushSizeInput.disabled = busy;
     toleranceInput.disabled = busy;
     featherInput.disabled = busy;
@@ -1946,10 +2495,10 @@ function buildEditor(): HTMLElement {
     const shown = texts.length > 0 ? textStyleOf(texts[0]) : nextStyle;
     const textReason = textBlocker(fonts, fontsProblem);
     textButton.disabled = busy || textReason !== null;
-    textButton.title = textReason ?? textTitle;
+    textButton.title = blockedTitle(addTextStem, textReason, addTextTitle);
     const editReason = editTextBlocker(textReason, doc, current.selection);
     editTextButton.disabled = busy || editReason !== null;
-    editTextButton.title = editReason ?? editTextTitle;
+    editTextButton.title = blockedTitle(editTextStem, editReason, editTextTitle);
     // The picker lists the installed fonts, plus a layer's font that is no longer installed.
     const choices = fontChoices(fonts ?? [], shown.fontFamily);
     fontPicker.setFonts(choices);
@@ -1961,11 +2510,27 @@ function buildEditor(): HTMLElement {
     outlineColorInput.value = shown.outline?.color ?? DEFAULT_OUTLINE_COLOR;
     for (const control of textControls) control.disabled = busy || textReason !== null;
     const target = texts.length > 0 ? "the selected text" : "the next text";
-    fontPicker.title = textReason ?? `Font of ${target}`;
-    fontSizeInput.title = textReason ?? `Font size of ${target} in px (${TEXT_FONT_SIZE.min}–${TEXT_FONT_SIZE.max})`;
-    colorInput.title = textReason ?? `Colour of ${target}`;
-    outlineColorInput.title = textReason ?? `Outline colour of ${target}`;
-    outlineWidthInput.title = textReason ?? `Outline width of ${target} in px (0 for no outline)`;
+    fontPicker.title = blockedTitle(fontStem, textReason, `${fontStem} — The font of ${target}`);
+    fontSizeInput.title = blockedTitle(
+      fontSizeStem,
+      textReason,
+      `${fontSizeStem} — The size of ${target} in px (${TEXT_FONT_SIZE.min}–${TEXT_FONT_SIZE.max})`,
+    );
+    colorInput.title = blockedTitle(textColourStem, textReason, `${textColourStem} — The colour of ${target}`);
+    outlineColorInput.title = blockedTitle(
+      textOutlineColourStem,
+      textReason,
+      `${textOutlineColourStem} — The outline colour of ${target}`,
+    );
+    outlineWidthInput.title = blockedTitle(
+      textOutlineWidthStem,
+      textReason,
+      `${textOutlineWidthStem} — The outline width of ${target} in px (0 for no outline)`,
+    );
+    // The two eyedroppers join the text controls' disable loop, so a disabled
+    // one says the same fonts blocker (SPEC §2).
+    textEyedropper.title = blockedTitle(EYEDROPPER_STEM, textReason, EYEDROPPER_TITLE);
+    outlineEyedropper.title = blockedTitle(EYEDROPPER_STEM, textReason, EYEDROPPER_TITLE);
     // Explain disabled actions only once something is selected.
     layerHint.textContent = layerHintText(doc, current.selection, current.region, {
       merge: blocker,
@@ -2033,6 +2598,18 @@ function buildEditor(): HTMLElement {
     // lasso in progress takes Enter, Esc and Backspace (SPM-9) - the most
     // recent mode cancels first - and only then the Editor's own Esc runs.
     if (stage?.handlePickKey(e.key) || stage?.handleLassoKey(e.key, { shift: e.shiftKey, alt: e.altKey })) {
+      e.preventDefault();
+      return;
+    }
+    // The single-key tool shortcuts (SPEC §6 Layout): the table and matcher
+    // are src/editor/model/shortcuts.ts; this caller owns the guards above
+    // (no session, overlay open, busy, a text field has focus). Each tool
+    // activation runs the button's own path, so it surfaces its category;
+    // T is the Text category's switch, not a tool.
+    const shortcut = shortcutOf(e);
+    if (shortcut) {
+      if (shortcut === "text-tab") showPanel("text");
+      else setTool(shortcut);
       e.preventDefault();
       return;
     }
@@ -2120,7 +2697,10 @@ function buildEditor(): HTMLElement {
     if (origin) origin = { ...origin, otherLibrary: true };
     // A thumbnail session's pack id is just as old: its save says so too.
     if (thumbnailOrigin) thumbnailOrigin = { ...thumbnailOrigin, otherLibrary: true };
+    // The Emoji tab's sticker id is old too: never look it up in the new Library (SPM-15).
+    emoji?.forgetOrigin();
     libraryGeneration++; // a saved note's link now points into the old Library
+    refresh(); // the Emoji box shows its disabled reason at once
   };
 
   refresh();
@@ -2293,6 +2873,6 @@ function confirmScaleToFit(info: ImageInfo): Promise<boolean> {
   );
 }
 
-function button(label: string, onClick: () => void, variant?: "primary"): HTMLButtonElement {
+function button(label: string, onClick: () => void, variant?: "primary" | "danger"): HTMLButtonElement {
   return el("button", { class: variant ?? "secondary", onclick: onClick }, label) as HTMLButtonElement;
 }

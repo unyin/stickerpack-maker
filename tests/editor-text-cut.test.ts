@@ -105,7 +105,7 @@ test("changing text or style is one step that keeps the layer's place; the same 
   const session = new EditorSession(withText());
   const id = session.doc.layers[1].id;
   const before = session.doc;
-  session.apply((d) => setTextStyle(d, id, { ...HI, text: "bye", fontSize: 80 }, render(120, 90)));
+  session.apply("Edit", (d) => setTextStyle(d, id, { ...HI, text: "bye", fontSize: 80 }, render(120, 90)));
   const text = session.doc.layers[1];
   if (text.kind !== "text") throw new Error("not text");
   expect([text.id, text.name, text.fontSize, text.render.image.width]).toEqual([id, "bye", 80, 120]);
@@ -130,7 +130,7 @@ test("an outline grows the layer's box around its text: the glyphs stay put (SPM
   if (beforeText.kind !== "text") throw new Error("not text");
   const grown: TextRender = { image: image(64, 54), metrics: { originX: 4, originY: 2, ascent: 40, descent: 10, lineHeight: 60 } };
   const style: TextStyle = { ...HI, outline: { color: "#ffffff", width: 2 } };
-  session.apply((d) => setTextStyle(d, id, style, grown));
+  session.apply("Edit", (d) => setTextStyle(d, id, style, grown));
   const text = session.doc.layers[1];
   if (text.kind !== "text") throw new Error("not text");
   expect([text.render.image.width, text.render.image.height]).toEqual([64, 54]);
@@ -173,7 +173,7 @@ test("restyledTexts carries an outline to every selected text layer; the same ou
   const changes = restyledTexts(doc, ids, { outline: outlined }).map((c) => ({ ...c, render: render(70, 55) }));
   expect(changes.map((c) => c.style.outline)).toEqual([outlined, outlined]);
   const session = new EditorSession(doc);
-  session.apply((d) => setTextStyles(d, changes));
+  session.apply("Edit", (d) => setTextStyles(d, changes));
   expect(setTextStyles(session.doc, changes)).toBe(session.doc); // re-applying: no step
   session.undo();
   expect(session.doc).toBe(doc);
@@ -301,7 +301,7 @@ test("cut leaves a hole in the source and floats the cutout directly above it at
   const session = new EditorSession(doc);
   const hole = image(40, 30, 1);
   const cutout = image(10, 6, 2);
-  session.apply((d) => cutLayer(d, "layer-1", { hole, cutout, x: 4, y: 3 }));
+  session.apply("Edit", (d) => cutLayer(d, "layer-1", { hole, cutout, x: 4, y: 3 }));
   const [source, floating, top] = session.doc.layers;
   expect(source).toMatchObject({ id: "layer-1", name: "base", image: hole });
   expect(source.transform).toEqual(doc.layers[0].transform);
@@ -363,9 +363,9 @@ test("text renderings count toward the history's memory budget", () => {
   // A budget that holds one 100x100 rendering: older steps drop past it.
   const session = new EditorSession(withText(), 100 * 100 * 4);
   const id = "layer-2";
-  session.apply((d) => setTextStyle(d, id, { ...HI, text: "a" }, render(100, 100)));
-  session.apply((d) => setTextStyle(d, id, { ...HI, text: "b" }, render(100, 100)));
-  session.apply((d) => setTextStyle(d, id, { ...HI, text: "c" }, render(100, 100)));
+  session.apply("Edit", (d) => setTextStyle(d, id, { ...HI, text: "a" }, render(100, 100)));
+  session.apply("Edit", (d) => setTextStyle(d, id, { ...HI, text: "b" }, render(100, 100)));
+  session.apply("Edit", (d) => setTextStyle(d, id, { ...HI, text: "c" }, render(100, 100)));
   session.undo();
   expect(session.canUndo).toBe(false);
 });
@@ -380,7 +380,7 @@ test("setTextStyles restyles several text layers as ONE undo step", () => {
   const before = session.doc;
   const changes = restyledTexts(before, [...ids, "layer-1"], { color: "#00ff00" }).map((c) => ({ ...c, render: render(70, 55) }));
   expect(changes.map((c) => c.id)).toEqual(ids); // the image layer is not a text layer
-  session.apply((d) => setTextStyles(d, changes));
+  session.apply("Edit", (d) => setTextStyles(d, changes));
   expect(session.doc.layers.filter((l) => l.kind === "text").map((l) => (l.kind === "text" ? l.color : ""))).toEqual([
     "#00ff00",
     "#00ff00",
