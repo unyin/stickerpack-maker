@@ -585,7 +585,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   function renderBanners(): void {
     let show: HTMLElement | null = null;
     if (rejected.length) {
-      show = el("button", { class: "pm-link pm-banner-show", type: "button" }, "Show…");
+      show = el("button", { class: "pm-link", type: "button", title: "Show… — List the files that were not added, with the reasons" }, "Show…");
       show.addEventListener("click", showRejected);
     }
     banners.replaceChildren(...(notice ? [noticeBanner(notice, show)] : []));

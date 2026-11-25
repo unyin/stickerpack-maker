@@ -297,6 +297,8 @@
   --count-pad: 8px;
   --count-border: 1px;
   box-sizing: border-box;
+  /* Contains the .sr-only reasons span (absolute), as the scroll container does. */
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--count-gap);
@@ -440,12 +442,9 @@
   border: var(--notice-border) solid var(--warn-border);
 }
 
-.pm-banner-warn button.pm-link {
-  color: var(--warn-text);
-}
-
-/* A dismissible banner: X | message | Dismiss. The message takes the space
-   between, so both close controls stay at the edges. */
+/* A dismissible banner: X | main | Dismiss. The flex is on .pm-banner-main,
+   which takes the space between (the text truncates, then Show…), so both
+   close controls stay at the edges. */
 .pm-banner-body {
   min-width: 0;
   white-space: nowrap;

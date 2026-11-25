@@ -307,7 +307,7 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   keeps the X and Dismiss. The Pack list is not part of this (owner decisions 2026-11-25).
 - **The toolbar's sticker count carries the pack-level warnings.** The over-120 warning and the
   Missing summary are no longer banners: when the pack has more than 120 stickers OR any Missing
-  sticker, the count ("125 stickers", same text and fixed width as before) takes the warn tone
+  sticker, the count ("125 stickers", the same text, at a fixed width now wide enough for the glyph and the longest count and unchanged between the clean and warn states) takes the warn tone
   (`--warn-*`) and shows a warning glyph inside its reserved width, so colour is never the only
   signal and nothing in the toolbar moves. Its tooltip and accessible text give the reasons: the
   over-120 text, and/or "N Missing.". The width fits the glyph and "999 stickers". Tiles keep their
