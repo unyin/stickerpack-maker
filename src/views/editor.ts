@@ -606,7 +606,7 @@ function buildEditor(): HTMLElement {
   resizeButton.title = resizeTitle();
   sideKind.title = "Long side — the entered size applies to the image's longest side; Short side — its shortest";
   resetViewButton.title = "Zoom and centre the canvas in view (changes the view only)";
-  boxButton.title = "Show or hide the crop guide";
+  boxButton.title = "Guide — Show or hide the crop guide";
   const cropTitle = (size: string) =>
     `Crop to ${size} — discard everything outside the ${size} box; drag the image to choose what stays. The canvas size stays`;
   closeButton.title = "Close — end the editing session; asks first while there are unsaved changes";
