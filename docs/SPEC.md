@@ -282,8 +282,12 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
     thumbnail shows the None placeholder (see below).
   - **The row**, in columns that line up across rows (one grid, each row a subgrid): grip, a
     40px thumbnail, the Title with the Short Name under it (one line each, ellipsis, both in
-    full in the tooltip; clicking opens the pack), the **status badge**, the Draft/Live badge,
+    full in the tooltip), the **status badge**, the Draft/Live badge,
     Open in explorer, Delete.
+  - **Opening a pack**: a click anywhere on the row opens it, except on the grip and the row's
+    buttons (Open in explorer, Delete), which keep their own behaviour; the click that ends a
+    drag never opens. The row shows a pointer cursor and tints on hover. The title stays the
+    one keyboard-focusable open control.
   - **The thumbnail cell**: the pack's own thumbnail (tooltip "Thumbnail"); with none, the
     first sticker in a dashed frame ("No thumbnail: Telegram shows the first sticker"), or the
     Missing art when that sticker is Missing ("... which is Missing"); a Missing thumbnail
@@ -304,10 +308,11 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
     is display only: it never renames a folder or a sticker file. **New packs go at the
     top.** Existing packs of an older Library are backfilled newest first, so the list reads
     newest first from the upgrade on. Deleting a pack closes the gap.
-    The pack pickers (Send to pack, the Editor's save target) list packs in the same stored
-    order.
+    The pack pickers (Send to pack, the Editor's save target) list packs alphabetically by
+    Title (case-insensitive, natural number order: "Pack 2" before "Pack 10"), not in the
+    stored order.
   - **Drag to reorder**, from the row's **grip** only (six dots, a 32px-wide handle at the
-    row's left edge, tooltip "Drag to reorder"); clicking the title still opens the pack. No
+    row's left edge, tooltip "Drag to reorder"). No
     Reorder mode or toggle. Pointer-only, like the Upload list's drag handle and the Pack
     view's Reorder mode: a faded copy of the row follows the cursor, the dragged row fades, a
     4px accent line between rows marks the drop, Esc mid-drag cancels, and releasing stores

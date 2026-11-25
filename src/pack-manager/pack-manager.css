@@ -149,7 +149,7 @@
 
 .pm-grip:hover {
   color: var(--text);
-  background: var(--bg);
+  background: var(--panel); /* the row's own hover tint is --bg */
 }
 
 .pm-grip .icon {
@@ -184,9 +184,10 @@ body.pm-row-dragging * {
 }
 
 /* The first sticker standing in for a missing thumbnail: a dashed frame, the
-   same cue the Pack view's thumbnail slot uses. */
+   same cue the Pack view's thumbnail slot uses. --muted, not --border: the
+   border token is 1.32:1 against the row, too faint to read as a frame. */
 .pm-row-thumb.fallback {
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--muted);
   border-radius: 6px;
   padding: 2px;
   box-sizing: border-box;
@@ -212,6 +213,16 @@ body.pm-row-dragging * {
    middle of the 8px row gap (offsets below). */
 .pm-pack-row.dragging {
   opacity: 0.45;
+}
+
+/* The whole row opens the pack (pack-list.ts), so the pointer says so and the
+   row tints on hover (not while it is the dragged row). */
+.pm-pack-row {
+  cursor: pointer;
+}
+
+.pm-pack-row:hover:not(.dragging) {
+  background: var(--bg);
 }
 
 .pm-row-ghost {

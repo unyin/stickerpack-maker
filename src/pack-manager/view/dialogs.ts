@@ -17,6 +17,7 @@ import {
   type SendReport,
   type StickerView,
 } from "../api";
+import { packsAlphabetical } from "../model/pack-row";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import {
   fileNameOf,
@@ -401,7 +402,7 @@ export function packPicker(options: { message: HTMLElement; excludeId?: number; 
     combo.select(p);
     onChange();
   };
-  const listed = () => packs.filter((p) => p.id !== excludeId);
+  const listed = () => packsAlphabetical(packs.filter((p) => p.id !== excludeId));
 
   const newPackArea = el("div", { class: "pm-new-pack" });
   const newPackButton = el("button", { class: "secondary", type: "button" }, "New pack…") as HTMLButtonElement;

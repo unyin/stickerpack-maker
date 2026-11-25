@@ -16,10 +16,10 @@ import {
 } from "../api";
 import { packCountText, packDeleteMessage, thumbnailFormat } from "../model/messages";
 import { statusBadgeOf } from "../model/pack-issues";
-import { rowThumbnail } from "../model/pack-row";
+import { rowClickOpens, rowThumbnail } from "../model/pack-row";
 import { confirmChoice } from "../../dialog";
 import { createPackDialog, statusBadge } from "./dialogs";
-import { cancelRowDrag, startRowDrag } from "./pack-list-drag";
+import { cancelRowDrag, rowClickSuppressed, startRowDrag } from "./pack-list-drag";
 import { previewImage, Previews } from "./previews";
 
 export function buildPackList(onOpen: (packId: number) => void): {
@@ -151,6 +151,13 @@ export function buildPackList(onOpen: (packId: number) => void): {
       reveal,
       del,
     );
+    // The whole row opens the pack, except the grip and the buttons (the
+    // title button has its own handler). A handler, not an overlay: an overlay
+    // would cover the thumbnail's and badges' tooltips.
+    item.addEventListener("click", (e) => {
+      const onControl = (e.target as Element).closest("button, .pm-grip") !== null;
+      if (rowClickOpens({ onControl, endsDrag: rowClickSuppressed() })) onOpen(pack.id);
+    });
     grip.addEventListener("pointerdown", (e) => startRowDrag(e, item, pack.id, { list, drop: (id, position) => void reorder(id, position) }));
     return item;
   }

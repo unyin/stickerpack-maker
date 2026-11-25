@@ -39,6 +39,24 @@ export function rowGhost(list: HTMLElement, row: HTMLElement): HTMLElement {
   return ghost;
 }
 
+/**
+ * True from a drag's start until the click that ends it has been delivered. A
+ * drag starts on the grip and ends elsewhere in the row, so the browser clicks
+ * the row (their common ancestor); the row's click handler asks this to skip
+ * that click. An Esc-cancelled drag is still ended by the pointer's release,
+ * which clicks too, so the flag outlives the cleanup until that release.
+ */
+let clickSuppressed = false;
+
+export function rowClickSuppressed(): boolean {
+  return clickSuppressed;
+}
+
+/** Clear the flag after the release's click (dispatched right after the pointerup). */
+function settleClick(): void {
+  setTimeout(() => (clickSuppressed = false), 0);
+}
+
 /** Cleanup of the drag in progress, if any. */
 let activeDrag: (() => void) | null = null;
 
@@ -49,6 +67,7 @@ export function startRowDrag(e: PointerEvent, row: HTMLElement, packId: number, 
   // A stray earlier drag must not leak its listeners. Clean it up BEFORE this
   // drag takes the pointer capture: a mouse reuses the same pointer id.
   activeDrag?.();
+  clickSuppressed = true;
   const { list } = host;
   const from = packRows(list).indexOf(row);
   if (from === -1) return;
@@ -79,12 +98,16 @@ export function startRowDrag(e: PointerEvent, row: HTMLElement, packId: number, 
     window.removeEventListener("keydown", escape, true);
     if (list.hasPointerCapture(e.pointerId)) list.releasePointerCapture(e.pointerId);
     ghost.remove();
+    // A drag cancelled before the release (Esc, a reload) still ends in a click.
+    window.addEventListener("pointerup", settleClick, { once: true, capture: true });
+    window.addEventListener("pointercancel", settleClick, { once: true, capture: true });
     document.body.classList.remove("pm-row-dragging");
     for (const r of packRows(list)) r.classList.remove("drop-before", "drop-after", "dragging");
     activeDrag = null;
   };
   const end = (u: PointerEvent) => {
     cleanup();
+    settleClick();
     const position = u.type === "pointerup" && slot !== null ? dropPosition(from, slot) : null;
     if (position !== null) host.drop(packId, position);
   };

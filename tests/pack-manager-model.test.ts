@@ -319,3 +319,21 @@ test("rowSlotAt: before a row above its middle, after it below, ends clamp", () 
   expect(rowSlotAt(rows, 9999)).toBe(3);
   expect(rowSlotAt([], 5)).toBe(0);
 });
+
+import { packsAlphabetical, rowClickOpens } from "../src/pack-manager/model/pack-row";
+
+test("a click opens the pack unless it hit a control or ends a drag", () => {
+  expect(rowClickOpens({ onControl: false, endsDrag: false })).toBe(true);
+  expect(rowClickOpens({ onControl: true, endsDrag: false })).toBe(false);
+  expect(rowClickOpens({ onControl: false, endsDrag: true })).toBe(false);
+  expect(rowClickOpens({ onControl: true, endsDrag: true })).toBe(false);
+});
+
+test("pickers list packs alphabetically: case-insensitive, natural numbers, stable ties", () => {
+  const p = (id: number, title: string, shortName = `s${id}`) => ({ id, title, shortName });
+  const sorted = packsAlphabetical([p(1, "pack 10"), p(2, "Pack 2"), p(3, "banana"), p(4, "Apple"), p(5, "apple", "a"), p(6, "APPLE", "a")]);
+  expect(sorted.map((x) => x.id)).toEqual([5, 6, 4, 3, 2, 1]);
+  const input = [p(2, "b"), p(1, "a")];
+  packsAlphabetical(input);
+  expect(input.map((x) => x.id)).toEqual([2, 1]);
+});
