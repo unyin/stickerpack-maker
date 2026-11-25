@@ -16,6 +16,7 @@ import {
   matchPacks,
   MISSING_REASON,
   countWarningText,
+  noPackMatchText,
   packCountText,
   packDeleteMessage,
   packSizeText,
@@ -24,6 +25,7 @@ import {
   thumbnailFormat,
 } from "../src/pack-manager/model/messages";
 import { dropPosition, escapeAction, rowSlotAt, selectionActive, slotAt, toggleMode } from "../src/pack-manager/model/modes";
+import { filterPacks, reorderAllowed } from "../src/pack-manager/model/pack-row";
 import { importOrder } from "../src/pack-manager/model/import-order";
 import { defaultPackId, initialFocus } from "../src/pack-manager/model/pack-memory";
 import {
@@ -288,6 +290,34 @@ test("packCountText: singular and plural", () => {
   expect(packCountText(0)).toBe("0 packs");
   expect(packCountText(1)).toBe("1 pack");
   expect(packCountText(12)).toBe("12 packs");
+});
+
+test("packCountText while filtering reads N of M, M deciding the plural", () => {
+  expect(packCountText(5, 5)).toBe("5 packs");
+  expect(packCountText(5, 2)).toBe("2 of 5 packs");
+  expect(packCountText(5, 0)).toBe("0 of 5 packs");
+  expect(packCountText(1, 0)).toBe("0 of 1 pack");
+  expect(noPackMatchText("  zz ")).toBe("No packs match “zz”.");
+});
+
+test("filterPacks: Title or Short Name, case-insensitive, trimmed, stored order kept", () => {
+  const a = { title: "Best cats", shortName: "best" };
+  const b = { title: "Cats two", shortName: "two" };
+  const c = { title: "Misc", shortName: "OLD_CATS" };
+  const all = [a, c, b];
+  expect(filterPacks(all, "")).toEqual(all);
+  expect(filterPacks(all, "   ")).toEqual(all);
+  expect(filterPacks(all, "cat")).toEqual([a, c, b]);
+  expect(filterPacks(all, "  OLD_ ")).toEqual([c]);
+  expect(filterPacks(all, "TWO")).toEqual([b]);
+  expect(filterPacks(all, "dogs")).toEqual([]);
+  expect(filterPacks(all, "")).not.toBe(all);
+});
+
+test("reordering is allowed only while the search is blank", () => {
+  expect(reorderAllowed("")).toBe(true);
+  expect(reorderAllowed("  ")).toBe(true);
+  expect(reorderAllowed("a")).toBe(false);
 });
 
 test("pack pickers start on the open pack, else the last pack saved into, else none", () => {

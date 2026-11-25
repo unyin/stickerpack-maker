@@ -89,6 +89,21 @@
   gap: 12px;
 }
 
+.pm-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pm-search {
+  width: 240px;
+}
+
+/* Reordering is off while the search has text: the grip's column stays so nothing shifts. */
+.pm-pack-list.filtering .pm-grip {
+  visibility: hidden;
+}
+
 .pm-list-title {
   display: flex;
   align-items: baseline;

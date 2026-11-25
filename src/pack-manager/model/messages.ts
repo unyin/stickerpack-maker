@@ -33,8 +33,14 @@ export function stickerCountText(n: number): string {
   return n === 1 ? "1 sticker" : `${n} stickers`;
 }
 
-export function packCountText(n: number): string {
-  return n === 1 ? "1 pack" : `${n} packs`;
+export function packCountText(n: number, shown: number = n): string {
+  const total = n === 1 ? "1 pack" : `${n} packs`;
+  return shown === n ? total : `${shown} of ${total}`;
+}
+
+/** The Pack list's only item when the search matches nothing (SPEC §5). */
+export function noPackMatchText(query: string): string {
+  return `No packs match “${query.trim()}”.`;
 }
 
 /** Pack deletion confirmation, per status (SPEC §3). */

@@ -14,9 +14,9 @@ import {
   revealPack,
   type PackListEntry,
 } from "../api";
-import { packCountText, packDeleteMessage, thumbnailFormat } from "../model/messages";
+import { noPackMatchText, packCountText, packDeleteMessage, thumbnailFormat } from "../model/messages";
 import { statusBadgeOf } from "../model/pack-issues";
-import { rowClickOpens, rowThumbnail } from "../model/pack-row";
+import { filterPacks, reorderAllowed, rowClickOpens, rowThumbnail } from "../model/pack-row";
 import { confirmChoice } from "../../dialog";
 import { createPackDialog, statusBadge } from "./dialogs";
 import { cancelRowDrag, rowClickSuppressed, startRowDrag } from "./pack-list-drag";
@@ -47,15 +47,37 @@ export function buildPackList(onOpen: (packId: number) => void): {
   const newButton = el("button", { class: "primary", type: "button" }, "New pack…") as HTMLButtonElement;
   // How many packs the Library holds.
   const packCount = el("span", { class: "pm-pack-count" });
+  // Filters the list as you type (SPEC §5); type=search brings the webview's own clear button and Esc-to-clear.
+  const search = el("input", {
+    type: "search",
+    class: "pm-input pm-search",
+    placeholder: "Search packs",
+    "aria-label": "Search packs by Title or Short Name",
+  }) as HTMLInputElement;
+  // The Library's packs as last loaded, in stored order; the search filters this copy, no reload.
+  let packs: PackListEntry[] = [];
   const element = el(
     "section",
     { class: "view pm-list" },
-    el("div", { class: "pm-list-head" }, el("div", { class: "pm-list-title" }, el("h1", {}, "Pack Manager"), packCount), newButton),
+    el(
+      "div",
+      { class: "pm-list-head" },
+      el("div", { class: "pm-list-title" }, el("h1", {}, "Pack Manager"), packCount),
+      el("div", { class: "pm-list-actions" }, search, newButton),
+    ),
     el("p", { class: "muted" }, "Organise stickers into packs. Files are named in pack order, ready to drag into @Stickers."),
     message,
     notice,
     list,
   );
+
+  // `input` covers typing and the clear button; `search` covers Esc-to-clear.
+  const refilter = () => {
+    if (!reorderAllowed(search.value)) cancelRowDrag();
+    paint();
+  };
+  search.addEventListener("input", refilter);
+  search.addEventListener("search", refilter);
 
   newButton.addEventListener("click", async () => {
     const pack = await createPackDialog();
@@ -158,7 +180,10 @@ export function buildPackList(onOpen: (packId: number) => void): {
       const onControl = (e.target as Element).closest("button, .pm-grip") !== null;
       if (rowClickOpens({ onControl, endsDrag: rowClickSuppressed() })) onOpen(pack.id);
     });
-    grip.addEventListener("pointerdown", (e) => startRowDrag(e, item, pack.id, { list, drop: (id, position) => void reorder(id, position) }));
+    grip.addEventListener("pointerdown", (e) => {
+      if (!reorderAllowed(search.value)) return;
+      startRowDrag(e, item, pack.id, { list, drop: (id, position) => void reorder(id, position) });
+    });
     return item;
   }
 
@@ -176,18 +201,27 @@ export function buildPackList(onOpen: (packId: number) => void): {
   // Reloads can overlap (a drop right after the list was shown): only the latest one paints, failures included.
   let loads = 0;
 
+  /** Draw the loaded packs through the current search (kept across reloads and shows). */
+  function paint(): void {
+    const shown = filterPacks(packs, search.value);
+    packCount.textContent = packCountText(packs.length, shown.length);
+    cancelRowDrag();
+    for (const cache of previews) cache.clear();
+    previews = [];
+    list.classList.toggle("filtering", !reorderAllowed(search.value));
+    list.replaceChildren(...shown.map(row));
+    if (packs.length === 0) list.append(el("li", { class: "pm-empty-item muted" }, "No packs yet. Create one to start."));
+    else if (shown.length === 0) list.append(el("li", { class: "pm-empty-item muted" }, noPackMatchText(search.value)));
+  }
+
   async function reload(): Promise<void> {
     const load = ++loads;
     try {
-      const packs = await listPackFacts();
+      const loaded = await listPackFacts();
       if (load !== loads) return;
       if (loadFailed) say(""); // a successful load clears an earlier load failure only
-      packCount.textContent = packCountText(packs.length);
-      cancelRowDrag();
-      for (const cache of previews) cache.clear();
-      previews = [];
-      list.replaceChildren(...packs.map(row));
-      if (packs.length === 0) list.append(el("li", { class: "pm-empty-item muted" }, "No packs yet. Create one to start."));
+      packs = loaded;
+      paint();
     } catch (err) {
       if (load !== loads) return;
       say(errorMessage(err), true);

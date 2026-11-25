@@ -67,3 +67,24 @@ export function rowThumbnail(facts: RowThumbnailFacts): RowThumbnail {
   }
   return { kind: "first", title: "No thumbnail: Telegram shows the first sticker", stickerId: first.id };
 }
+
+/** The Pack list's search text, trimmed; "" means no filter. */
+export function packQuery(raw: string): string {
+  return raw.trim();
+}
+
+/**
+ * The packs the Pack list search shows, in their stored order: those whose
+ * Title or Short Name contains the trimmed query, case-insensitively. An empty
+ * (or blank) query shows them all. Unlike matchPacks (the pickers), never reorders.
+ */
+export function filterPacks<P extends { title: string; shortName: string }>(packs: readonly P[], raw: string): P[] {
+  const q = packQuery(raw).toLocaleLowerCase();
+  if (q === "") return [...packs];
+  return packs.filter((p) => p.title.toLocaleLowerCase().includes(q) || p.shortName.toLocaleLowerCase().includes(q));
+}
+
+/** Reordering is off while the search box has text: a filtered list hides rows, so a drop position would be ambiguous. */
+export function reorderAllowed(raw: string): boolean {
+  return packQuery(raw) === "";
+}
