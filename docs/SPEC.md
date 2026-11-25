@@ -251,7 +251,9 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   file, so it can be dropped into Telegram Desktop. The webview names only a sticker or pack id;
   the app resolves the path itself (as Open in explorer does), so the page can never ask to drag
   an arbitrary file. Windows only (OLE drag and drop of the file); the cursor image is a small
-  PNG made by the app, since Windows may not decode WEBP. Other platforms do not drag.
+  PNG made by the app, since Windows may not decode WEBP. Other platforms do not drag. The drag
+  handle is pointer-only by nature (a native file drag); each entry's Open in explorer button is
+  the keyboard route to the file.
 
 ### Pack-level
 - **UI conventions**: the app-wide dialog and dismissible-message rules are in §2.

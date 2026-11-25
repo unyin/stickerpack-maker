@@ -1,8 +1,8 @@
 // The Upload list (SPEC §5, SPM-21; owner decisions 2026-11-25): which entries
 // the dialog shows, when its header button is available, its notes, and the
 // width that fits ten emoji per row. Pure, so it is testable without a webview.
-import type { PackStatus, PackView, StickerView } from "../api";
-import { MISSING_REASON, packSizeText } from "./messages";
+import type { PackStatus, PackView, StickerFormat, StickerView } from "../api";
+import { MISSING_REASON, thumbnailFormat } from "./messages";
 
 /** Why the Upload list is unavailable, or null. A thumbnail alone is not a list: the pack must have stickers. */
 export function uploadListBlocker(stickerCount: number): string | null {
@@ -17,40 +17,50 @@ export function draftNote(status: PackStatus): string | null {
   return status === "draft" ? "This pack is a Draft: press Go Live once @Stickers' /publish succeeds." : null;
 }
 
-/** The over-the-cap line as a warning: informational, blocks nothing (the same words as the pack banner). */
-export function uploadSizeWarning(stickerCount: number): string | null {
-  return packSizeText(stickerCount);
-}
-
 export const EXPLORER_TITLE = "Open in explorer — Show this file in File Explorer, selected";
 export const DRAG_TITLE = "Drag to Telegram — Drag this file straight into the @Stickers chat";
 export const THUMBNAIL_MISSING_REASON = "The thumbnail file is Missing; replace it first.";
 export const THUMBNAIL_NOTE = "Thumbnail — no emoji";
 
-/** One row of the list. The thumbnail, when the pack has one, is the last. */
-export type UploadEntry =
-  | { kind: "sticker"; sticker: StickerView }
-  | { kind: "thumbnail"; missing: boolean };
+/** The file an entry stands for: what the app is asked to reveal, drag and preview (it resolves the path itself). */
+export type FileTarget =
+  | { kind: "sticker"; id: number; format: StickerFormat }
+  | { kind: "thumbnail"; packId: number; format: StickerFormat };
+
+/**
+ * One row of the list, described once: its labels, Missing reason and file
+ * target. The thumbnail, when the pack has one, is the last. `kind` is for
+ * layout only (the thumbnail has no #N, copy button or emoji box).
+ */
+export type UploadEntry = {
+  /** The accessible name of the entry's Open in explorer button (it has no text). */
+  explorerLabel: string;
+  /** What replaces the description of the entry's controls (§2) when its file is Missing, else null. */
+  missingReason: string | null;
+  imageAlt: string;
+  target: FileTarget;
+} & ({ kind: "sticker"; sticker: StickerView } | { kind: "thumbnail" });
 
 export function uploadEntries(view: PackView): UploadEntry[] {
-  const entries: UploadEntry[] = view.stickers.map((sticker) => ({ kind: "sticker", sticker }));
-  if (view.pack.thumbnail) entries.push({ kind: "thumbnail", missing: view.thumbnailMissing || view.thumbnailFile === null });
+  const entries: UploadEntry[] = view.stickers.map((sticker) => ({
+    kind: "sticker",
+    sticker,
+    explorerLabel: `Open #${sticker.position} in explorer`,
+    missingReason: sticker.missing ? MISSING_REASON : null,
+    imageAlt: `Sticker ${sticker.position}`,
+    target: { kind: "sticker", id: sticker.id, format: sticker.format },
+  }));
+  if (view.pack.thumbnail) {
+    const missing = view.thumbnailMissing || view.thumbnailFile === null;
+    entries.push({
+      kind: "thumbnail",
+      explorerLabel: "Open thumbnail in explorer",
+      missingReason: missing ? THUMBNAIL_MISSING_REASON : null,
+      imageAlt: "Thumbnail",
+      target: { kind: "thumbnail", packId: view.pack.id, format: thumbnailFormat(view.pack.thumbnail) },
+    });
+  }
   return entries;
-}
-
-export function entryMissing(entry: UploadEntry): boolean {
-  return entry.kind === "thumbnail" ? entry.missing : entry.sticker.missing;
-}
-
-/** What replaces the description of a Missing entry's controls (§2), or null when its file is there. */
-export function entryMissingReason(entry: UploadEntry): string | null {
-  if (!entryMissing(entry)) return null;
-  return entry.kind === "thumbnail" ? THUMBNAIL_MISSING_REASON : MISSING_REASON;
-}
-
-/** The accessible name of an entry's Open in explorer button (it has no text). */
-export function explorerLabelFor(entry: UploadEntry): string {
-  return entry.kind === "thumbnail" ? "Open thumbnail in explorer" : `Open #${entry.sticker.position} in explorer`;
 }
 
 /** Emoji per row the dialog is sized for (owner, 2026-11-25). */

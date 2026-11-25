@@ -14,18 +14,15 @@ import {
   type PackView,
   type StickerView,
 } from "../api";
-import { thumbnailFormat } from "../model/messages";
+import { packSizeText } from "../model/messages";
 import {
   DRAG_TITLE,
   draftNote,
-  entryMissing,
-  entryMissingReason,
   EXPLORER_TITLE,
-  explorerLabelFor,
   THUMBNAIL_NOTE,
   uploadDialogWidth,
   uploadEntries,
-  uploadSizeWarning,
+  type FileTarget,
   type UploadEntry,
 } from "../model/upload-list";
 import { bindEmojiSave, copyButton, measureEmojiGlyph } from "./emoji-field";
@@ -50,6 +47,9 @@ export async function openUploadList(view: PackView, previews: Previews, host: U
   const showError = (err: unknown) => {
     error.textContent = errorMessage(err);
   };
+  const clearError = () => {
+    error.textContent = "";
+  };
 
   const list = el("ol", { class: "ul-list", "aria-label": "Stickers in pack order" });
   for (const entry of entries) list.append(entryRow(entry));
@@ -58,7 +58,7 @@ export async function openUploadList(view: PackView, previews: Previews, host: U
   const draft = draftNote(view.pack.status);
   if (draft) notes.push(el("p", { class: "ul-note muted" }, draft));
   // A warning, informational: it blocks nothing (SPEC §3).
-  const size = uploadSizeWarning(view.stickers.length);
+  const size = packSizeText(view.stickers.length);
   if (size) notes.push(el("p", { class: "ul-note warn", role: "status" }, size));
 
   const handle = openDialog("Upload list", [...notes, error, list], [{ label: "Close", value: "close", variant: "secondary" }], "close");
@@ -78,26 +78,25 @@ export async function openUploadList(view: PackView, previews: Previews, host: U
   await handle.result;
 
   function entryRow(entry: UploadEntry): HTMLElement {
-    const reason = entryMissingReason(entry);
+    const reason = entry.missingReason;
     const open = el(
       "button",
-      { class: "secondary ul-open", type: "button", "aria-label": explorerLabelFor(entry) },
+      { class: "secondary ul-open", type: "button", "aria-label": entry.explorerLabel },
       icon("external"),
     ) as HTMLButtonElement;
     // §2: when the control is disabled the blocker reason replaces the description.
     open.disabled = reason !== null;
     open.title = reason ?? EXPLORER_TITLE;
     open.addEventListener("click", () => {
-      error.textContent = "";
-      const done = entry.kind === "thumbnail" ? revealThumbnail(view.pack.id) : revealSticker(entry.sticker.id);
-      done.catch(showError);
+      clearError();
+      reveal(entry.target).catch(showError);
     });
 
     const preview = previewCell(entry, reason);
     if (entry.kind === "thumbnail") {
       return el(
         "li",
-        { class: ["ul-entry", "thumb", reason ? "missing" : ""].join(" ").trim() },
+        { class: entryClass(reason, "thumb") },
         el("span", {}),
         preview,
         open,
@@ -114,16 +113,16 @@ export async function openUploadList(view: PackView, previews: Previews, host: U
       "aria-label": `Emoji String for #${sticker.position}`,
     }) as HTMLTextAreaElement;
     input.value = sticker.emojiString;
-    let saved = sticker.emojiString;
+    let lastStored = sticker.emojiString;
     bindEmojiSave(input, (value) => {
-      error.textContent = "";
+      clearError();
       host.saveEmoji(sticker, value).then(
         (stored) => {
-          saved = stored;
+          lastStored = stored;
           input.value = stored; // spaces stripped, as saved
         },
         (err) => {
-          input.value = saved;
+          input.value = lastStored;
           showError(err);
         },
       );
@@ -131,7 +130,7 @@ export async function openUploadList(view: PackView, previews: Previews, host: U
     const { button: copy, status } = copyButton(() => input.value, `Copy the Emoji String of #${sticker.position} to the clipboard`);
     return el(
       "li",
-      { class: ["ul-entry", reason ? "missing" : ""].join(" ").trim() },
+      { class: entryClass(reason) },
       el("span", { class: "pm-pos" }, `#${sticker.position}`),
       preview,
       open,
@@ -140,26 +139,36 @@ export async function openUploadList(view: PackView, previews: Previews, host: U
     );
   }
 
+  function previewUrl(target: FileTarget): Promise<string | null> {
+    return target.kind === "thumbnail" ? previews.thumbnailOf(target.packId, target.format) : previews.sticker(target.id, target.format);
+  }
+
   /** The entry's image; a drag handle unless its file is Missing. */
   function previewCell(entry: UploadEntry, reason: string | null): HTMLElement {
-    const missing = entryMissing(entry);
+    const missing = reason !== null;
     const art = missing
       ? el("div", { class: "pm-missing-art" }, "Missing")
-      : entry.kind === "thumbnail"
-        ? previewImage(previews.thumbnailOf(view.pack.id, thumbnailFormat(view.pack.thumbnail)), "Thumbnail", "pm-tile-img")
-        : previewImage(previews.sticker(entry.sticker.id, entry.sticker.format), `Sticker ${entry.sticker.position}`, "pm-tile-img");
+      : previewImage(previewUrl(entry.target), entry.imageAlt, "pm-tile-img");
     const cell = el("span", { class: missing ? "ul-prev" : "ul-prev draggable" }, art);
     cell.title = reason ?? DRAG_TITLE;
     if (!missing) {
       makeDragHandle(cell, () => {
-        error.textContent = "";
-        const done = entry.kind === "thumbnail" ? dragThumbnail(view.pack.id) : dragSticker(entry.sticker.id);
-        return done.catch(showError);
+        clearError();
+        return drag(entry.target).catch(showError);
       });
     }
     return cell;
   }
 }
+
+/** The CSS classes of an entry's row. */
+function entryClass(missingReason: string | null, ...extra: string[]): string {
+  return ["ul-entry", ...extra, missingReason ? "missing" : ""].filter(Boolean).join(" ");
+}
+
+/** The one place an entry's file target meets the app's reveal and drag commands. */
+const reveal = (target: FileTarget) => (target.kind === "thumbnail" ? revealThumbnail(target.packId) : revealSticker(target.id));
+const drag = (target: FileTarget) => (target.kind === "thumbnail" ? dragThumbnail(target.packId) : dragSticker(target.id));
 
 /**
  * Press and move on `cell` starts a native file drag (`start`), once the

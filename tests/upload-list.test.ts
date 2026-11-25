@@ -1,19 +1,15 @@
 // The Upload list's pure rules (SPEC §5, SPM-21): entries, availability, notes, width.
 import { expect, test } from "bun:test";
 import type { PackView, StickerView } from "../src/pack-manager/api";
-import { MISSING_REASON } from "../src/pack-manager/model/messages";
+import { MISSING_REASON, packSizeText } from "../src/pack-manager/model/messages";
 import {
   draftNote,
   emojiRowWidth,
-  entryMissing,
-  entryMissingReason,
   EMOJI_PER_ROW,
-  explorerLabelFor,
   THUMBNAIL_MISSING_REASON,
   uploadDialogWidth,
   uploadEntries,
   uploadListBlocker,
-  uploadSizeWarning,
 } from "../src/pack-manager/model/upload-list";
 
 function sticker(position: number, missing = false): StickerView {
@@ -55,19 +51,25 @@ test("entries are the stickers in pack order, then the thumbnail when the pack h
 
 test("Missing entries carry the app's Missing reason; the thumbnail has its own", () => {
   const [ok, gone] = uploadEntries(view([sticker(1), sticker(2, true)]));
-  expect(entryMissing(ok)).toBe(false);
-  expect(entryMissingReason(ok)).toBeNull();
-  expect(entryMissingReason(gone)).toBe(MISSING_REASON);
+  expect(ok.missingReason).toBeNull();
+  expect(gone.missingReason).toBe(MISSING_REASON);
   const thumb = uploadEntries(view([sticker(1)], "thumbnail.png", true))[1];
-  expect(entryMissing(thumb)).toBe(true);
-  expect(entryMissingReason(thumb)).toBe(THUMBNAIL_MISSING_REASON);
+  expect(thumb.missingReason).toBe(THUMBNAIL_MISSING_REASON);
   expect(THUMBNAIL_MISSING_REASON).toBe("The thumbnail file is Missing; replace it first.");
 });
 
 test("Open in explorer buttons have descriptive accessible names", () => {
   const [first, , thumb] = uploadEntries(view([sticker(1), sticker(2)], "thumbnail.webp"));
-  expect(explorerLabelFor(first)).toBe("Open #1 in explorer");
-  expect(explorerLabelFor(thumb)).toBe("Open thumbnail in explorer");
+  expect(first.explorerLabel).toBe("Open #1 in explorer");
+  expect(thumb.explorerLabel).toBe("Open thumbnail in explorer");
+});
+
+test("each entry names the one file it stands for", () => {
+  const [first, thumb] = uploadEntries(view([sticker(1)], "thumbnail.webp"));
+  expect(first.target).toEqual({ kind: "sticker", id: 10, format: "png" });
+  expect(first.imageAlt).toBe("Sticker 1");
+  expect(thumb.target).toEqual({ kind: "thumbnail", packId: 1, format: "webp" });
+  expect(thumb.imageAlt).toBe("Thumbnail");
 });
 
 test("only a Draft pack shows the reminder", () => {
@@ -76,8 +78,8 @@ test("only a Draft pack shows the reminder", () => {
 });
 
 test("past 120 stickers the over-limit warning shows, at or under it nothing does", () => {
-  expect(uploadSizeWarning(120)).toBeNull();
-  expect(uploadSizeWarning(125)).toContain("125 stickers");
+  expect(packSizeText(120)).toBeNull();
+  expect(packSizeText(125)).toContain("125 stickers");
 });
 
 test("the preferred width fits ten emoji per row with half a glyph to spare", () => {
