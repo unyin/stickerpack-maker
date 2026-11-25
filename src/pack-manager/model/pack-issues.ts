@@ -81,8 +81,14 @@ export function packIssues(facts: PackFacts): PackIssue[] {
   return issues;
 }
 
-/** Ready to go live: a Draft with no issues. A Live pack is never ready. */
-export function isReady(facts: PackFacts): boolean {
+/**
+ * Whether the pack is ready to go live (owner decisions 2026-11-25): a Draft
+ * with no issues (none Missing, 1 to PACK_MAX_STICKERS stickers, every Emoji
+ * String of EMOJI_MIN to EMOJI_MAX emoji, a thumbnail (if set) that is not
+ * Missing; no thumbnail does not block). A Live pack is never ready. The same
+ * rule as the Pack list's badge. Recomputed on every render, never stored.
+ */
+export function readyToGoLive(facts: PackFacts): boolean {
   return facts.status === "draft" && packIssues(facts).length === 0;
 }
 

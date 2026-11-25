@@ -3,16 +3,15 @@
 import { expect, test } from "bun:test";
 import type { PackView, StickerView } from "../src/pack-manager/api";
 import {
-  isReady,
   packFactsOfView,
   packIssues,
+  readyToGoLive,
   READY_DETAIL,
   READY_LABEL,
   statusBadgeOf,
   type PackFacts,
 } from "../src/pack-manager/model/pack-issues";
-import { rowSlotAt, rowThumbnail } from "../src/pack-manager/model/pack-row";
-import { readyToGoLive } from "../src/pack-manager/model/upload-list";
+import { rowThumbnail } from "../src/pack-manager/model/pack-row";
 
 const good = (n: number): string[] => Array.from({ length: n }, () => "😀");
 
@@ -25,7 +24,7 @@ const labels = (f: PackFacts) => packIssues(f).map((i) => i.label);
 
 test("a clean Draft has no issues and is ready", () => {
   expect(packIssues(facts())).toEqual([]);
-  expect(isReady(facts())).toBe(true);
+  expect(readyToGoLive(facts())).toBe(true);
 });
 
 test("Missing stickers: badge N Missing, singular and plural tooltip", () => {
@@ -97,8 +96,7 @@ test("a Draft with no issues is Ready to upload; a Live pack with none shows no 
 test("issues show on a Live pack, which is never ready", () => {
   const live = facts({ status: "live", missingCount: 1 });
   expect(statusBadgeOf(live)?.tone).toBe("issue");
-  expect(isReady(live)).toBe(false);
-  expect(isReady(facts({ status: "live" }))).toBe(false);
+  expect(readyToGoLive(live)).toBe(false);
   expect(readyToGoLive(facts({ status: "live" }))).toBe(false);
 });
 
@@ -152,38 +150,33 @@ test("the Pack view's adapter derives the facts", () => {
 });
 
 test("thumbnail cell: own, first sticker, Missing art, or nothing", () => {
-  const first = { id: 7, missing: false };
-  expect(rowThumbnail({ thumbnail: "thumbnail.png", thumbnailMissing: false, firstSticker: first })).toEqual({
+  const first = { id: 7, format: "png" as const, missing: false };
+  expect(rowThumbnail({ thumbnail: "thumbnail.png", thumbnailMissing: false, firstSticker: first, checkError: null })).toEqual({
     kind: "own",
     title: "Thumbnail",
   });
-  expect(rowThumbnail({ thumbnail: null, thumbnailMissing: false, firstSticker: first })).toEqual({
+  expect(rowThumbnail({ thumbnail: null, thumbnailMissing: false, firstSticker: first, checkError: null })).toEqual({
     kind: "first",
     title: "No thumbnail: Telegram shows the first sticker",
     stickerId: 7,
   });
-  expect(rowThumbnail({ thumbnail: null, thumbnailMissing: false, firstSticker: { id: 7, missing: true } })).toEqual({
+  expect(rowThumbnail({ thumbnail: null, thumbnailMissing: false, firstSticker: { id: 7, format: "png", missing: true }, checkError: null })).toEqual({
     kind: "missing",
     title: "No thumbnail: Telegram shows the first sticker, which is Missing",
   });
-  expect(rowThumbnail({ thumbnail: "thumbnail.png", thumbnailMissing: true, firstSticker: first })).toEqual({
+  expect(rowThumbnail({ thumbnail: "thumbnail.png", thumbnailMissing: true, firstSticker: first, checkError: null })).toEqual({
     kind: "missing",
     title: "The thumbnail file is Missing",
   });
-  expect(rowThumbnail({ thumbnail: null, thumbnailMissing: false, firstSticker: null })).toEqual({
+  expect(rowThumbnail({ thumbnail: null, thumbnailMissing: false, firstSticker: null, checkError: null })).toEqual({
     kind: "none",
     title: "No thumbnail and no stickers yet",
   });
 });
 
-test("rowSlotAt: before a row above its middle, after it below, ends clamp", () => {
-  const rows = [0, 1, 2].map((i) => ({ left: 0, top: i * 50, width: 400, height: 40 })); // gaps of 10
-  expect(rowSlotAt(rows, -30)).toBe(0);
-  expect(rowSlotAt(rows, 10)).toBe(0);
-  expect(rowSlotAt(rows, 30)).toBe(1); // below row 0's middle (20)
-  expect(rowSlotAt(rows, 45)).toBe(1); // in the gap
-  expect(rowSlotAt(rows, 80)).toBe(2);
-  expect(rowSlotAt(rows, 130)).toBe(3);
-  expect(rowSlotAt(rows, 9999)).toBe(3);
-  expect(rowSlotAt([], 5)).toBe(0);
+test("a failed check shows the neutral placeholder, whatever the files say", () => {
+  const first = { id: 7, format: "png" as const, missing: false };
+  const expected = { kind: "none", title: "The pack could not be checked" };
+  expect(rowThumbnail({ thumbnail: "thumbnail.png", thumbnailMissing: false, firstSticker: first, checkError: "boom" })).toEqual(expected);
+  expect(rowThumbnail({ thumbnail: null, thumbnailMissing: false, firstSticker: first, checkError: "boom" })).toEqual(expected);
 });

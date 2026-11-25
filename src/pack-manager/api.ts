@@ -20,6 +20,13 @@ export interface PackSummary extends Pack {
   stickerCount: number;
 }
 
+/** The first sticker of a pack, which stands in for a missing thumbnail. */
+export interface FirstSticker {
+  id: number;
+  format: StickerFormat;
+  missing: boolean;
+}
+
 /** One pack as the Pack list shows it: plain facts from the full open check (SPM-25). */
 export interface PackListEntry extends Pack {
   stickerCount: number;
@@ -28,7 +35,7 @@ export interface PackListEntry extends Pack {
   /** Every sticker's Emoji String, in position order. */
   emojiStrings: string[];
   /** The first sticker, which stands in for a missing thumbnail; null when the pack is empty. */
-  firstSticker: { id: number; format: StickerFormat; missing: boolean } | null;
+  firstSticker: FirstSticker | null;
   /** Set when the pack's check failed; the other facts are then the database's alone. */
   checkError: string | null;
 }
@@ -105,8 +112,8 @@ export function isSendFailure(err: unknown): err is SendFailure {
 export const listPacks = () => invoke<PackSummary[]>("list_packs");
 /** The Pack list's rows: every pack gets the full open check, in the stored order (SPEC §4, §5). */
 export const listPackFacts = () => invoke<PackListEntry[]>("list_pack_facts");
-/** Move a pack to 1-based `newPosition` in the Pack list (1 = top); display order only. */
-export const movePack = (packId: number, newPosition: number) => invoke<void>("move_pack", { packId, newPosition });
+/** Reorder a pack to 1-based `newPosition` in the Pack list (1 = top); display order only. */
+export const reorderPack = (packId: number, newPosition: number) => invoke<void>("reorder_pack", { packId, newPosition });
 export const suggestShortName = (title: string) => invoke<string>("suggest_short_name", { title });
 /** `shortName` null = auto-derive from the Title (made unique). */
 export const createPack = (title: string, shortName: string | null) =>

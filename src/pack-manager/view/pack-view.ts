@@ -54,8 +54,8 @@ import {
   type SelectionState,
 } from "../model/selection";
 import { emojiCountWarning, emojiWarning } from "../model/emoji";
-import { packFactsOfView } from "../model/pack-issues";
-import { readyToGoLive, UPLOAD_LIST_TITLE, UPLOAD_READY_TITLE, uploadListBlocker } from "../model/upload-list";
+import { packFactsOfView, readyToGoLive } from "../model/pack-issues";
+import { UPLOAD_LIST_TITLE, UPLOAD_READY_TITLE, uploadListBlocker } from "../model/upload-list";
 import { importOrder } from "../model/import-order";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { dialogOpen, openDialog } from "../../dialog";

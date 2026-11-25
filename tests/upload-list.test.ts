@@ -2,12 +2,11 @@
 import { expect, test } from "bun:test";
 import type { PackView, StickerView } from "../src/pack-manager/api";
 import { MISSING_REASON, packSizeText } from "../src/pack-manager/model/messages";
-import { packFactsOfView } from "../src/pack-manager/model/pack-issues";
+import { packFactsOfView, readyToGoLive } from "../src/pack-manager/model/pack-issues";
 import {
   draftNote,
   emojiRowWidth,
   EMOJI_PER_ROW,
-  readyToGoLive,
   THUMBNAIL_MISSING_REASON,
   UPLOAD_READY_TITLE,
   uploadDialogWidth,

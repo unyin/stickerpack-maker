@@ -1,6 +1,6 @@
 // The Pack list row's pure choices (SPEC §5, SPM-25): which picture stands for
-// the pack, and where a dragged row lands. Pure, so testable without a webview.
-import type { Box } from "./modes";
+// the pack. Pure, so testable without a webview.
+import type { FirstSticker } from "../api";
 
 /** What a row's thumbnail cell shows (owner-approved tooltips, 2026-11-25). */
 export type RowThumbnail =
@@ -18,10 +18,14 @@ export interface RowThumbnailFacts {
   /** The pack's thumbnail file name, or null when it has none. */
   thumbnail: string | null;
   thumbnailMissing: boolean;
-  firstSticker: { id: number; missing: boolean } | null;
+  firstSticker: FirstSticker | null;
+  /** Set when the pack's check failed: its files were never verified. */
+  checkError: string | null;
 }
 
 export function rowThumbnail(facts: RowThumbnailFacts): RowThumbnail {
+  // A failed check leaves the file facts unknown: show nothing it never verified.
+  if (facts.checkError !== null) return { kind: "none", title: "The pack could not be checked" };
   if (facts.thumbnail !== null) {
     return facts.thumbnailMissing
       ? { kind: "missing", title: "The thumbnail file is Missing" }
@@ -33,15 +37,4 @@ export function rowThumbnail(facts: RowThumbnailFacts): RowThumbnail {
     return { kind: "missing", title: "No thumbnail: Telegram shows the first sticker, which is Missing" };
   }
   return { kind: "first", title: "No thumbnail: Telegram shows the first sticker", stickerId: first.id };
-}
-
-/**
- * The insertion slot under a pointer at height `y` in a vertical list: slot i
- * means "before row i", slot n "after the last". Above a row's middle is
- * before it, below is after (so gaps, edges and the space past the ends all
- * resolve to the nearest sensible slot).
- */
-export function rowSlotAt(rows: readonly Box[], y: number): number {
-  const index = rows.findIndex((r) => y < r.top + r.height / 2);
-  return index === -1 ? rows.length : index;
 }

@@ -105,7 +105,7 @@ pub fn import_files(
 }
 
 /// Reorder mode's one-sticker move, then the pack view without a presence
-/// scan (SPEC §4/§5: Missing is checked on open and Refresh only).
+/// scan (SPEC §4/§5: Missing is checked on pack open, Refresh and each show of the Pack list only).
 pub fn reorder(
     conn: &mut Connection,
     dir: &Path,
@@ -135,16 +135,16 @@ pub fn list_pack_facts(config: State<'_, SharedConfig>, lock: State<'_, LibraryL
     with_library(&config, &lock, |conn, dir| desync::list_pack_facts(conn, dir, lock.memo()))
 }
 
-/// Move a pack to 1-based `new_position` in the Pack list (1 = top). Display
+/// Reorder a pack to 1-based `new_position` in the Pack list (1 = top). Display
 /// order only: no folder or file changes.
 #[tauri::command(async)]
-pub fn move_pack(
+pub fn reorder_pack(
     pack_id: i64,
     new_position: i64,
     config: State<'_, SharedConfig>,
     lock: State<'_, LibraryLock>,
 ) -> Result<(), String> {
-    with_library(&config, &lock, |conn, _| packs::move_pack(conn, pack_id, new_position).map(|_| ()))
+    with_library(&config, &lock, |conn, _| packs::reorder_pack(conn, pack_id, new_position).map(|_| ()))
 }
 
 /// The pack summaries (database only, no checks) in the stored order: for the
@@ -189,7 +189,7 @@ pub fn delete_pack(
 // ---- Pack view ----
 
 /// Open or manually refresh a pack: recovery, then desync detection
-/// (SPEC §4: pack open and refresh only, never app start).
+/// (SPEC §4: pack open, refresh and each show of the Pack list, never app start).
 #[tauri::command(async)]
 pub fn open_pack(pack_id: i64, config: State<'_, SharedConfig>, lock: State<'_, LibraryLock>) -> Result<PackView, String> {
     with_library(&config, &lock, |conn, dir| desync::open_pack(conn, dir, pack_id, lock.memo()))

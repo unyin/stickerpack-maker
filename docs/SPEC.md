@@ -278,7 +278,8 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
     gets (recovery, then the presence check, remembered like an open's), so the badges are
     true; the cost was measured on a 50 x 120-sticker Library (about 50 ms release, 120 ms
     debug). A pack whose check fails does not break the list: its row reads **Check failed**
-    (the reason as its tooltip) and shows what the database knows.
+    (the error as its tooltip); its counts and emoji come from the database and its
+    thumbnail shows the None placeholder (see below).
   - **The row**, in columns that line up across rows (one grid, each row a subgrid): grip, a
     40px thumbnail, the Title with the Short Name under it (one line each, ellipsis, both in
     full in the tooltip; clicking opens the pack), the **status badge**, the Draft/Live badge,
@@ -287,7 +288,8 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
     first sticker in a dashed frame ("No thumbnail: Telegram shows the first sticker"), or the
     Missing art when that sticker is Missing ("... which is Missing"); a Missing thumbnail
     file shows the Missing art ("The thumbnail file is Missing"); with no thumbnail and no
-    stickers, a neutral "None" ("No thumbnail and no stickers yet").
+    stickers, a neutral "None" ("No thumbnail and no stickers yet"). A pack whose check failed
+    shows the same "None" ("The pack could not be checked"): its files were never verified.
   - **The status badge** comes from ONE issue rule (`model/pack-issues.ts`) that the Pack
     view's green **Upload…** shares (ready = a Draft with no issues). Issues, most severe
     first: N Missing stickers ("1 sticker is Missing" / "N stickers are Missing"); Thumbnail
@@ -302,6 +304,8 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
     is display only: it never renames a folder or a sticker file. **New packs go at the
     top.** Existing packs of an older Library are backfilled newest first, so the list reads
     newest first from the upgrade on. Deleting a pack closes the gap.
+    The pack pickers (Send to pack, the Editor's save target) list packs in the same stored
+    order.
   - **Drag to reorder**, from the row's **grip** only (six dots, a 32px-wide handle at the
     row's left edge, tooltip "Drag to reorder"); clicking the title still opens the pack. No
     Reorder mode or toggle. Pointer-only, like the Upload list's drag handle and the Pack
@@ -1138,7 +1142,7 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 1. **Scaffold**: Tauri app skeleton (Rust + TS), Windows build, SQLite, first-run library
    chooser, settings (path display, manual re-point, fresh-library creation).
 2. **Library core (Rust)**: schema (packs/stickers/thumbnail/emoji/status), order-encoded
-   filenames, crash-safe renames, desync detection (pack-open + manual refresh), Missing state.
+   filenames, crash-safe renames, desync detection (pack open, manual refresh and each show of the Pack list), Missing state.
 3. **Pack Manager UI**: pack list/create, Draft/Live toggle + short-name lock, pack view
    (Normal/Reorder modes, detail + aggregate panels, thumbnail slot), emoji edit/copy,
    explorer reveal, delete semantics, 120 warning, bulk import with validation.

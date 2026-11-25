@@ -136,11 +136,11 @@ fn store_pack_order(conn: &mut Connection, ids: &[i64]) -> Result<(), String> {
     tx.commit().map_err(|e| format!("cannot commit pack order: {e}"))
 }
 
-/// Move one pack to 1-based `new_position` in the Pack list (1 = top), like
+/// Reorder one pack to 1-based `new_position` in the Pack list (1 = top), like
 /// `reorder_sticker` for stickers. Display order only: no pack folder or
 /// sticker file is touched (owner, SPM-25). Returns the packs in their new
-/// order; moving a pack to where it already is changes nothing.
-pub fn move_pack(conn: &mut Connection, pack_id: i64, new_position: i64) -> Result<Vec<Pack>, String> {
+/// order; reordering a pack to where it already is changes nothing.
+pub fn reorder_pack(conn: &mut Connection, pack_id: i64, new_position: i64) -> Result<Vec<Pack>, String> {
     let mut packs = load_packs(conn)?;
     let count = packs.len() as i64;
     if new_position < 1 || new_position > count {
@@ -473,14 +473,21 @@ pub fn delete_pack(
             ));
         }
     }
-    conn.execute("DELETE FROM packs WHERE id = ?1", params![pack_id])
+    // Delete the row and close ITS gap in one transaction: every later
+    // sort_order drops by one, which keeps the order 1..N only if it was 1..N
+    // before (a pre-existing gap stays; only a reorder rewrites the order). A
+    // failure leaves both the row and the order untouched.
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("cannot start transaction: {e}"))?;
+    let sort_order: i64 = tx
+        .query_row("SELECT sort_order FROM packs WHERE id = ?1", params![pack_id], |r| r.get(0))
         .map_err(|e| format!("cannot delete pack {pack_id}: {e}"))?;
-    // Close the gap so the stored order stays 1..N. A failure here is
-    // harmless to the order's correctness (a gap still sorts the same), so it
-    // must not hide that the pack is gone.
-    if let Ok(packs) = load_packs(conn) {
-        let _ = store_pack_order(conn, &packs.iter().map(|p| p.id).collect::<Vec<_>>());
-    }
+    tx.execute("DELETE FROM packs WHERE id = ?1", params![pack_id])
+        .map_err(|e| format!("cannot delete pack {pack_id}: {e}"))?;
+    tx.execute("UPDATE packs SET sort_order = sort_order - 1 WHERE sort_order > ?1", params![sort_order])
+        .map_err(|e| format!("cannot close the gap in the pack order: {e}"))?;
+    tx.commit().map_err(|e| format!("cannot commit pack deletion: {e}"))?;
     let mut leftover = None;
     for folder in folders {
         let dir = library_dir.join(folder);
@@ -795,45 +802,45 @@ mod tests {
     }
 
     #[test]
-    fn move_pack_places_a_pack_at_the_new_position_and_keeps_the_order_contiguous() {
+    fn reorder_pack_places_a_pack_at_the_new_position_and_keeps_the_order_contiguous() {
         let mut lib = Lib::new();
         let ids: Vec<i64> = ["a", "b", "c", "d"].iter().map(|n| lib.create(n, Some(n)).unwrap().id).collect();
-        // List reads d c b a. Move a to the top, then d to the bottom.
-        let moved = move_pack(&mut lib.conn, ids[0], 1).unwrap();
+        // List reads d c b a. Reorder: a to the top, then d to the bottom.
+        let moved = reorder_pack(&mut lib.conn, ids[0], 1).unwrap();
         assert_eq!(moved.iter().map(|p| p.short_name.as_str()).collect::<Vec<_>>(), ["a", "d", "c", "b"]);
-        move_pack(&mut lib.conn, ids[3], 4).unwrap();
+        reorder_pack(&mut lib.conn, ids[3], 4).unwrap();
         assert_eq!(order(&lib), ["a", "c", "b", "d"]);
         assert_eq!(stored_orders(&lib), [1, 2, 3, 4]);
     }
 
     #[test]
-    fn move_pack_to_where_it_is_changes_nothing() {
+    fn reorder_pack_to_where_it_is_changes_nothing() {
         let mut lib = Lib::new();
         let ids: Vec<i64> = ["a", "b", "c"].iter().map(|n| lib.create(n, Some(n)).unwrap().id).collect();
-        move_pack(&mut lib.conn, ids[1], 2).unwrap();
+        reorder_pack(&mut lib.conn, ids[1], 2).unwrap();
         assert_eq!(order(&lib), ["c", "b", "a"]);
     }
 
     #[test]
-    fn move_pack_refuses_bad_positions_and_unknown_packs() {
+    fn reorder_pack_refuses_bad_positions_and_unknown_packs() {
         let mut lib = Lib::new();
         let a = lib.create("a", Some("a")).unwrap();
         lib.create("b", Some("b")).unwrap();
         for to in [0, 3, -1] {
-            assert!(move_pack(&mut lib.conn, a.id, to).is_err());
+            assert!(reorder_pack(&mut lib.conn, a.id, to).is_err());
         }
-        assert!(move_pack(&mut lib.conn, 999, 1).is_err());
+        assert!(reorder_pack(&mut lib.conn, 999, 1).is_err());
         assert_eq!(order(&lib), ["b", "a"]);
     }
 
     #[test]
-    fn moving_a_pack_touches_no_folder_and_no_file() {
+    fn reordering_a_pack_touches_no_folder_and_no_file() {
         let mut lib = Lib::new();
         let a = lib.create("a", Some("a")).unwrap();
         lib.create("b", Some("b")).unwrap();
         fs::write(lib.path().join("a").join("001.png"), "x").unwrap();
         let folders = lib.folders();
-        move_pack(&mut lib.conn, a.id, 1).unwrap();
+        reorder_pack(&mut lib.conn, a.id, 1).unwrap();
         assert_eq!(lib.folders(), folders);
         assert_eq!(fs::read(lib.path().join("a").join("001.png")).unwrap(), b"x");
         assert_eq!(load_pack(&lib.conn, a.id).unwrap().short_name, "a");
@@ -853,12 +860,12 @@ mod tests {
     }
 
     #[test]
-    fn a_gap_in_the_stored_order_still_sorts_correctly_and_heals_on_the_next_change() {
+    fn a_gap_in_the_stored_order_still_sorts_correctly_and_a_reorder_heals_it() {
         let mut lib = Lib::new();
         let ids: Vec<i64> = ["a", "b", "c"].iter().map(|n| lib.create(n, Some(n)).unwrap().id).collect();
         lib.conn.execute("UPDATE packs SET sort_order = sort_order * 10", []).unwrap();
         assert_eq!(order(&lib), ["c", "b", "a"]);
-        move_pack(&mut lib.conn, ids[0], 1).unwrap();
+        reorder_pack(&mut lib.conn, ids[0], 1).unwrap();
         assert_eq!(order(&lib), ["a", "c", "b"]);
         assert_eq!(stored_orders(&lib), [1, 2, 3]);
     }

@@ -4,7 +4,6 @@
 import type { PackStatus, PackView, StickerFormat, StickerView } from "../api";
 import { EMOJI_MAX, EMOJI_MIN } from "./emoji";
 import { MISSING_REASON, thumbnailFormat } from "./messages";
-import { isReady, type PackFacts } from "./pack-issues";
 
 /** Why the Upload list is unavailable, or null. A thumbnail alone is not a list: the pack must have stickers. */
 export function uploadListBlocker(stickerCount: number): string | null {
@@ -16,17 +15,6 @@ export const UPLOAD_LIST_TITLE = "Upload… — Every sticker in order with its 
 
 /** The enabled tooltip while the pack is ready to go live: the header button is green and says why (owner, 2026-11-25). */
 export const UPLOAD_READY_TITLE = `Upload… — Ready to go live: every sticker has its file and ${EMOJI_MIN}–${EMOJI_MAX} emoji`;
-
-/**
- * Whether the pack is ready to go live (owner decisions 2026-11-25): a Draft
- * with no issues (pack-issues.ts: none Missing, 1 to PACK_MAX_STICKERS
- * stickers, every Emoji String of EMOJI_MIN to EMOJI_MAX emoji, a thumbnail
- * (if set) that is not Missing; no thumbnail does not block). The same rule
- * as the Pack list's badge. Recomputed on every render, never stored.
- */
-export function readyToGoLive(facts: PackFacts): boolean {
-  return isReady(facts);
-}
 
 /** A Draft pack's reminder (owner-approved wording, 2026-11-25); null for a Live pack. */
 export function draftNote(status: PackStatus): string | null {

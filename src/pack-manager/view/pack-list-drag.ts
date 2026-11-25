@@ -3,14 +3,13 @@
 // is unavailable in the Windows webview while Tauri's file drop is enabled),
 // and pointer-only like it: no keyboard route. The hit test and drop rules are
 // pure and live in ../model (rowSlotAt, dropPosition).
-import { dropPosition } from "../model/modes";
-import { rowSlotAt } from "../model/pack-row";
+import { dropPosition, rowSlotAt } from "../model/modes";
 
 /** What the drag needs from the Pack list. */
 export interface RowDragHost {
   /** The list holding the rows (`.pm-pack-row[data-id]`). */
   list: HTMLElement;
-  /** A row was dropped on a new place: move its pack to 1-based `position`. */
+  /** A row was dropped on a new place: reorder its pack to 1-based `position`. */
   drop(packId: number, position: number): void;
 }
 

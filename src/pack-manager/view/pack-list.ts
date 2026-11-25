@@ -10,36 +10,36 @@ import { el, errorMessage } from "../../ui";
 import {
   deletePack,
   listPackFacts,
-  movePack,
+  reorderPack,
   revealPack,
   type PackListEntry,
 } from "../api";
 import { packCountText, packDeleteMessage, thumbnailFormat } from "../model/messages";
-import { statusBadgeOf, type PackFacts } from "../model/pack-issues";
+import { statusBadgeOf } from "../model/pack-issues";
 import { rowThumbnail } from "../model/pack-row";
 import { confirmChoice } from "../../dialog";
 import { createPackDialog, statusBadge } from "./dialogs";
 import { cancelRowDrag, startRowDrag } from "./pack-list-drag";
 import { previewImage, Previews } from "./previews";
 
-/** The facts the issue rule reads, from a list entry. */
-function factsOf(pack: PackListEntry): PackFacts {
-  return {
-    status: pack.status,
-    stickerCount: pack.stickerCount,
-    missingCount: pack.missingCount,
-    thumbnailMissing: pack.thumbnailMissing,
-    emojiStrings: pack.emojiStrings,
-  };
-}
-
 export function buildPackList(onOpen: (packId: number) => void): {
   element: HTMLElement;
   reload(): Promise<void>;
   /** Show an error in the list's message line. */
   showError(text: string): void;
+  /** Empty the message line; the show path calls it before reload(). */
+  clearMessage(): void;
 } {
   const message = el("p", { class: "message", role: "alert" });
+  // The ONE writer of the message line. Rule: a successful reload clears the
+  // line only when a failed LOAD wrote it, so a delete/reorder/reveal error
+  // or a showError message survives the reload that follows; each show of the
+  // list starts clear (clearMessage, before reload).
+  let loadFailed = false;
+  function say(text: string, fromLoad = false): void {
+    message.textContent = text;
+    loadFailed = fromLoad && text !== "";
+  }
   const notice = el("p", { class: "pm-notice", role: "status" });
   const list = el("ul", { class: "pm-pack-list" });
   // One preview cache per row (each pack has its own thumbnail and first sticker); dropped on every reload.
@@ -73,25 +73,21 @@ export function buildPackList(onOpen: (packId: number) => void): {
       { actionLabel: live ? "Delete locally" : "Delete pack", keepLabel: "Cancel", danger: true },
     );
     if (!ok) return;
-    message.textContent = "";
+    say("");
     try {
       const leftover = await deletePack(pack.id);
       notice.textContent = leftover
         ? `“${pack.title}” is gone from the Library, but its folder could not be removed (${leftover.reason}). Delete ${leftover.path} yourself.`
         : `Deleted “${pack.title}”.`;
     } catch (err) {
-      message.textContent = errorMessage(err);
+      say(errorMessage(err));
     }
     await reload();
   }
 
   /** The thumbnail cell: its own thumbnail, the first sticker standing in, the Missing art, or nothing. */
   function thumbnailCell(pack: PackListEntry, cache: Previews): HTMLElement {
-    const choice = rowThumbnail({
-      thumbnail: pack.thumbnail,
-      thumbnailMissing: pack.thumbnailMissing,
-      firstSticker: pack.firstSticker,
-    });
+    const choice = rowThumbnail(pack);
     const cell = el("div", { class: "pm-row-thumb", title: choice.title });
     switch (choice.kind) {
       case "own":
@@ -118,7 +114,7 @@ export function buildPackList(onOpen: (packId: number) => void): {
       cell.append(el("span", { class: "pm-badge pm-badge-issue", title: pack.checkError }, "Check failed"));
       return cell;
     }
-    const badge = statusBadgeOf(factsOf(pack));
+    const badge = statusBadgeOf(pack);
     if (badge) cell.append(el("span", { class: `pm-badge pm-badge-${badge.tone}`, title: badge.title }, badge.label));
     return cell;
   }
@@ -139,8 +135,8 @@ export function buildPackList(onOpen: (packId: number) => void): {
       ...explorerLabel(),
     );
     reveal.addEventListener("click", () => {
-      message.textContent = "";
-      revealPack(pack.id).catch((err) => (message.textContent = errorMessage(err)));
+      say("");
+      revealPack(pack.id).catch((err) => say(errorMessage(err)));
     });
     const del = el("button", { class: "secondary", type: "button", title: "Delete this pack" }, "Delete");
     del.addEventListener("click", () => void remove(pack));
@@ -155,22 +151,22 @@ export function buildPackList(onOpen: (packId: number) => void): {
       reveal,
       del,
     );
-    grip.addEventListener("pointerdown", (e) => startRowDrag(e, item, pack.id, { list, drop: (id, position) => void move(id, position) }));
+    grip.addEventListener("pointerdown", (e) => startRowDrag(e, item, pack.id, { list, drop: (id, position) => void reorder(id, position) }));
     return item;
   }
 
   /** A row was dropped on a new place: store the order, then show the list again. */
-  async function move(packId: number, position: number): Promise<void> {
-    message.textContent = "";
+  async function reorder(packId: number, position: number): Promise<void> {
+    say("");
     try {
-      await movePack(packId, position);
+      await reorderPack(packId, position);
     } catch (err) {
-      message.textContent = errorMessage(err);
+      say(errorMessage(err));
     }
     await reload();
   }
 
-  // Reloads can overlap (a drop right after the list was shown): only the latest one paints.
+  // Reloads can overlap (a drop right after the list was shown): only the latest one paints, failures included.
   let loads = 0;
 
   async function reload(): Promise<void> {
@@ -178,7 +174,7 @@ export function buildPackList(onOpen: (packId: number) => void): {
     try {
       const packs = await listPackFacts();
       if (load !== loads) return;
-      message.textContent = ""; // a successful load clears an earlier failure
+      if (loadFailed) say(""); // a successful load clears an earlier load failure only
       packCount.textContent = packCountText(packs.length);
       cancelRowDrag();
       for (const cache of previews) cache.clear();
@@ -186,9 +182,15 @@ export function buildPackList(onOpen: (packId: number) => void): {
       list.replaceChildren(...packs.map(row));
       if (packs.length === 0) list.append(el("li", { class: "pm-empty-item muted" }, "No packs yet. Create one to start."));
     } catch (err) {
-      message.textContent = errorMessage(err);
+      if (load !== loads) return;
+      say(errorMessage(err), true);
     }
   }
 
-  return { element, reload, showError: (text) => void (message.textContent = text) };
+  return {
+    element,
+    reload,
+    showError: (text) => say(text),
+    clearMessage: () => say(""),
+  };
 }

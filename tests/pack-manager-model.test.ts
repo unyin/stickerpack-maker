@@ -23,7 +23,7 @@ import {
   sendReportText,
   thumbnailFormat,
 } from "../src/pack-manager/model/messages";
-import { dropPosition, escapeAction, selectionActive, slotAt, toggleMode } from "../src/pack-manager/model/modes";
+import { dropPosition, escapeAction, rowSlotAt, selectionActive, slotAt, toggleMode } from "../src/pack-manager/model/modes";
 import { importOrder } from "../src/pack-manager/model/import-order";
 import { defaultPackId, initialFocus } from "../src/pack-manager/model/pack-memory";
 import {
@@ -306,4 +306,16 @@ test("Save focuses its button when a pack is chosen; Send to pack always starts 
   // Enter must never send to a remembered pack at once (owner decision 2026-11-22).
   expect(initialFocus("send", true)).toBe("picker");
   expect(initialFocus("send", false)).toBe("picker");
+});
+
+test("rowSlotAt: before a row above its middle, after it below, ends clamp", () => {
+  const rows = [0, 1, 2].map((i) => ({ left: 0, top: i * 50, width: 400, height: 40 })); // gaps of 10
+  expect(rowSlotAt(rows, -30)).toBe(0);
+  expect(rowSlotAt(rows, 10)).toBe(0);
+  expect(rowSlotAt(rows, 30)).toBe(1); // below row 0's middle (20)
+  expect(rowSlotAt(rows, 45)).toBe(1); // in the gap
+  expect(rowSlotAt(rows, 80)).toBe(2);
+  expect(rowSlotAt(rows, 130)).toBe(3);
+  expect(rowSlotAt(rows, 9999)).toBe(3);
+  expect(rowSlotAt([], 5)).toBe(0);
 });

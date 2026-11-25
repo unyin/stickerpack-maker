@@ -87,34 +87,34 @@ pub struct PackListEntry {
     pub check_error: Option<String>,
 }
 
-fn entry_from_view(view: PackView) -> PackListEntry {
+/// One pack's list entry from its stickers' facts (`missing` per sticker, in
+/// position order); the shape lives here once.
+fn entry_of(pack: Pack, stickers: &[(&Sticker, bool)], thumbnail_missing: bool, check_error: Option<String>) -> PackListEntry {
     PackListEntry {
-        sticker_count: view.stickers.len() as i64,
-        missing_count: view.stickers.iter().filter(|s| s.missing).count() as i64,
-        thumbnail_missing: view.thumbnail_missing,
-        emoji_strings: view.stickers.iter().map(|s| s.sticker.emoji_string.clone()).collect(),
-        first_sticker: view.stickers.first().map(|s| FirstSticker {
-            id: s.sticker.id,
-            format: s.sticker.format,
-            missing: s.missing,
-        }),
-        pack: view.pack,
-        check_error: None,
+        sticker_count: stickers.len() as i64,
+        missing_count: stickers.iter().filter(|(_, missing)| *missing).count() as i64,
+        thumbnail_missing,
+        emoji_strings: stickers.iter().map(|(s, _)| s.emoji_string.clone()).collect(),
+        first_sticker: stickers.first().map(|(s, missing)| FirstSticker { id: s.id, format: s.format, missing: *missing }),
+        pack,
+        check_error,
     }
 }
 
-/// What the database alone knows of a pack whose check failed.
-fn entry_unchecked(conn: &Connection, pack: Pack, error: String) -> PackListEntry {
-    let stickers = load_stickers(conn, pack.id).unwrap_or_default();
-    PackListEntry {
-        sticker_count: stickers.len() as i64,
-        missing_count: 0,
-        thumbnail_missing: false,
-        emoji_strings: stickers.iter().map(|s| s.emoji_string.clone()).collect(),
-        first_sticker: stickers.first().map(|s| FirstSticker { id: s.id, format: s.format, missing: false }),
-        pack,
-        check_error: Some(error),
-    }
+fn entry_from_view(view: PackView) -> PackListEntry {
+    let stickers: Vec<(&Sticker, bool)> = view.stickers.iter().map(|s| (&s.sticker, s.missing)).collect();
+    entry_of(view.pack, &stickers, view.thumbnail_missing, None)
+}
+
+/// What the database alone knows of a pack whose check failed: file facts are
+/// unknown (the row shows none), and a failed sticker read is reported too.
+fn entry_unchecked(conn: &Connection, pack: Pack, mut error: String) -> PackListEntry {
+    let stickers = load_stickers(conn, pack.id).unwrap_or_else(|e| {
+        error = format!("{error}; the stickers could not be read either: {e}");
+        Vec::new()
+    });
+    let stickers: Vec<(&Sticker, bool)> = stickers.iter().map(|s| (s, false)).collect();
+    entry_of(pack, &stickers, false, Some(error))
 }
 
 /// The Pack list's facts (SPM-25, owner decision): EVERY pack gets the full
@@ -132,9 +132,9 @@ pub fn list_pack_facts(conn: &Connection, library_dir: &Path, memo: &PresenceMem
         .collect())
 }
 
-/// What the last explicit check (pack open or Refresh) found per file, kept
-/// in memory so operations can refresh the view WITHOUT re-scanning for
-/// Missing (SPEC §4/§5: desync checks run only on open and Refresh).
+/// What the last explicit check (pack open, manual refresh, or a show of the Pack list) found per file,
+/// kept in memory so operations can refresh the view WITHOUT re-scanning for
+/// Missing (SPEC §4/§5: desync checks run on pack open, Refresh and each show of the Pack list).
 /// Tauri-free: the app holds one next to its Library lock.
 #[derive(Default)]
 pub struct PresenceMemo(Mutex<HashMap<i64, PackPresence>>);
@@ -187,7 +187,7 @@ impl PresenceMemo {
 /// repairs our own interrupted work — a pending folder rename, then a
 /// pending rename plan (ADR-0004) — so only genuine external desync
 /// remains; then derives Missing from file presence (never stored) and
-/// remembers it in `memo`. Call it on pack open and refresh only, never on
+/// remembers it in `memo`. Call it on pack open, refresh and each show of the Pack list, never on
 /// app start (SPEC §4) nor after an operation (use `load_pack_view`).
 pub fn open_pack(conn: &Connection, library_dir: &Path, pack_id: i64, memo: &PresenceMemo) -> Result<PackView, String> {
     build_view(conn, library_dir, pack_id, memo, true)
