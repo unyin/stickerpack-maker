@@ -27,3 +27,7 @@ Pin model AND effort variant explicitly on every `review-cycle` spawn — a bare
 ### Icons
 
 An icon change never ships without being rendered at its real toolbar size first and judged: pixel math where fidelity is the question (bounds within the viewBox, overlap against a reference), the owner's eyes where taste is. No current model in this setup can view images — verify by measurement, and show the owner a rendered sheet before landing anything visual. (Owner, 2026-11-23, after the SPM-8 icon saga: CMT-300/301.)
+
+### UI audience
+
+The UI serves the owner's own mouse-and-screen use. Judge a UI change by what the owner sees and clicks: visual contrast counts and is measured. Screen-reader and Tab-only access sit outside that scope, so they never enter trade-offs, briefs or review findings; existing aria/role attributes stay as they are. (Owner, 2026-11-25, SPM-26.)
