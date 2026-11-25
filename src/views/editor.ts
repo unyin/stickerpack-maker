@@ -37,6 +37,7 @@ import {
   type ImageInfo,
 } from "../editor/api";
 import { backgroundTarget, refineLayerPixels } from "../editor/model/background";
+import { SessionEmoji, type EmojiStore } from "../editor/model/emoji";
 import {
   moveWandGesture,
   NOTHING_TO_SELECT_OUTSIDE,
@@ -81,7 +82,7 @@ import type { ThumbnailOrigin } from "../shared/thumbnail-origin";
 import { originNow, saveDialog, thumbnailSaveDialog } from "../editor/view/save-dialog";
 import { packMemory } from "../pack-manager/model/pack-memory";
 import { markStickerFileChanged, markThumbnailChanged } from "../pack-manager/model/changed-files";
-import { loadPackView, type Sticker } from "../pack-manager/api";
+import { loadPackView, setEmojiString, type Sticker } from "../pack-manager/api";
 import {
   anchoredTransform,
   addRasterLayer,
@@ -224,6 +225,21 @@ function buildEditor(): HTMLElement {
   let thumbnailOrigin: ThumbnailOrigin | null = null;
   // Counts Library changes, so a saved note's link knows its sticker is from an old one.
   let libraryGeneration = 0;
+  // The session's Emoji String (SPEC §6 Layout, Emoji tab; SPM-15): staged for
+  // a fresh image, written through when the session edits an origin sticker.
+  // The tab's box (slice D3) reads and commits through it.
+  let emoji: SessionEmoji | null = null;
+  // The Rust side of that box: the pack view's sticker and the Pack Manager's
+  // own emoji command (set_emoji_string — reuse, not a second command).
+  const emojiStore: EmojiStore = {
+    read: async (packId, stickerId) => {
+      const view = await loadPackView(packId);
+      const sticker = view.stickers.find((s) => s.id === stickerId);
+      if (!sticker) throw new Error(`sticker ${stickerId} is not in its pack`);
+      return sticker.emojiString;
+    },
+    write: async (stickerId, emojiString) => (await setEmojiString(stickerId, emojiString)).emojiString,
+  };
 
   const message = el("p", { class: "message editor-message", role: "alert" });
   const canvasHost = el("div", { class: "editor-canvas" }) as HTMLDivElement;
@@ -248,14 +264,14 @@ function buildEditor(): HTMLElement {
   // and titles come from the active constraint set and are (re)set in
   // refresh(), which every session start runs.
   const fitButton = button("Fit", () =>
-    resizeWholeImage((doc, c) => fitToBox(doc, c, constraints.side)),
+    resizeWholeImage(`Fit in ${constraints.side}`, (doc, c) => fitToBox(doc, c, constraints.side)),
   );
   // Sizing tool 4 (SPEC §6): Fill is to Fit what CSS cover is to contain.
   const fillButton = button("Fill", () =>
-    resizeWholeImage((doc, c) => fillToBox(doc, c, constraints.side)),
+    resizeWholeImage(`Cover ${constraints.side}`, (doc, c) => fillToBox(doc, c, constraints.side)),
   );
   const longestButton = button("Longest side", () =>
-    resizeWholeImage((doc, c) => scaleLongestSide(doc, c, constraints.side)),
+    resizeWholeImage(`Long side ${constraints.side}`, (doc, c) => scaleLongestSide(doc, c, constraints.side)),
   );
   // The free-resize side-kind choice (CMT-152), instead of the old fixed
   // "Longest side" label for the field.
@@ -794,6 +810,17 @@ function buildEditor(): HTMLElement {
     constraints = set;
     origin = stickerFrom;
     thumbnailOrigin = thumbnailFrom;
+    emoji = new SessionEmoji(
+      stickerFrom
+        ? {
+            kind: "origin",
+            stickerId: stickerFrom.stickerId,
+            packId: stickerFrom.packId,
+            otherLibrary: stickerFrom.otherLibrary ?? false,
+          }
+        : { kind: "staged" },
+      emojiStore,
+    );
     session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(set)));
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
@@ -829,7 +856,7 @@ function buildEditor(): HTMLElement {
     const picked = await pickAndImport();
     if (!picked) return;
     const id = nextLayerId(current.doc);
-    current.apply((doc) => addRasterLayer(doc, picked.image, picked.name, centeredPlacement(doc, picked.image)));
+    current.apply("Add image as layer", (doc) => addRasterLayer(doc, picked.image, picked.name, centeredPlacement(doc, picked.image)));
     current.select(id);
   }
 
@@ -858,7 +885,7 @@ function buildEditor(): HTMLElement {
       },
       ({ chosen, placed }, doc) => {
         const id = nextLayerId(doc);
-        current.apply((d) =>
+        current.apply("Merge layers", (d) =>
           mergeLayers(
             d,
             chosen.map((l) => l.id),
@@ -890,7 +917,7 @@ function buildEditor(): HTMLElement {
         return { plan, byId: new Map(clips.map((c, i) => [c.id, images[i]])) };
       },
       ({ plan, byId }, doc) => {
-        current.apply((d) => cropLayers(d, plan, byId));
+        current.apply("Crop", (d) => cropLayers(d, plan, byId));
         const notice = cropTextNotice(doc, plan);
         if (notice) say(notice, "note");
       },
@@ -947,6 +974,7 @@ function buildEditor(): HTMLElement {
     basis = null;
     origin = null;
     thumbnailOrigin = null;
+    emoji = null;
     // Back to the default set: the toolbar's labels and rules read it.
     constraints = STICKER;
     textOverlay.close();
@@ -980,7 +1008,7 @@ function buildEditor(): HTMLElement {
     onExhausted: (outcome: TooLarge) => void,
   ): Promise<SaveOutcome | string | null> {
     const result = await runSave(format, {
-      save: (f) => saveImage(doc, f, target),
+      save: (f) => saveImage(doc, f, target, emoji?.forSave(target.kind) ?? ""),
       offerWebp: async (outcome) => {
         const ok = await confirmWebp(pngTooLargeText(outcome));
         if (ok) setFormat("webp");
@@ -1016,6 +1044,9 @@ function buildEditor(): HTMLElement {
     const refusal = saveRefusal(stage?.strokeInProgress() ?? false, current.doc, constraints);
     if (refusal) return say(refusal);
     const doc = current.doc;
+    // The Emoji tab's value the dialog's hint reads; for an origin session a
+    // "Save as a new sticker" carries the sticker's own string (SPEC §6).
+    await emoji?.load();
     let exhausted: TooLarge | null = null;
     if (constraints.mode === "thumbnail") {
       // Thumbnail mode (SPM-12): the pack is the session's origin, already
@@ -1058,6 +1089,7 @@ function buildEditor(): HTMLElement {
         constraints,
         format: lastFormat,
         origin,
+        emojiString: emoji?.forSave("append") ?? "",
         submit: async (choice, setFormat) => {
           const { format } = choice;
           const target: SaveTarget =
@@ -1078,6 +1110,8 @@ function buildEditor(): HTMLElement {
           if (target.kind === "replace") markStickerFileChanged(outcome.sticker.id);
           // The session now edits the saved sticker: the next save replaces it (design decision 2026-11-22).
           origin = originAfterSave(outcome, packTitle);
+          // …and its Emoji String is the box's value from now on (SPEC §6 Layout, SPM-15).
+          emoji?.afterSave(outcome.sticker);
           // An Erase, Restore or Warp press could commit under this dialog; the
           // mid-stroke refusal above makes that known path impossible. The
           // check stays as defence in depth for anything unforeseen.
@@ -1153,7 +1187,7 @@ function buildEditor(): HTMLElement {
       },
       ({ source, cut }, doc) => {
         const id = nextLayerId(doc);
-        current.apply((d) => cutLayer(d, source.id, cut));
+        current.apply("Cut", (d) => cutLayer(d, source.id, cut));
         current.clearRegion();
         current.select(id);
         setTool("move");
@@ -1171,7 +1205,7 @@ function buildEditor(): HTMLElement {
       () => probePasted(bytes).then((info) => importWithCap(info, (scale) => importPasted(bytes, scale))),
       (image, doc) => {
         const id = nextLayerId(doc);
-        current.apply((d) => addRasterLayer(d, image, "Pasted image", centeredPlacement(d, image)));
+        current.apply("Paste image", (d) => addRasterLayer(d, image, "Pasted image", centeredPlacement(d, image)));
         current.select(id);
       },
     );
@@ -1257,7 +1291,7 @@ function buildEditor(): HTMLElement {
         },
         ({ style, render }) => {
           setTool("move"); // drops the preview first: the styled text replaces it
-          current.apply((d) => setTextStyle(d, req.layerId, style, render));
+          current.apply("Outline", (d) => setTextStyle(d, req.layerId, style, render));
         },
       );
       return;
@@ -1268,7 +1302,7 @@ function buildEditor(): HTMLElement {
       () => preview.result(req),
       (result) => {
         setTool("move"); // drops the preview first: the baked pixels replace it
-        current.apply((d) => applyEffectResult(d, req.layerId, result));
+        current.apply(kind === "glow" ? "Glow" : "Outline", (d) => applyEffectResult(d, req.layerId, result));
         const notice = effectTextNotice(layer, kind);
         if (notice) say(notice, "note");
       },
@@ -1327,7 +1361,7 @@ function buildEditor(): HTMLElement {
     // The target layer changed mid-press (e.g. Ctrl+Z): the bulge was painted on old pixels, so it is dropped.
     const stale = current.doc.layers.find((l) => l.id === layer.id) !== layer;
     if (image && stale) say("The layers changed while warping; the bulge was dropped. Try again.");
-    if (image && !stale) current.apply((d) => setLayerImage(d, layer.id, image));
+    if (image && !stale) current.apply("Warp", (d) => setLayerImage(d, layer.id, image));
     else refresh(); // no new state to redraw from, but the bar's values may have changed
   }
 
@@ -1510,7 +1544,7 @@ function buildEditor(): HTMLElement {
           return { id: target.layer.id, image: await removeImageBackground(target.layer.image) };
         },
         ({ id, image }) => {
-          current.apply((d) => refineLayerPixels(d, id, image));
+          current.apply("Remove background", (d) => refineLayerPixels(d, id, image));
           say("");
         },
       );
@@ -1627,7 +1661,7 @@ function buildEditor(): HTMLElement {
       () => renderText(style),
       (render, doc) => {
         const id = nextLayerId(doc);
-        current.apply((d) => addTextLayer(d, style, render, centeredPlacement(d, render.image)));
+        current.apply("Add text", (d) => addTextLayer(d, style, render, centeredPlacement(d, render.image)));
         current.select(id);
       },
     );
@@ -1645,7 +1679,7 @@ function buildEditor(): HTMLElement {
         const renders = await Promise.all(styles.map((c) => renderText(c.style)));
         return styles.map((c, i) => ({ ...c, render: renders[i] }));
       },
-      (changes) => current.apply((d) => setTextStyles(d, changes)),
+      (changes) => current.apply("Restyle text", (d) => setTextStyles(d, changes)),
     );
   }
 
@@ -1678,15 +1712,17 @@ function buildEditor(): HTMLElement {
 
   /**
    * Apply a sizing tool (SPEC §6) to the whole image: everything on the
-   * canvas as one group, measured like a multi-layer selection. One undo step.
+   * canvas as one group, measured like a multi-layer selection. One undo
+   * step. `label` is the action's name for the Actions panel (SPM-15), the
+   * top row's own words: "Fit in 512", "Cover 100", "Free resize".
    */
-  function resizeWholeImage(tool: (doc: Doc, content: Rect) => Doc): void {
+  function resizeWholeImage(label: string, tool: (doc: Doc, content: Rect) => Doc): void {
     const current = session;
     if (!current || !stage || busy) return;
     const content = stage.contentBounds();
     say("");
     try {
-      current.apply((doc) => tool(doc, content));
+      current.apply(label, (doc) => tool(doc, content));
     } catch (err) {
       say(errorMessage(err));
     }
@@ -1705,7 +1741,7 @@ function buildEditor(): HTMLElement {
       say(problem);
       return;
     }
-    resizeWholeImage((doc, content) => resizeToSide(doc, content, side, freeSide));
+    resizeWholeImage("Free resize", (doc, content) => resizeToSide(doc, content, side, freeSide));
   }
 
   /** Why Delete cannot run right now: with a region drawn it erases, else it deletes layers. */
@@ -1720,7 +1756,7 @@ function buildEditor(): HTMLElement {
     const current = session;
     if (!current || busy || deleteBlocker(current.doc, current.selection)) return;
     const chosen = [...current.selection];
-    current.apply((doc) => deleteLayers(doc, chosen));
+    current.apply("Delete layers", (doc) => deleteLayers(doc, chosen));
   }
 
   /**
@@ -1763,7 +1799,7 @@ function buildEditor(): HTMLElement {
         return { id: source.id, hole: await eraseFor(source, region) };
       },
       ({ id, hole }) => {
-        current.apply((d) => refineLayerPixels(d, id, hole));
+        current.apply("Erase selection", (d) => refineLayerPixels(d, id, hole));
         current.clearRegion();
       },
     );
@@ -1784,7 +1820,7 @@ function buildEditor(): HTMLElement {
     const current = session;
     if (!current || current.selection.length !== 1) return;
     const id = current.selection[0];
-    current.apply((doc) => {
+    current.apply(step > 0 ? "Move layer up" : "Move layer down", (doc) => {
       const index = layerIndex(doc, id);
       const target = index + step;
       return target < 0 || target >= doc.layers.length ? doc : moveLayer(doc, id, target);
@@ -2120,6 +2156,8 @@ function buildEditor(): HTMLElement {
     if (origin) origin = { ...origin, otherLibrary: true };
     // A thumbnail session's pack id is just as old: its save says so too.
     if (thumbnailOrigin) thumbnailOrigin = { ...thumbnailOrigin, otherLibrary: true };
+    // The Emoji tab's sticker id is old too: never look it up in the new Library (SPM-15).
+    emoji?.forgetOrigin();
     libraryGeneration++; // a saved note's link now points into the old Library
   };
 

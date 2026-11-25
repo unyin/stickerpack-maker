@@ -55,6 +55,12 @@ export interface SaveDialogOptions {
   /** The sticker this session edits (opened with Edit), or null. */
   readonly origin: StickerOrigin | null;
   /**
+   * The Emoji String a new sticker would carry (the Emoji tab's value,
+   * SPM-15); "" shows the without-emoji hint. The view pass (D3) restyles
+   * this dialog; the hint's condition is data, not layout.
+   */
+  readonly emojiString: string;
+  /**
    * Save with the choice. Resolve null to close the dialog, or a line to
    * show in it while it stays open (e.g. "Not saved: …"). A rejection shows
    * its message and the dialog stays open too.
@@ -100,12 +106,13 @@ export async function saveDialog(options: SaveDialogOptions): Promise<void> {
   replaceRadio.checked = origin !== null;
   newRadio.checked = origin === null;
   const replacing = () => origin !== null && replaceRadio.checked;
+  const emojiHint = options.emojiString === "" ? "without emoji" : "with its emoji";
   const packSection = el(
     "div",
     { class: "editor-save-pack" },
     el("p", { class: "field-label" }, "Pack"),
     ...picker.elements,
-    el("p", { class: "muted pm-hint" }, "The sticker goes to the end of the pack, without emoji."),
+    el("p", { class: "muted pm-hint" }, `The sticker goes to the end of the pack, ${emojiHint}.`),
   );
 
   const { row: formatToggle, format, setFormat } = formatRow(options.format);

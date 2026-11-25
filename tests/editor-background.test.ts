@@ -138,7 +138,7 @@ test("the history budget counts restore sources as pixels the present holds", ()
   // even a zero budget keeps that step.
   const original = solid(10, 10, [9, 8, 7, 255]);
   const tight = new EditorSession(docWith(original), 0);
-  tight.apply((d) => refineLayerPixels(d, "layer-1", solid(10, 10, [9, 8, 7, 0])));
+  tight.apply("Edit", (d) => refineLayerPixels(d, "layer-1", solid(10, 10, [9, 8, 7, 0])));
   expect(raster(tight.doc).restoreSource).toBe(original);
   expect(tight.canUndo).toBe(true);
 });

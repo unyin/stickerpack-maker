@@ -218,8 +218,8 @@ const bytesOf = (doc: Doc) =>
 
 test("undo and redo walk the committed states; a new commit clears redo", () => {
   const h = new History<number>(0, { budgetBytes: Infinity, buffersOf: () => [] });
-  h.commit(1);
-  h.commit(2);
+  h.commit("one", 1);
+  h.commit("two", 2);
   expect(h.present).toBe(2);
   expect(h.canRedo).toBe(false);
   h.undo();
@@ -230,7 +230,7 @@ test("undo and redo walk the committed states; a new commit clears redo", () => 
   expect(h.present).toBe(0);
   h.redo();
   expect(h.present).toBe(1);
-  h.commit(5);
+  h.commit("five", 5);
   expect(h.canRedo).toBe(false);
   h.undo();
   expect(h.present).toBe(1);
@@ -239,7 +239,7 @@ test("undo and redo walk the committed states; a new commit clears redo", () => 
 test("unsaved changes means the present is not the saved state", () => {
   const h = new History<string>("imported", { budgetBytes: Infinity, buffersOf: () => [] });
   expect(h.isDirty).toBe(false);
-  h.commit("edited");
+  h.commit("edit", "edited");
   expect(h.isDirty).toBe(true);
   h.undo();
   expect(h.isDirty).toBe(false); // undoing back to the saved state is clean
@@ -250,6 +250,35 @@ test("unsaved changes means the present is not the saved state", () => {
   expect(h.isDirty).toBe(true);
 });
 
+test("every step carries its action's label in-band, oldest first, with the present marked", () => {
+  const h = new History<string>("start", { budgetBytes: Infinity, buffersOf: () => [] });
+  expect(h.actionTrail()).toEqual({ labels: [null], currentIndex: 0 });
+  h.commit("Add text", "a");
+  h.commit("Move layer up", "b");
+  h.commit("Crop", "c");
+  expect(h.actionTrail()).toEqual({
+    labels: [null, "Add text", "Move layer up", "Crop"],
+    currentIndex: 3,
+  });
+  // Undo moves the marker back; the label travels with its state, redoable.
+  h.undo();
+  h.undo();
+  expect(h.present).toBe("a");
+  expect(h.actionTrail()).toEqual({
+    labels: [null, "Add text", "Move layer up", "Crop"],
+    currentIndex: 1,
+  });
+  h.redo();
+  expect(h.present).toBe("b");
+  expect(h.actionTrail().labels[2]).toBe("Move layer up");
+  // A new commit after undoing drops the redo labels together with their states.
+  h.commit("Paste image", "d");
+  expect(h.actionTrail()).toEqual({
+    labels: [null, "Add text", "Move layer up", "Paste image"],
+    currentIndex: 3,
+  });
+});
+
 test("the memory budget drops the oldest steps, counting shared buffers once", () => {
   const MB = 1024 * 1024;
   // Each step repaints the base layer with a fresh 1 MB buffer.
@@ -257,10 +286,15 @@ test("the memory budget drops the oldest steps, counting shared buffers once", (
   const h = new History<Doc>(doc, { budgetBytes: 3 * MB, buffersOf: bytesOf });
   for (let i = 1; i <= 6; i++) {
     doc = setLayerImage(doc, doc.layers[0].id, image(512, 512, i));
-    h.commit(doc);
+    h.commit(`step ${i}`, doc);
   }
   // Present holds 1 MB (not counted); at most 3 MB of past buffers remain.
   expect(h.retainedBytes).toBeLessThanOrEqual(3 * MB);
+  // The dropped steps took their labels too: the trail starts at the oldest retained one.
+  const trail = h.actionTrail();
+  expect(trail.labels).toEqual(["step 3", "step 4", "step 5", "step 6"]);
+  expect(trail.currentIndex).toBe(3);
+  expect(trail.labels).not.toContain(null);
   let undos = 0;
   while (h.canUndo) {
     h.undo();
@@ -271,7 +305,7 @@ test("the memory budget drops the oldest steps, counting shared buffers once", (
   const h2 = new History<Doc>(doc, { budgetBytes: 0, buffersOf: bytesOf });
   for (let i = 0; i < 50; i++) {
     doc = setTransform(doc, doc.layers[0].id, { ...IDENTITY, x: i });
-    h2.commit(doc);
+    h2.commit("Move layer", doc);
   }
   expect(h2.retainedBytes).toBe(0);
   let steps = 0;
@@ -287,7 +321,7 @@ test("the memory budget drops the oldest steps, counting shared buffers once", (
 test("selection is not an undo step and is pruned after undo", () => {
   const s = new EditorSession(newDocument(image(4, 4), "base", STICKER_CANVAS));
   const base = s.doc.layers[0].id;
-  s.apply((d) => addRasterLayer(d, image(1, 1), "cutout"));
+  s.apply("Edit", (d) => addRasterLayer(d, image(1, 1), "cutout"));
   const cutout = s.doc.layers[1].id;
   s.select(cutout);
   expect(s.selection).toEqual([cutout]);
@@ -310,7 +344,7 @@ test("listeners hear every change; unknown layers cannot be selected", () => {
   const s = new EditorSession(newDocument(image(4, 4), "base", STICKER_CANVAS));
   let heard = 0;
   const off = s.subscribe(() => heard++);
-  s.apply((d) => addRasterLayer(d, image(1, 1), "a"));
+  s.apply("Edit", (d) => addRasterLayer(d, image(1, 1), "a"));
   s.select(s.doc.layers[1].id);
   s.undo();
   s.redo();
@@ -325,11 +359,28 @@ test("a failing operation leaves the session unchanged", () => {
   const s = new EditorSession(newDocument(image(4, 4), "base", STICKER_CANVAS));
   const before = s.doc;
   expect(() =>
-    s.apply((d) => setLayerImage(d, "nope", image(1, 1))),
+    s.apply("Edit", (d) => setLayerImage(d, "nope", image(1, 1))),
   ).toThrow();
   expect(s.doc).toBe(before);
   expect(s.canUndo).toBe(false);
   expect(s.isDirty).toBe(false);
+  // A failed operation leaves no label either.
+  expect(s.actionTrail()).toEqual({ labels: [null], currentIndex: 0 });
+});
+
+test("the Actions trail names each applied action and marks the present; undo and redo keep the labels", () => {
+  const s = new EditorSession(newDocument(image(4, 4), "base", STICKER_CANVAS));
+  s.apply("Add image as layer", (d) => addRasterLayer(d, image(1, 1), "cutout"));
+  s.apply("Move layer", (d) => setTransform(d, s.doc.layers[1].id, { ...IDENTITY, x: 2 }));
+  expect(s.actionTrail()).toEqual({ labels: [null, "Add image as layer", "Move layer"], currentIndex: 2 });
+  s.undo();
+  expect(s.actionTrail()).toEqual({ labels: [null, "Add image as layer", "Move layer"], currentIndex: 1 });
+  s.redo();
+  expect(s.actionTrail()).toEqual({ labels: [null, "Add image as layer", "Move layer"], currentIndex: 2 });
+  // An operation that returns the same document is no step: no label, no marker move.
+  s.apply("Crop", (d) => d);
+  expect(s.actionTrail().labels).toEqual([null, "Add image as layer", "Move layer"]);
+  expect(s.actionTrail().currentIndex).toBe(2);
 });
 
 test("deleting layers removes them in one step and always keeps one", () => {
@@ -352,12 +403,12 @@ test("deleting layers removes them in one step and always keeps one", () => {
 
 test("a deletion is one undo step and drops the deleted layers from the selection", () => {
   const s = new EditorSession(newDocument(image(4, 4), "base", STICKER_CANVAS));
-  s.apply((d) => addRasterLayer(d, image(1, 1), "x"));
-  s.apply((d) => addRasterLayer(d, image(1, 1), "y"));
+  s.apply("Edit", (d) => addRasterLayer(d, image(1, 1), "x"));
+  s.apply("Edit", (d) => addRasterLayer(d, image(1, 1), "y"));
   const [, x, y] = s.doc.layers.map((l) => l.id);
   s.select(x);
   s.select(y, "toggle");
-  s.apply((d) => deleteLayers(d, s.selection));
+  s.apply("Edit", (d) => deleteLayers(d, s.selection));
   expect(names(s.doc)).toEqual(["base"]);
   expect(s.selection).toEqual([]);
   s.undo();
@@ -430,7 +481,7 @@ test("fitting content that already fills the box changes nothing (no undo step)"
   const doc = snug(512, 512, "done");
   expect(fitToBox(doc, contentBounds(doc), 512)).toBe(doc);
   const s = new EditorSession(doc);
-  s.apply((d) => fitToBox(d, contentBounds(d), 512));
+  s.apply("Edit", (d) => fitToBox(d, contentBounds(d), 512));
   expect(s.canUndo).toBe(false);
   // Same canvas, but content smaller than the box: fit does work.
   const shrunk = setTransform(doc, doc.layers[0].id, { ...IDENTITY, scaleX: 0.5, scaleY: 0.5 });
@@ -439,7 +490,7 @@ test("fitting content that already fills the box changes nothing (no undo step)"
 
 test("fit is one undo step that restores canvas and layers", () => {
   const s = new EditorSession(snug(1000, 500, "base"));
-  s.apply((d) => fitToBox(d, contentBounds(d), 512));
+  s.apply("Edit", (d) => fitToBox(d, contentBounds(d), 512));
   expect([s.doc.width, s.doc.height]).toEqual([512, 512]);
   s.undo();
   expect([s.doc.width, s.doc.height]).toEqual([1000, 500]);
@@ -622,7 +673,7 @@ test("fill spills outside the canvas and keeps the spill: only transforms change
 
 test("fill is one undo step that restores canvas and layers", () => {
   const s = new EditorSession(snug(300, 200, "base"));
-  s.apply((d) => fillToBox(d, contentBounds(d), 512));
+  s.apply("Edit", (d) => fillToBox(d, contentBounds(d), 512));
   expect([s.doc.width, s.doc.height]).toEqual([512, 512]);
   expect(Math.min(contentBounds(s.doc).width, contentBounds(s.doc).height)).toBeCloseTo(512);
   s.undo();
@@ -637,7 +688,7 @@ test("filling content that already covers the side square changes nothing (no un
   const doc = newDocument(image(600, 512), "cover", { width: 512, height: 512 });
   expect(fillToBox(doc, contentBounds(doc), 512)).toBe(doc);
   const s = new EditorSession(doc);
-  s.apply((d) => fillToBox(d, contentBounds(d), 512));
+  s.apply("Edit", (d) => fillToBox(d, contentBounds(d), 512));
   expect(s.canUndo).toBe(false);
   // Off-centre on the same-size canvas: Fill recentres, so it does work.
   const moved = setTransform(doc, doc.layers[0].id, { ...IDENTITY, x: 0, y: 0 });
@@ -648,9 +699,9 @@ test("scaling to the size the content already has changes nothing (no undo step)
   const doc = snug(512, 300, "done");
   expect(scaleLongestSide(doc, contentBounds(doc), 512)).toBe(doc);
   const s = new EditorSession(doc);
-  s.apply((d) => scaleLongestSide(d, contentBounds(d), 512));
+  s.apply("Edit", (d) => scaleLongestSide(d, contentBounds(d), 512));
   expect(s.canUndo).toBe(false);
-  s.apply((d) => scaleLongestSide(d, contentBounds(d), 256));
+  s.apply("Edit", (d) => scaleLongestSide(d, contentBounds(d), 256));
   expect([s.doc.width, s.doc.height]).toEqual([256, 150]);
   s.undo();
   expect([s.doc.width, s.doc.height]).toEqual([512, 300]);

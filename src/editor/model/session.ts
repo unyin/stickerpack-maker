@@ -3,7 +3,7 @@
 // No selection is an undo step of the document (ADR-0005); undo/redo prunes
 // the layer selection to layers that still exist.
 import { layerImage, layerIndex, textLayersOf, type Doc, type TextLayer } from "./document";
-import { DEFAULT_HISTORY_BUDGET, History } from "./history";
+import { DEFAULT_HISTORY_BUDGET, History, type ActionTrail } from "./history";
 import type { Region } from "./region";
 
 /** Pixel buffers of a document (text renderings and restore sources too), for the history's memory budget. */
@@ -121,6 +121,16 @@ export class EditorSession {
     return this.history.canUndo;
   }
 
+  /**
+   * The document's action labels for the Actions panel (SPEC §6 Layout,
+   * SPM-15): oldest first, the present's position marked, redoable steps
+   * included. Read-only; the selection's own trail is not part of it (the
+   * panel derives those entries from the Region states themselves).
+   */
+  actionTrail(): ActionTrail {
+    return this.history.actionTrail();
+  }
+
   get canRedo(): boolean {
     return this.history.canRedo;
   }
@@ -156,11 +166,11 @@ export class EditorSession {
     return this.history.isDirty;
   }
 
-  /** Apply one operation as an undoable step. A throwing operation changes nothing. */
-  apply(operation: (doc: Doc) => Doc): void {
+  /** Apply one operation as an undoable step, labelled for the Actions panel (SPM-15). A throwing operation changes nothing. */
+  apply(label: string, operation: (doc: Doc) => Doc): void {
     const next = operation(this.doc);
     if (next === this.doc) return;
-    this.history.commit(next);
+    this.history.commit(label, next);
     this.dropFloatingRegion();
     // A document EDIT clears the selection's step trail whatever remains of it
     // (owner, 2026-11-24: "Esc should clear it all, as should document

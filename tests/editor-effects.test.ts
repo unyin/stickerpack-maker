@@ -192,7 +192,7 @@ test("the Outline tool on a text layer is a style patch; Glow and raster targets
 test("Apply is ONE undo step, and undo brings the layer back exactly", () => {
   const session = new EditorSession(threeLayers());
   const before = session.doc;
-  session.apply((d) => applyEffectResult(d, "layer-1", { image: solid(120, 120), transform: { ...IDENTITY, x: 196, y: 196 } }));
+  session.apply("Edit", (d) => applyEffectResult(d, "layer-1", { image: solid(120, 120), transform: { ...IDENTITY, x: 196, y: 196 } }));
   expect(session.isDirty).toBe(true);
   session.undo();
   expect(session.doc).toBe(before);

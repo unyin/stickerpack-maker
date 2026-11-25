@@ -101,7 +101,7 @@ test("Ctrl+Z steps the selection first, then falls through to the document", () 
   const s = session();
   const base = s.doc.layers[0].id;
   const a = rect(0, 0, 2, 2);
-  s.apply((doc) => setLayerImage(doc, base, image(4, 4)));
+  s.apply("Edit", (doc) => setLayerImage(doc, base, image(4, 4)));
   const changed = s.doc;
   s.commitRegion(a);
   expect(s.canUndoAny).toBe(true);
@@ -131,7 +131,7 @@ test("the buttons' enablement follows either history: a selection step or a docu
   expect(s.canUndoAny).toBe(false);
   expect(s.canRedoAny).toBe(true); // only a stepped-back selection state
   s.redoRegion();
-  s.apply((doc) => setLayerImage(doc, s.doc.layers[0].id, image(4, 4)));
+  s.apply("Edit", (doc) => setLayerImage(doc, s.doc.layers[0].id, image(4, 4)));
   expect(s.canUndoAny).toBe(true);
   // The edit cleared the selection's trail: only the document has steps left.
   expect(s.canUndoRegion).toBe(false);
@@ -166,13 +166,13 @@ test("a document edit drops a floating selection with its trail; a plain one sur
   const plan = rect(0, 0, 2, 2);
   s.commitRegion(plan);
   s.commitRegion(composed(rect(1, 1, 3, 3)));
-  s.apply((doc) => setLayerImage(doc, base, image(4, 4)));
+  s.apply("Edit", (doc) => setLayerImage(doc, base, image(4, 4)));
   expect(s.region).toBeNull();
   expect(s.canUndoRegion).toBe(false);
   expect(s.canRedoRegion).toBe(false);
   // A plain Rectangle/Lasso survives an edit, but the edit clears its trail.
   s.commitRegion(plan);
-  s.apply((doc) => setLayerImage(doc, base, image(4, 4)));
+  s.apply("Edit", (doc) => setLayerImage(doc, base, image(4, 4)));
   expect(s.region).toBe(plan);
   expect(s.canUndoRegion).toBe(false);
   expect(s.canRedoRegion).toBe(false);
@@ -183,7 +183,7 @@ test("a document edit clears a surviving plain selection's trail: Ctrl+Z then un
   const base = s.doc.layers[0].id;
   const plan = rect(0, 0, 2, 2);
   s.commitRegion(plan);
-  s.apply((doc) => setLayerImage(doc, base, image(4, 4)));
+  s.apply("Edit", (doc) => setLayerImage(doc, base, image(4, 4)));
   const changed = s.doc;
   expect(s.region).toBe(plan);
   expect(s.canUndoRegion).toBe(false);
@@ -200,7 +200,7 @@ test("a document edit kills stepped-back selection states even with no selection
   s.undoRegion();
   expect(s.region).toBeNull();
   expect(s.canRedoRegion).toBe(true);
-  s.apply((doc) => setLayerImage(doc, base, image(4, 4)));
+  s.apply("Edit", (doc) => setLayerImage(doc, base, image(4, 4)));
   expect(s.region).toBeNull();
   expect(s.canUndoRegion).toBe(false);
   // Ctrl+Y cannot resurrect a pre-edit selection state.
@@ -210,7 +210,7 @@ test("a document edit kills stepped-back selection states even with no selection
 test("a document undo that leaves the selection alone keeps its trail", () => {
   const s = session();
   const base = s.doc.layers[0].id;
-  s.apply((doc) => setLayerImage(doc, base, image(4, 4)));
+  s.apply("Edit", (doc) => setLayerImage(doc, base, image(4, 4)));
   const plan = rect(0, 0, 2, 2);
   const next = rect(1, 1, 3, 3);
   s.commitRegion(plan);

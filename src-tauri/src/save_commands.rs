@@ -46,6 +46,11 @@ pub struct SaveMeta {
     pub doc: SaveDoc,
     pub format: SaveFormat,
     pub target: SaveTarget,
+    /// The Emoji String a NEW sticker gets (SPEC §6 Layout, SPM-15): the
+    /// Emoji tab's staged value, empty for none. A replace and a thumbnail
+    /// save ignore it. Warn-only, never blocked (SPEC §3, §7).
+    #[serde(default)]
+    pub emoji_string: String,
 }
 
 /// What a save did; mirrors `SaveOutcome` in src/editor/api.ts.
@@ -115,7 +120,7 @@ pub fn editor_save_image(
             Ok(SaveOutcome::SavedThumbnail { pack, bytes: encoded.bytes.len(), quality: encoded.quality })
         }
         _ => {
-            let sticker = write_sticker(conn, dir, meta.target, &encoded)?;
+            let sticker = write_sticker(conn, dir, meta.target, &encoded, &meta.emoji_string)?;
             if let SaveTarget::Replace { sticker_id } = meta.target {
                 // The file is new: the Pack Manager reads it again instead of trusting its last check.
                 lock.memo().forget_sticker(sticker.pack_id, sticker_id);
@@ -159,12 +164,21 @@ fn parse_cap_kb(raw: &str) -> Result<u64, String> {
 /// file, so the bytes go to a temporary file first (removed afterwards); the
 /// core then checks it as a sticker (format, size, dimensions) like any
 /// drop-in, and appends it with an order-encoded name (ADR-0003) or puts it
-/// in its slot.
-pub fn write_sticker(conn: &mut Connection, library_dir: &Path, target: SaveTarget, encoded: &Encoded) -> Result<Sticker, String> {
+/// in its slot. `emoji` is the new sticker's Emoji String, stored with its
+/// spaces stripped like `stickers::set_emoji_string` (SPEC §5); a replace
+/// keeps the sticker's own string and ignores it.
+pub fn write_sticker(
+    conn: &mut Connection,
+    library_dir: &Path,
+    target: SaveTarget,
+    encoded: &Encoded,
+    emoji: &str,
+) -> Result<Sticker, String> {
     let temp = TempFile::write(encoded.format.as_str(), &encoded.bytes)?;
     match target {
         SaveTarget::Append { pack_id } => {
-            let new = [NewSticker { path: temp.0.clone(), emoji_string: String::new() }];
+            let emoji_string: String = emoji.chars().filter(|c| !c.is_whitespace()).collect();
+            let new = [NewSticker { path: temp.0.clone(), emoji_string }];
             let mut outcome = stickers::add_stickers(conn, library_dir, pack_id, &new, None)?;
             if let Some(rejected) = outcome.rejected.pop() {
                 return Err(format!("Not saved: the image {}.", rejected.reason));
@@ -253,10 +267,11 @@ mod tests {
         let pack = create_pack(&mut lib.conn, lib.dir.path(), "Cats", None).unwrap();
         let png = encoded(&sticker_image(8), SaveFormat::Png);
         let webp = encoded(&sticker_image(9), SaveFormat::Webp);
-        let a = write_sticker(&mut lib.conn, lib.dir.path(), SaveTarget::Append { pack_id: pack.id }, &png).unwrap();
-        let b = write_sticker(&mut lib.conn, lib.dir.path(), SaveTarget::Append { pack_id: pack.id }, &webp).unwrap();
+        let a = write_sticker(&mut lib.conn, lib.dir.path(), SaveTarget::Append { pack_id: pack.id }, &png, "").unwrap();
+        let b = write_sticker(&mut lib.conn, lib.dir.path(), SaveTarget::Append { pack_id: pack.id }, &webp, "").unwrap();
         assert_eq!((a.position, a.file_name.as_str(), a.format), (1, "001.png", Format::Png));
         assert_eq!((b.position, b.file_name.as_str(), b.format), (2, "002.webp", Format::Webp));
+        // No staged emoji: today's behaviour, an empty string flagged in the Pack Manager.
         assert!(a.emoji_string.is_empty());
         // The files are exactly the encoded bytes, and decode at their size.
         assert_eq!(lib.file("cats", "001.png"), png.bytes);
@@ -266,16 +281,38 @@ mod tests {
     }
 
     #[test]
+    fn a_new_sticker_saves_with_the_staged_emoji_string() {
+        let mut lib = Lib::new();
+        let pack = create_pack(&mut lib.conn, lib.dir.path(), "Cats", None).unwrap();
+        let append = SaveTarget::Append { pack_id: pack.id };
+        // A staged Emoji String is stored as typed (warn-only counts, SPEC §3).
+        let saved = write_sticker(&mut lib.conn, lib.dir.path(), append, &encoded(&sticker_image(4), SaveFormat::Png), "😀🎉").unwrap();
+        assert_eq!(saved.emoji_string, "😀🎉");
+        // Spaces are stripped like set_emoji_string does (SPEC §5).
+        let spaced = write_sticker(&mut lib.conn, lib.dir.path(), append, &encoded(&sticker_image(5), SaveFormat::Png), " 😀 🎉 ").unwrap();
+        assert_eq!(spaced.emoji_string, "😀🎉");
+        assert_eq!(load_stickers(&lib.conn, pack.id).unwrap().len(), 2);
+    }
+
+    #[test]
     fn replace_keeps_the_slot_and_emoji_and_may_change_the_format() {
         let mut lib = Lib::new();
         let pack = create_pack(&mut lib.conn, lib.dir.path(), "Dogs", None).unwrap();
         let append = SaveTarget::Append { pack_id: pack.id };
-        let first = write_sticker(&mut lib.conn, lib.dir.path(), append, &encoded(&sticker_image(4), SaveFormat::Png)).unwrap();
-        write_sticker(&mut lib.conn, lib.dir.path(), append, &encoded(&sticker_image(5), SaveFormat::Png)).unwrap();
+        let first =
+            write_sticker(&mut lib.conn, lib.dir.path(), append, &encoded(&sticker_image(4), SaveFormat::Png), "").unwrap();
+        write_sticker(&mut lib.conn, lib.dir.path(), append, &encoded(&sticker_image(5), SaveFormat::Png), "").unwrap();
         stickers::set_emoji_string(&lib.conn, first.id, "🐶").unwrap();
         let new = encoded(&sticker_image(6), SaveFormat::Webp);
-        let replaced =
-            write_sticker(&mut lib.conn, lib.dir.path(), SaveTarget::Replace { sticker_id: first.id }, &new).unwrap();
+        // A replace ignores the request's Emoji String: the sticker keeps its own (SPEC §6).
+        let replaced = write_sticker(
+            &mut lib.conn,
+            lib.dir.path(),
+            SaveTarget::Replace { sticker_id: first.id },
+            &new,
+            "🐱",
+        )
+        .unwrap();
         assert_eq!((replaced.id, replaced.position, replaced.emoji_string.as_str()), (first.id, 1, "🐶"));
         assert_eq!(replaced.file_name, "001.webp");
         assert_eq!(lib.file("dogs", "001.webp"), new.bytes);
@@ -289,7 +326,8 @@ mod tests {
         let mut lib = Lib::new();
         let pack = create_pack(&mut lib.conn, lib.dir.path(), "Birds", None).unwrap();
         let small = encoded(&noise(10, 10), SaveFormat::Png);
-        let err = write_sticker(&mut lib.conn, lib.dir.path(), SaveTarget::Append { pack_id: pack.id }, &small).unwrap_err();
+        let err =
+            write_sticker(&mut lib.conn, lib.dir.path(), SaveTarget::Append { pack_id: pack.id }, &small, "").unwrap_err();
         assert!(err.starts_with("Not saved:"), "{err}");
         assert!(load_stickers(&lib.conn, pack.id).unwrap().is_empty());
     }
@@ -390,12 +428,20 @@ mod tests {
 
     #[test]
     fn request_and_outcome_json_match_the_typescript_names() {
+        // Without the field (an older caller) the Emoji String defaults to empty: today's behaviour.
         let meta: SaveMeta = serde_json::from_str(&format!(
             r#"{{"width":{STICKER_SIDE},"height":3,"layers":[],"format":"webp","target":{{"kind":"replace","stickerId":7}}}}"#,
         ))
         .unwrap();
         assert_eq!((meta.doc.width, meta.doc.height, meta.format), (STICKER_SIDE, 3, SaveFormat::Webp));
         assert_eq!(meta.target, SaveTarget::Replace { sticker_id: 7 });
+        assert_eq!(meta.emoji_string, "");
+        let with_emoji: SaveMeta = serde_json::from_str(&format!(
+            r#"{{"width":{STICKER_SIDE},"height":3,"layers":[],"format":"png","target":{{"kind":"append","packId":3}},"emojiString":"😀"}}"#,
+        ))
+        .unwrap();
+        assert_eq!(with_emoji.target, SaveTarget::Append { pack_id: 3 });
+        assert_eq!(with_emoji.emoji_string, "😀");
         let append: SaveTarget = serde_json::from_str(r#"{"kind":"append","packId":3}"#).unwrap();
         assert_eq!(append, SaveTarget::Append { pack_id: 3 });
         let too_large = SaveOutcome::TooLarge { format: SaveFormat::Png, bytes: 9, max_kilobytes: STICKER_MAX_KB };
