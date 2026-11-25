@@ -244,9 +244,9 @@ pass.
   **Save…**, **Close**. Thin vertical rules divide neighbouring groups: rules 1–3 sit
   exactly 8px from the controls on both sides; the fourth sits after the flexible spacer,
   8px from **Save…** on its right and 8px from the spacer on its left (owner decision
-  2026-11-25). Undo, Redo, Save… and Close become icons in a later pass; the seven renamed
-  sizing and crop controls stay text (owner decision
-  2026-11-25). The row holds its one line from the window's 1100px minimum up (Window, below).
+  2026-11-25). Undo, Redo, Save… and Close become icons and the seven renamed sizing and
+  crop controls stay text (owner decisions 2026-11-25; the icon pass is parked for v2 — §9).
+  The row holds its one line from the window's 1100px minimum up (Window, below).
 - **The reserved message row** sits under the top row: fixed minimum height, never collapsed
   (§2; the CMT-290 canvas jump).
 - **A bottom status strip**: the live readout (Crop and sizing, below) on the left; on the
@@ -254,7 +254,7 @@ pass.
   (owner decision 2026-11-25 — Reset view sits in the status cluster, never floating at the
   canvas/panel boundary).
 - **A left tabbed tools panel (192px)**: browser-style tab leaves stuck on the panel's top
-  edge and protruding past it over the canvas until the icon pass. The tabs:
+  edge and protruding past it over the canvas until the icon pass (§9). The tabs:
   - **Select**: Move, Rectangle, Lasso, Wand; the Tolerance and Feather fields; the contextual
     actions Cut and Paste.
   - **Paint**: Erase, Restore, Warp; the Brush field; Remove background, which stays
@@ -937,6 +937,38 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
   (owner, 2026-11-23).
 - Editor: remove a layer's excess transparency — crop the layer to its visible content,
   the "crop to content" function of other graphics editors (owner, 2026-11-23).
+- **Editor icon pass** (SPM-15's deferred visual polish — a later iteration, undecided by
+  design; the owner's framing from the design rounds: icons are the last touch). Settled
+  scope: the four session actions **Undo**, **Redo**, **Save…**, **Close** become icons in
+  the top row (owner decision 2026-11-25, CMT-404); the seven renamed sizing and crop
+  controls — Fit in 512, Cover 512, Long side 512, the free-resize cluster, Guide, Crop to
+  {size} — stay text permanently (owner decision 2026-11-25). The left panel's tools
+  (the ~21 tool controls) go icon-only, and the four tab leaves' labels become icons,
+  ending the accepted overhang past the 192px panel (owner accepted the overhang only
+  until then, CMT-407). The sizing trio's diagram icons — a square holding the image, a
+  square overflowed by it, a plain image — are proposed but **UNDECIDED** until the owner
+  sees them rendered at the icon pass (owner, 2026-11-25, CMT-414/415); the four session
+  icons should free roughly 50px of top-row headroom at the 1100px floor. New icons join
+  the existing inline set (`src/icons.ts`: 24×24 outline style, currentColor, rendered at
+  1.05em; the eyedropper is the one filled exception), and icon-only controls keep the §2
+  tooltip contract and a descriptive accessible name — the N1 blessing: the icon-only
+  eyedropper's aria stays the description, never the bare tool name.
+
+  The process is AGENTS.md's Icons rule, and it is not optional: every proposal is
+  rendered at its real toolbar size first and judged — pixel math where fidelity is the
+  question (bounds within the viewBox, overlap against a reference), the owner's eyes
+  where taste is. No model can view images, so verification is by measurement and the
+  owner sees a rendered sheet before anything visual lands (owner, 2026-11-23,
+  CMT-300/301).
+
+  Reference material: the approved design page `spm15-v7-mockup.html` and its
+  predecessors `spm15-mockup.html` (the current-UI v1), `spm15-v2-mockup.html` and
+  `spm15-v4-mockup.html`–`spm15-v6-mockup.html` sit untracked in the repo root (v3
+  retired); they are design artifacts, never committed. Serve the repo root with
+  `python3 -m http.server 8931 --bind 0.0.0.0` and open
+  `http://localhost:8931/spm15-v7-mockup.html` in the desktop pane — direct
+  `file://wsl.localhost` pages stopped loading after the 2026-11-25 desktop update
+  (CMT-419). Stop the server when the visual work ends.
 
 ### v3 parking lot
 - Drag and drop an image file onto an open session to add it as a layer (owner, 2026-11-20).
