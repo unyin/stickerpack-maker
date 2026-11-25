@@ -6,7 +6,9 @@ import {
   draftNote,
   emojiRowWidth,
   EMOJI_PER_ROW,
+  readyToGoLive,
   THUMBNAIL_MISSING_REASON,
+  UPLOAD_READY_TITLE,
   uploadDialogWidth,
   uploadEntries,
   uploadListBlocker,
@@ -87,4 +89,56 @@ test("the preferred width fits ten emoji per row with half a glyph to spare", ()
   expect(emojiRowWidth(24)).toBe(252); // 10.5 × 24: ten fit, eleven do not
   expect(emojiRowWidth(27.4)).toBe(288); // rounds up
   expect(uploadDialogWidth(24, 30, 300)).toBe(252 + 30 + 300);
+});
+
+// ---- readyToGoLive (owner decisions 2026-11-25)
+const ready = (v: PackView) => readyToGoLive(v);
+const withEmoji = (n: number, emojiString: string): StickerView => ({ ...sticker(n), emojiString });
+const many = (n: number) => Array.from({ length: n }, (_, i) => sticker(i + 1));
+const live = (v: PackView): PackView => ({ ...v, pack: { ...v.pack, status: "live" } });
+
+test("a Draft with good stickers is ready, with or without a thumbnail", () => {
+  expect(ready(view(many(3)))).toBe(true);
+  expect(ready(view(many(3), "thumbnail.png"))).toBe(true);
+  expect(UPLOAD_READY_TITLE).toBe("Upload… — Ready to go live: every sticker has its file and 1–20 emoji");
+});
+
+test("no stickers is not ready, a thumbnail alone included", () => {
+  expect(ready(view([]))).toBe(false);
+  expect(ready(view([], "thumbnail.png"))).toBe(false);
+});
+
+test("120 stickers are ready, 121 are not", () => {
+  expect(ready(view(many(120)))).toBe(true);
+  expect(ready(view(many(121)))).toBe(false);
+});
+
+test("a Missing sticker blocks", () => {
+  expect(ready(view([sticker(1), sticker(2, true)]))).toBe(false);
+});
+
+test("the emoji count must be 1-20, spaces ignored", () => {
+  expect(ready(view([withEmoji(1, "")]))).toBe(false);
+  expect(ready(view([withEmoji(1, "  ")]))).toBe(false);
+  expect(ready(view([withEmoji(1, "😀")]))).toBe(true);
+  expect(ready(view([withEmoji(1, "😀".repeat(20))]))).toBe(true);
+  expect(ready(view([withEmoji(1, "😀 ".repeat(20))]))).toBe(true);
+  expect(ready(view([withEmoji(1, "😀".repeat(21))]))).toBe(false);
+  expect(ready(view([sticker(1), withEmoji(2, "")]))).toBe(false);
+});
+
+test("a ZWJ family counts as one emoji", () => {
+  expect(ready(view([withEmoji(1, "👨‍👩‍👧".repeat(20))]))).toBe(true);
+  expect(ready(view([withEmoji(1, "👨‍👩‍👧".repeat(21))]))).toBe(false);
+});
+
+test("a Missing thumbnail blocks; no thumbnail does not", () => {
+  expect(ready(view(many(2), "thumbnail.png", true))).toBe(false);
+  expect(ready(view(many(2), null))).toBe(true);
+  const noFile = view(many(2), "thumbnail.png");
+  expect(ready({ ...noFile, thumbnailFile: null })).toBe(false);
+});
+
+test("a Live pack is never ready", () => {
+  expect(ready(live(view(many(3))))).toBe(false);
 });

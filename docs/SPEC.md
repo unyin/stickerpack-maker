@@ -137,7 +137,9 @@ stickers, Missing stickers, and the thumbnail.
 - **Emoji String**: inline editable box of four rows of five that shows all 20 emoji at once
   (type, or Win+. for the Windows emoji panel); past 20 it grows a row instead of scrolling.
   Every space is stripped when it is saved and the count ignores spaces. Beside the box: a
-  small square icon-only **copy** button and the live 1–20 count; the count warning shows
+  small square icon-only **copy** button (a successful copy shows ✓ with a green border and
+  icon, `--success-*`, no fill, the red failure tint's mirror, here and in the Upload list:
+  owner decision 2026-11-25) and the live 1–20 count; the count warning shows
   below (owner decisions 2026-11-21). Emoji are drawn with the colour emoji font first, never
   as monochrome text glyphs (owner decision 2026-11-22). The emoji font is a Settings choice
   (SPM-17, owner decisions 2026-11-21): **Android** — bundled Noto Color Emoji (SIL OFL 1.1),
@@ -229,7 +231,16 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   last. The Open in explorer button shows only the "opens in another program" icon, named for
   assistive technology "Open #N in explorer", with the tooltip "Open in explorer — Show this
   file in File Explorer, selected" (§2, §4). The copy button and its feedback are the detail
-  panel's (✓ on success, red on failure).
+  panel's (✓ and a green tint on success, red on failure; see below).
+- **Ready to go live.** While the pack is ready, the header **Upload…** button turns green (a
+  `--success-*` border and text tint, no fill, no change of size) and its tooltip's description
+  becomes "Upload… — Ready to go live: every sticker has its file and 1–20 emoji", so colour is
+  never the only signal (owner decisions 2026-11-25). Ready means all of: at least 1 sticker; at
+  most 120; no sticker Missing; every Emoji String counted as the app counts (spaces ignored)
+  at 1–20 emoji; the pack is a Draft; a thumbnail, if set, is not Missing (no thumbnail does
+  not block). Otherwise the button and its tooltip are as above; a disabled button is never
+  green, and a Live pack never is. It is recomputed on every render, so emoji edits (panel or
+  dialog), Refresh, add/delete and Go Live / Revert to Draft all update it.
 - **The emoji box.** A fixed two-row box that never resizes and scrolls inside past 20 emoji. It
   saves like the detail panel's Emoji String box (§5 Detail panel): on change, every space
   stripped, warn-only (never blocks), Enter ends the edit, through the same command, so the

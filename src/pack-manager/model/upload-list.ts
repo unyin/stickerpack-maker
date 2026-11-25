@@ -2,7 +2,8 @@
 // the dialog shows, when its header button is available, its notes, and the
 // width that fits ten emoji per row. Pure, so it is testable without a webview.
 import type { PackStatus, PackView, StickerFormat, StickerView } from "../api";
-import { MISSING_REASON, thumbnailFormat } from "./messages";
+import { EMOJI_MAX, EMOJI_MIN, emojiCount } from "./emoji";
+import { MISSING_REASON, PACK_MAX_STICKERS, thumbnailFormat } from "./messages";
 
 /** Why the Upload list is unavailable, or null. A thumbnail alone is not a list: the pack must have stickers. */
 export function uploadListBlocker(stickerCount: number): string | null {
@@ -11,6 +12,26 @@ export function uploadListBlocker(stickerCount: number): string | null {
 
 /** The enabled tooltip, per the §2 contract "Name (Shortcut) — one-line description". */
 export const UPLOAD_LIST_TITLE = "Upload… — Every sticker in order with its emoji, for uploading through @Stickers";
+
+/** The enabled tooltip while the pack is ready to go live: the header button is green and says why (owner, 2026-11-25). */
+export const UPLOAD_READY_TITLE = `Upload… — Ready to go live: every sticker has its file and ${EMOJI_MIN}–${EMOJI_MAX} emoji`;
+
+/**
+ * Whether the pack is ready to go live (owner decisions 2026-11-25): a Draft
+ * with 1 to PACK_MAX_STICKERS stickers, none Missing, every Emoji String of
+ * EMOJI_MIN to EMOJI_MAX emoji, and a thumbnail (if set) that is not Missing.
+ * No thumbnail does not block. Recomputed on every render, never stored.
+ */
+export function readyToGoLive(view: PackView): boolean {
+  const { pack, stickers } = view;
+  if (pack.status !== "draft") return false;
+  if (stickers.length < 1 || stickers.length > PACK_MAX_STICKERS) return false;
+  if (pack.thumbnail && (view.thumbnailMissing || view.thumbnailFile === null)) return false;
+  return stickers.every((s) => {
+    const count = emojiCount(s.emojiString);
+    return !s.missing && count >= EMOJI_MIN && count <= EMOJI_MAX;
+  });
+}
 
 /** A Draft pack's reminder (owner-approved wording, 2026-11-25); null for a Live pack. */
 export function draftNote(status: PackStatus): string | null {

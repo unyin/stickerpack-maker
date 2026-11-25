@@ -17,6 +17,11 @@
   --danger-border: #c25a53;
   /* 7.7:1 on --danger-bg: the text rule holds. */
   --danger-text: #8a2c26;
+  /* Success tint (owner, 2026-11-25): a border and text colour, never a fill,
+     for a successful copy and a pack ready to go live. Measured on --panel and
+     --bg: text 5.4:1 and 5.0:1, boundary 3.5:1 and 3.3:1. */
+  --success-text: #1f7a45;
+  --success-border: #3d9a62;
   /* Warn-only conditions (Missing, emoji count, pack size): SPM-3. */
   --warn-bg: #fff6e0;
   --warn-border: #a87b0e;
@@ -74,6 +79,9 @@
      --danger-text stays 8.8:1 on the fill. */
   --danger-border: #b8625b;
   --danger-text: #f0b9b6;
+  /* Text 9.4:1 on --panel, 10.4:1 on --bg; boundary 4.8:1 and 5.3:1. */
+  --success-text: #8fd4a8;
+  --success-border: #4a9a6c;
   --warn-bg: #33290f;
   --warn-border: #9c7a22;
   --warn-text: #f3d58a;

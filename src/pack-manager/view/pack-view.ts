@@ -54,7 +54,7 @@ import {
   type SelectionState,
 } from "../model/selection";
 import { emojiCountWarning, emojiWarning } from "../model/emoji";
-import { UPLOAD_LIST_TITLE, uploadListBlocker } from "../model/upload-list";
+import { readyToGoLive, UPLOAD_LIST_TITLE, UPLOAD_READY_TITLE, uploadListBlocker } from "../model/upload-list";
 import { importOrder } from "../model/import-order";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { dialogOpen } from "../../dialog";
@@ -617,7 +617,10 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     for (const b of [refreshButton, addButton, revealButton, statusButton, backButton]) b.disabled = busy;
     const uploadBlocker = uploadListBlocker(view.stickers.length);
     uploadButton.disabled = busy || uploadBlocker !== null;
-    uploadButton.title = uploadBlocker ?? UPLOAD_LIST_TITLE;
+    // Green (a border and text tint, no fill; no size change) only while enabled and ready to go live.
+    const ready = !uploadButton.disabled && readyToGoLive(view);
+    uploadButton.classList.toggle("ready", ready);
+    uploadButton.title = uploadBlocker ?? (ready ? UPLOAD_READY_TITLE : UPLOAD_LIST_TITLE);
     titleInput.disabled = busy;
     if (busy) shortInput.disabled = true;
 

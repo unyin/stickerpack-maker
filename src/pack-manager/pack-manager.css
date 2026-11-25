@@ -650,6 +650,12 @@
   flex: none;
 }
 
+.pm-copy.copied,
+.pm-header-btn.ready {
+  border-color: var(--success-border);
+  color: var(--success-text);
+}
+
 .pm-copy.failed {
   border-color: var(--danger-border);
   color: var(--danger-text);

@@ -44,19 +44,20 @@ export function bindEmojiSave(input: HTMLTextAreaElement, save: (value: string) 
   });
 }
 
-/** Briefly show the copy result: check icon on success, a red button on failure, and a screen-reader announcement. */
+/** Briefly show the copy result: check icon and a green button on success, a red button on failure, and a screen-reader announcement. */
 function copyFlash(button: HTMLButtonElement, status: HTMLElement): (text: string, ok: boolean) => void {
   let restore: ReturnType<typeof setTimeout> | undefined; // per button, like the one it restores
   return (text, ok) => {
     clearTimeout(restore); // a second click restarts the timer instead of leaving "Copied" stuck
     button.title = text;
     status.textContent = text;
+    button.classList.toggle("copied", ok);
     button.classList.toggle("failed", !ok);
     button.replaceChildren(icon(ok ? "check" : "copy"));
     restore = setTimeout(() => {
       button.title = COPY_TITLE;
       status.textContent = "";
-      button.classList.remove("failed");
+      button.classList.remove("copied", "failed");
       button.replaceChildren(icon("copy"));
     }, 1200);
   };
