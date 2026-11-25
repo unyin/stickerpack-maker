@@ -54,7 +54,8 @@ import {
   type SelectionState,
 } from "../model/selection";
 import { emojiCountWarning, emojiWarning } from "../model/emoji";
-import { readyToGoLive, UPLOAD_LIST_TITLE, UPLOAD_READY_TITLE, uploadListBlocker } from "../model/upload-list";
+import { packFactsOfView, readyToGoLive } from "../model/pack-issues";
+import { UPLOAD_LIST_TITLE, UPLOAD_READY_TITLE, uploadListBlocker } from "../model/upload-list";
 import { importOrder } from "../model/import-order";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { dialogOpen, openDialog } from "../../dialog";
@@ -629,7 +630,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     const uploadBlocker = uploadListBlocker(view.stickers.length);
     uploadButton.disabled = busy || uploadBlocker !== null;
     // The success tone (green fill, border and text; no size change) only while enabled and ready to go live.
-    const ready = !uploadButton.disabled && readyToGoLive(view);
+    const ready = !uploadButton.disabled && readyToGoLive(packFactsOfView(view));
     uploadButton.classList.toggle("tone-success", ready);
     uploadButton.title = uploadBlocker ?? (ready ? UPLOAD_READY_TITLE : UPLOAD_LIST_TITLE);
     titleInput.disabled = busy;

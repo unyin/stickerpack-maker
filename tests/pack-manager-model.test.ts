@@ -14,8 +14,10 @@ import {
   importSummary,
   REVERT_TO_DRAFT_WARNING,
   matchPacks,
+  packsAlphabetical,
   MISSING_REASON,
   countWarningText,
+  noPackMatchText,
   packCountText,
   packDeleteMessage,
   packSizeText,
@@ -23,7 +25,11 @@ import {
   sendReportText,
   thumbnailFormat,
 } from "../src/pack-manager/model/messages";
-import { dropPosition, escapeAction, selectionActive, slotAt, toggleMode } from "../src/pack-manager/model/modes";
+import { dropPosition, escapeAction, rowSlotAt, selectionActive, slotAt, toggleMode } from "../src/pack-manager/model/modes";
+import { filterPacks, reorderAllowed, searchView } from "../src/pack-manager/model/pack-search";
+import { rowClickOpens } from "../src/pack-manager/model/pack-row";
+import { naturalCollator } from "../src/shared/natural-collator";
+import { normaliseQuery } from "../src/shared/match-names";
 import { importOrder } from "../src/pack-manager/model/import-order";
 import { defaultPackId, initialFocus } from "../src/pack-manager/model/pack-memory";
 import {
@@ -290,6 +296,36 @@ test("packCountText: singular and plural", () => {
   expect(packCountText(12)).toBe("12 packs");
 });
 
+test("packCountText while filtering reads N of M, M deciding the plural", () => {
+  expect(packCountText(5)).toBe("5 packs");
+  expect(packCountText(5, 5)).toBe("5 of 5 packs");
+  expect(packCountText(1, 1)).toBe("1 of 1 pack");
+  expect(packCountText(5, 2)).toBe("2 of 5 packs");
+  expect(packCountText(5, 0)).toBe("0 of 5 packs");
+  expect(packCountText(1, 0)).toBe("0 of 1 pack");
+  expect(noPackMatchText("  zz ")).toBe("No packs match “zz”.");
+});
+
+test("filterPacks: Title or Short Name, case-insensitive, trimmed, stored order kept", () => {
+  const a = { title: "Best cats", shortName: "best" };
+  const b = { title: "Cats two", shortName: "two" };
+  const c = { title: "Misc", shortName: "OLD_CATS" };
+  const all = [a, c, b];
+  expect(filterPacks(all, "")).toEqual(all);
+  expect(filterPacks(all, "   ")).toEqual(all);
+  expect(filterPacks(all, "cat")).toEqual([a, c, b]);
+  expect(filterPacks(all, "  OLD_ ")).toEqual([c]);
+  expect(filterPacks(all, "TWO")).toEqual([b]);
+  expect(filterPacks(all, "dogs")).toEqual([]);
+  expect(filterPacks(all, "")).not.toBe(all);
+});
+
+test("reordering is allowed only while the search is blank", () => {
+  expect(reorderAllowed("")).toBe(true);
+  expect(reorderAllowed("  ")).toBe(true);
+  expect(reorderAllowed("a")).toBe(false);
+});
+
 test("pack pickers start on the open pack, else the last pack saved into, else none", () => {
   expect(defaultPackId([1, 2, 3], { openPackId: 2, lastSavedPackId: 3 })).toBe(2);
   // Send to pack does not list the pack it sends from: the last saved pack instead.
@@ -306,4 +342,49 @@ test("Save focuses its button when a pack is chosen; Send to pack always starts 
   // Enter must never send to a remembered pack at once (owner decision 2026-11-22).
   expect(initialFocus("send", true)).toBe("picker");
   expect(initialFocus("send", false)).toBe("picker");
+});
+
+test("rowSlotAt: before a row above its middle, after it below, ends clamp", () => {
+  const rows = [0, 1, 2].map((i) => ({ left: 0, top: i * 50, width: 400, height: 40 })); // gaps of 10
+  expect(rowSlotAt(rows, -30)).toBe(0);
+  expect(rowSlotAt(rows, 10)).toBe(0);
+  expect(rowSlotAt(rows, 30)).toBe(1); // below row 0's middle (20)
+  expect(rowSlotAt(rows, 45)).toBe(1); // in the gap
+  expect(rowSlotAt(rows, 80)).toBe(2);
+  expect(rowSlotAt(rows, 130)).toBe(3);
+  expect(rowSlotAt(rows, 9999)).toBe(3);
+  expect(rowSlotAt([], 5)).toBe(0);
+});
+
+test("a click opens the pack unless it hit a control or ends a drag", () => {
+  expect(rowClickOpens({ onControl: false, endsDrag: false })).toBe(true);
+  expect(rowClickOpens({ onControl: true, endsDrag: false })).toBe(false);
+  expect(rowClickOpens({ onControl: false, endsDrag: true })).toBe(false);
+  expect(rowClickOpens({ onControl: true, endsDrag: true })).toBe(false);
+});
+
+test("pickers list packs alphabetically: case-insensitive, natural numbers, stable ties", () => {
+  const p = (id: number, title: string, shortName = `s${id}`) => ({ id, title, shortName });
+  const sorted = packsAlphabetical([p(1, "pack 10"), p(2, "Pack 2"), p(3, "banana"), p(4, "Apple"), p(5, "apple", "a"), p(6, "APPLE", "a")]);
+  expect(sorted.map((x) => x.id)).toEqual([5, 6, 4, 3, 2, 1]);
+  const input = [p(2, "b"), p(1, "a")];
+  packsAlphabetical(input);
+  expect(input.map((x) => x.id)).toEqual([2, 1]);
+});
+
+test("searchView: shown ids, filtering state, and the no-match line", () => {
+  const all = [
+    { id: 1, title: "Best cats", shortName: "best" },
+    { id: 2, title: "Misc", shortName: "misc" },
+  ];
+  expect(searchView(all, "")).toEqual({ shownIds: new Set([1, 2]), filtering: false, noMatch: false });
+  expect(searchView(all, " CAT ")).toEqual({ shownIds: new Set([1]), filtering: true, noMatch: false });
+  expect(searchView(all, "dogs")).toEqual({ shownIds: new Set(), filtering: true, noMatch: true });
+  expect(searchView([], "dogs").noMatch).toBe(false);
+});
+
+test("the shared normaliser and collator", () => {
+  expect(normaliseQuery("  AbC ")).toBe("abc");
+  expect(naturalCollator.compare("Pack 2", "pack 10")).toBeLessThan(0);
+  expect(naturalCollator.compare("A", "a")).toBe(0);
 });

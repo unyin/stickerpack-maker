@@ -19,6 +19,12 @@ const PATHS = {
    * 16px, in Chromium at 100/125/150% scaling, the dot separates from both the
    * stem and the base (centre-column ink dips to <=0.25 on each side). */
   warning: ["M12 4L3 20h18z", "M12 10v2.5", "M12 16v.01"],
+  /** Drag handle: six dots in two columns (the Pack list's row grip, SPM-25),
+   * zero-length round-capped strokes like the warning icon's dot. Drawn for a
+   * 24px icon (one viewBox unit per CSS px), where the 2-unit dots land on whole
+   * pixels at 100%, 150% and 200% scaling; measured in Chromium, grip A of the
+   * owner's mockup choice. */
+  grip: ["M9 6v.01", "M15 6v.01", "M9 12v.01", "M15 12v.01", "M9 18v.01", "M15 18v.01"],
   /** Close: an X. */
   close: ["M6 6l12 12", "M18 6L6 18"],
   /** Eyedropper: the native colour picker's own glyph, traced from the owner's

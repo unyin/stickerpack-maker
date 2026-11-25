@@ -92,6 +92,8 @@ pub fn run() {
             commands::editor_remove_background,
             save_commands::editor_save_image,
             pack_commands::list_packs,
+            pack_commands::list_pack_facts,
+            pack_commands::reorder_pack,
             pack_commands::suggest_short_name,
             pack_commands::create_pack,
             pack_commands::delete_pack,

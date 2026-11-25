@@ -1,5 +1,6 @@
-//! Desync detection (SPEC §4): runs ONLY when a pack is opened and on
-//! manual refresh — never on app start.
+//! Desync detection (SPEC §4): runs when a pack is opened, on manual
+//! refresh, and each time the Pack list is shown (SPM-25) — never on app
+//! start.
 
 use std::collections::HashMap;
 use std::fs;
@@ -10,7 +11,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 
 use super::packs::open_pack_files;
-use super::schema::{load_sticker, load_stickers, Pack, Sticker};
+use super::schema::{load_packs, load_sticker, load_stickers, Format, Pack, Sticker};
 use super::stickers::{emoji_warning, image_dimensions, pack_size_warning, Warning};
 
 /// What the pack view shows about a present file: its size, and its pixel
@@ -57,9 +58,83 @@ pub struct PackView {
     pub pack_size_warning: Option<Warning>,
 }
 
-/// What the last explicit check (pack open or Refresh) found per file, kept
-/// in memory so operations can refresh the view WITHOUT re-scanning for
-/// Missing (SPEC §4/§5: desync checks run only on open and Refresh).
+/// The first sticker of a pack, which stands in for a missing thumbnail
+/// (Telegram shows it) and so is what the Pack list's row previews.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FirstSticker {
+    pub id: i64,
+    pub format: Format,
+    pub missing: bool,
+}
+
+/// One pack as the Pack list shows it (SPM-25): plain facts from the same
+/// check as opening the pack; the issue rule that turns them into a badge is
+/// the webview's (one definition, `pack-issues.ts`). `check_error` is set
+/// when the check itself failed (e.g. the pack folder cannot be settled): the
+/// row then carries what the database knows and nothing about files.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackListEntry {
+    #[serde(flatten)]
+    pub pack: Pack,
+    pub sticker_count: i64,
+    pub missing_count: i64,
+    pub thumbnail_missing: bool,
+    /// Every sticker's Emoji String, in position order.
+    pub emoji_strings: Vec<String>,
+    pub first_sticker: Option<FirstSticker>,
+    pub check_error: Option<String>,
+}
+
+/// One pack's list entry from its stickers' facts (`missing` per sticker, in
+/// position order); the shape lives here once.
+fn entry_of(pack: Pack, stickers: &[(&Sticker, bool)], thumbnail_missing: bool, check_error: Option<String>) -> PackListEntry {
+    PackListEntry {
+        sticker_count: stickers.len() as i64,
+        missing_count: stickers.iter().filter(|(_, missing)| *missing).count() as i64,
+        thumbnail_missing,
+        emoji_strings: stickers.iter().map(|(s, _)| s.emoji_string.clone()).collect(),
+        first_sticker: stickers.first().map(|(s, missing)| FirstSticker { id: s.id, format: s.format, missing: *missing }),
+        pack,
+        check_error,
+    }
+}
+
+fn entry_from_view(view: PackView) -> PackListEntry {
+    let stickers: Vec<(&Sticker, bool)> = view.stickers.iter().map(|s| (&s.sticker, s.missing)).collect();
+    entry_of(view.pack, &stickers, view.thumbnail_missing, None)
+}
+
+/// What the database alone knows of a pack whose check failed: file facts are
+/// unknown (the row shows none), and a failed sticker read is reported too.
+fn entry_unchecked(conn: &Connection, pack: Pack, mut error: String) -> PackListEntry {
+    let stickers = load_stickers(conn, pack.id).unwrap_or_else(|e| {
+        error = format!("{error}; the stickers could not be read either: {e}");
+        Vec::new()
+    });
+    let stickers: Vec<(&Sticker, bool)> = stickers.iter().map(|s| (s, false)).collect();
+    entry_of(pack, &stickers, false, Some(error))
+}
+
+/// The Pack list's facts (SPM-25, owner decision): EVERY pack gets the full
+/// open check — recovery first (ADR-0004), then the presence scan, remembered
+/// in `memo` exactly as `open_pack` does — each time the list is shown. A pack
+/// whose check fails is reported per pack (`check_error`), never failing the
+/// whole list. Packs come in the stored display order.
+pub fn list_pack_facts(conn: &Connection, library_dir: &Path, memo: &PresenceMemo) -> Result<Vec<PackListEntry>, String> {
+    Ok(load_packs(conn)?
+        .into_iter()
+        .map(|pack| match build_view(conn, library_dir, pack.id, memo, true) {
+            Ok(view) => entry_from_view(view),
+            Err(error) => entry_unchecked(conn, pack, error),
+        })
+        .collect())
+}
+
+/// What the last explicit check (pack open, manual refresh, or a show of the Pack list) found per file,
+/// kept in memory so operations can refresh the view WITHOUT re-scanning for
+/// Missing (SPEC §4/§5: desync checks run on pack open, Refresh and each show of the Pack list).
 /// Tauri-free: the app holds one next to its Library lock.
 #[derive(Default)]
 pub struct PresenceMemo(Mutex<HashMap<i64, PackPresence>>);
@@ -112,7 +187,7 @@ impl PresenceMemo {
 /// repairs our own interrupted work — a pending folder rename, then a
 /// pending rename plan (ADR-0004) — so only genuine external desync
 /// remains; then derives Missing from file presence (never stored) and
-/// remembers it in `memo`. Call it on pack open and refresh only, never on
+/// remembers it in `memo`. Call it on pack open, refresh and each show of the Pack list, never on
 /// app start (SPEC §4) nor after an operation (use `load_pack_view`).
 pub fn open_pack(conn: &Connection, library_dir: &Path, pack_id: i64, memo: &PresenceMemo) -> Result<PackView, String> {
     build_view(conn, library_dir, pack_id, memo, true)
@@ -473,6 +548,167 @@ mod tests {
         let lib = Lib::new();
         assert!(open_pack(&lib.conn, lib.path(), 999, &lib.memo).is_err());
         assert!(thumbnail_file_path(&lib.conn, lib.path(), 999).is_err());
+    }
+
+    // ---- The Pack list's facts (SPM-25) ----
+
+    #[test]
+    fn list_facts_count_stickers_missing_and_emoji_in_position_order() {
+        let mut lib = Lib::new();
+        let pack = lib.pack_with("p", &["A", "B", "C"]);
+        lib.pack_with("q", &[]);
+        fs::remove_file(lib.dir_of(pack.id).join("002.png")).unwrap();
+        fs::remove_file(lib.dir_of(pack.id).join("003.png")).unwrap();
+        let facts = list_pack_facts(&lib.conn, lib.path(), &lib.memo).unwrap();
+        // Stored order: newest first.
+        assert_eq!(facts.iter().map(|f| f.pack.short_name.as_str()).collect::<Vec<_>>(), ["q", "p"]);
+        let (q, p) = (&facts[0], &facts[1]);
+        assert_eq!((p.sticker_count, p.missing_count), (3, 2));
+        assert_eq!(p.emoji_strings, ["A", "B", "C"]);
+        assert!(!p.thumbnail_missing);
+        let first = p.first_sticker.as_ref().unwrap();
+        assert_eq!((first.missing, first.format), (false, Format::Png));
+        assert_eq!(p.check_error, None);
+        assert_eq!((q.sticker_count, q.missing_count), (0, 0));
+        assert!(q.emoji_strings.is_empty());
+        assert_eq!(q.first_sticker, None);
+    }
+
+    #[test]
+    fn list_facts_flag_a_missing_first_sticker_and_a_missing_thumbnail() {
+        let mut lib = Lib::new();
+        let pack = lib.pack_with("p", &["A", "B"]);
+        lib.conn
+            .execute("UPDATE packs SET thumbnail = 'thumbnail.png' WHERE id = ?1", params![pack.id])
+            .unwrap();
+        fs::remove_file(lib.dir_of(pack.id).join("001.png")).unwrap();
+        let facts = list_pack_facts(&lib.conn, lib.path(), &lib.memo).unwrap();
+        assert!(facts[0].thumbnail_missing);
+        assert!(facts[0].first_sticker.as_ref().unwrap().missing);
+        assert_eq!(facts[0].missing_count, 1);
+        fs::write(lib.dir_of(pack.id).join("thumbnail.png"), "t").unwrap();
+        assert!(!list_pack_facts(&lib.conn, lib.path(), &lib.memo).unwrap()[0].thumbnail_missing);
+    }
+
+    #[test]
+    fn list_facts_rescan_each_time_and_update_the_presence_memo_like_an_open() {
+        let mut lib = Lib::new();
+        let pack = lib.pack_with("p", &["A", "B"]);
+        assert_eq!(list_pack_facts(&lib.conn, lib.path(), &lib.memo).unwrap()[0].missing_count, 0);
+        fs::remove_file(lib.dir_of(pack.id).join("002.png")).unwrap();
+        // Showing the list again is a new check, so it sees the loss...
+        assert_eq!(list_pack_facts(&lib.conn, lib.path(), &lib.memo).unwrap()[0].missing_count, 1);
+        // ...and a later plain view load keeps what that check found.
+        let view = load_pack_view(&lib.conn, lib.path(), pack.id, &lib.memo).unwrap();
+        assert_eq!(missing(&view), [false, true]);
+    }
+
+    #[test]
+    fn list_facts_recover_an_interrupted_rename_first_so_nothing_reads_falsely_missing() {
+        let mut lib = Lib::new();
+        let pack = lib.pack_with("p", &["A", "B"]);
+        let dir = lib.dir_of(pack.id);
+        let steps = [Step::rename("001.png", "002.png"), Step::rename("002.png", "001.png")];
+        apply_plan_with_fault(
+            &mut lib.conn,
+            &dir,
+            pack.id,
+            &steps,
+            |tx| {
+                tx.execute_batch(
+                    "UPDATE stickers SET position = position + 1000000, file_name = '.dbtmp-' || id;
+                     UPDATE stickers SET position = 3 - (position - 1000000),
+                                         file_name = printf('%03d.png', 3 - (position - 1000000));",
+                )
+                .map_err(|e| e.to_string())
+            },
+            &|p| if p == FaultPoint::AfterPhase1 { Err("crash".into()) } else { Ok(()) },
+        )
+        .unwrap_err();
+        assert!(!dir.join("001.png").exists(), "files should be in temps");
+        let facts = list_pack_facts(&lib.conn, lib.path(), &lib.memo).unwrap();
+        assert_eq!((facts[0].sticker_count, facts[0].missing_count), (2, 0));
+        assert_eq!(facts[0].emoji_strings, ["B", "A"]);
+        assert_eq!(content(&lib, pack.id, "001.png"), "B");
+    }
+
+    #[test]
+    fn list_facts_settle_a_pending_folder_rename() {
+        let mut lib = Lib::new();
+        let pack = lib.pack_with("before", &["A"]);
+        lib.conn
+            .execute(
+                "UPDATE packs SET short_name = 'after', folder_rename_from = 'before' WHERE id = ?1",
+                params![pack.id],
+            )
+            .unwrap();
+        let facts = list_pack_facts(&lib.conn, lib.path(), &lib.memo).unwrap();
+        assert_eq!(facts[0].pack.folder_rename_from, None);
+        assert_eq!(facts[0].missing_count, 0);
+    }
+
+    #[test]
+    fn a_pack_whose_check_fails_is_reported_per_pack_and_does_not_break_the_list() {
+        let mut lib = Lib::new();
+        let bad = lib.pack_with("old", &["A", "B"]);
+        lib.pack_with("good", &["C"]);
+        // Both the old and the new folder exist: modified outside the app,
+        // which settling refuses to guess about (ADR-0004).
+        lib.conn
+            .execute(
+                "UPDATE packs SET short_name = 'new', folder_rename_from = 'old' WHERE id = ?1",
+                params![bad.id],
+            )
+            .unwrap();
+        fs::create_dir(lib.path().join("new")).unwrap();
+        let facts = list_pack_facts(&lib.conn, lib.path(), &lib.memo).unwrap();
+        assert_eq!(facts.len(), 2);
+        assert_eq!(facts[0].check_error, None);
+        assert_eq!(facts[0].sticker_count, 1);
+        let failed = &facts[1];
+        assert!(failed.check_error.as_ref().unwrap().contains("modified outside the app"));
+        // What the database alone knows is still shown.
+        assert_eq!((failed.sticker_count, failed.missing_count), (2, 0));
+        assert_eq!(failed.emoji_strings, ["A", "B"]);
+    }
+
+    #[test]
+    fn list_facts_serialize_flat_and_camel_case() {
+        let mut lib = Lib::new();
+        lib.pack_with("p", &["A"]);
+        let json = serde_json::to_value(list_pack_facts(&lib.conn, lib.path(), &lib.memo).unwrap()).unwrap();
+        let row = &json[0];
+        assert_eq!(row["shortName"], "p");
+        assert_eq!(row["stickerCount"], 1);
+        assert_eq!(row["missingCount"], 0);
+        assert_eq!(row["thumbnailMissing"], false);
+        assert_eq!(row["emojiStrings"][0], "A");
+        assert_eq!(row["firstSticker"]["format"], "png");
+        assert_eq!(row["firstSticker"]["missing"], false);
+        assert!(row["checkError"].is_null());
+    }
+
+    /// Cost of showing the Pack list with a large Library: 50 packs x 120
+    /// stickers of real small files, every pack fully checked. Ignored by
+    /// default (it writes 6000 files); run with
+    /// `cargo test --release list_facts_timing -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn list_facts_timing_for_a_large_library() {
+        let mut lib = Lib::new();
+        let tags: Vec<String> = (0..120).map(|i| format!("t{i}")).collect();
+        let tags: Vec<&str> = tags.iter().map(String::as_str).collect();
+        for n in 0..50 {
+            lib.pack_with(&format!("pack_{n}"), &tags);
+        }
+        for run in 1..=3 {
+            let started = std::time::Instant::now();
+            let facts = list_pack_facts(&lib.conn, lib.path(), &lib.memo).unwrap();
+            let took = started.elapsed();
+            assert_eq!(facts.len(), 50);
+            assert!(facts.iter().all(|f| f.sticker_count == 120 && f.missing_count == 0));
+            println!("list_pack_facts, 50 packs x 120 stickers, run {run}: {took:?}");
+        }
     }
 
     #[test]

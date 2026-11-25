@@ -1,9 +1,12 @@
 // User-facing wording and the small rules behind it (SPEC §3, §5), kept
-// pure so it is testable without a webview.
+// pure so it is testable without a webview. Includes the pack pickers' matcher
+// (matchPacks) and order (packsAlphabetical).
 import limits from "../../shared/limits.json";
 import { STICKER } from "../../editor/model/constraints";
 import { KB } from "../../shared/units";
 import { matchNames } from "../../shared/match-names";
+import { naturalCollator } from "../../shared/natural-collator";
+import { packQuery } from "./pack-search";
 import type { FileInfo, PackStatus, SendReport, StickerFormat, StickerView, Warning } from "../api";
 
 export const PACK_MAX_STICKERS = limits.pack.maxStickers;
@@ -33,8 +36,18 @@ export function stickerCountText(n: number): string {
   return n === 1 ? "1 sticker" : `${n} stickers`;
 }
 
-export function packCountText(n: number): string {
-  return n === 1 ? "1 pack" : `${n} packs`;
+/**
+ * `total` is the pack count; `shown` is the match count while the search
+ * filters (then always "N of M", even when all match), or null with no query.
+ */
+export function packCountText(total: number, shown: number | null = null): string {
+  const label = total === 1 ? "1 pack" : `${total} packs`;
+  return shown === null ? label : `${shown} of ${label}`;
+}
+
+/** The Pack list's only item when the search matches nothing (SPEC §5). */
+export function noPackMatchText(query: string): string {
+  return `No packs match “${packQuery(query)}”.`;
 }
 
 /** Pack deletion confirmation, per status (SPEC §3). */
@@ -132,6 +145,16 @@ export function sendReportText(report: SendReport, targetTitle: string): string 
  */
 export function matchPacks<P extends { title: string; shortName: string }>(packs: readonly P[], query: string): readonly P[] {
   return matchNames(packs, query, (p) => p.title, (p) => p.shortName);
+}
+
+/**
+ * The packs for a picker (Send to pack, the Editor's save target), alphabetical
+ * by Title: case-insensitive, numbers in natural order ("Pack 2" before
+ * "Pack 10"); ties fall to the Short Name, then the id. Returns a new array.
+ */
+export function packsAlphabetical<T extends { id: number; title: string; shortName: string }>(packs: readonly T[]): T[] {
+  const cmp = naturalCollator.compare;
+  return [...packs].sort((a, b) => cmp(a.title, b.title) || cmp(a.shortName, b.shortName) || a.id - b.id);
 }
 
 /** The Editor's saved-note link found its sticker gone between its check and the pack view (a rare race). */

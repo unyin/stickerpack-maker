@@ -102,8 +102,9 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
   match pack order. Renames must be crash-safe (two-phase to avoid collisions); DB and
   filenames must never disagree after an operation.
 - The library is app-managed: renaming files outside the app desyncs it.
-- **Desync checks run only when a pack is opened, plus a manual refresh. Never on app start.**
-  Absent files mark the sticker **Missing**.
+- **Desync checks run when a pack is opened, on a manual refresh, and each time the Pack list
+  is shown (SPM-25). Never on app start** (the app opens in the Editor). Each check first
+  recovers the pack's own interrupted work (ADR-0004), then marks absent files **Missing**.
 - "Open in explorer" opens the pack folder **with the sticker's file selected**.
 
 ## 5. Pack Manager
@@ -270,9 +271,67 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
 ### Pack-level
 - **UI conventions**: the app-wide dialog and dismissible-message rules are in §2.
 - Create pack (Title → auto Short Name, editable while Draft; new packs are Draft).
-- Pack list: shows how many packs the Library holds, but no per-pack sticker counts (each
-  pack's view shows its own); each pack has **Open in explorer**, which opens the pack's
-  folder (owner decisions 2026-11-21).
+- Pack list: shows how many packs the Library holds; each pack has **Open in explorer**, which
+  opens the pack's folder (owner decisions 2026-11-21). From SPM-25 (owner decisions
+  2026-11-25) each row also carries the pack's state, and the list is reorderable:
+  - **Every show of the list is a full open check.** Each pack gets exactly what opening it
+    gets (recovery, then the presence check, remembered like an open's), so the badges are
+    true; the cost was measured on a 50 x 120-sticker Library (about 50 ms release, 120 ms
+    debug). A pack whose check fails does not break the list: its row reads **Check failed**
+    (the error as its tooltip); its counts and emoji come from the database and its
+    thumbnail shows the None placeholder (see below).
+  - **The row**, in columns that line up across rows (one grid, each row a subgrid): grip, a
+    40px thumbnail, the Title with the Short Name under it (one line each, ellipsis, both in
+    full in the tooltip), the **status badge**, the Draft/Live badge,
+    Open in explorer, Delete.
+  - **Search box**: an `<input type="search">` ("Search packs", 240px; accessible name, its
+    `aria-label`: "Search packs by Title or Short Name") in the Pack list header,
+    just before **New pack…** (tab order: search, then New pack…; no shortcut). It filters as
+    you type, in the webview only: a pack shows when its Title or Short Name contains the
+    trimmed text, case-insensitively, in the stored order; empty or blank text shows every
+    pack. The header count reads "N of M packs" whenever the search has text, even when
+    every pack matches ("2 of 5 packs", "9 of 9 packs", "0 of 1 pack"); with no text it is
+    the plain total ("9 packs").
+    With no match the list holds one line, "No packs match “text”."; a Library with no packs
+    keeps "No packs yet. Create one to start." The webview's own clear button and Esc empty
+    the box. **Reordering is off while the box has text**: the grips are hidden (their column
+    stays, so nothing shifts) and a press on one starts no drag; clicking a row still opens its
+    pack. The filter is kept across reloads of the list (after a delete or reorder, an error)
+    and across leaving a pack and coming back, so the user returns to the next matching pack.
+  - **Opening a pack**: a click anywhere on the row opens it, except on the grip and the row's
+    buttons (Open in explorer, Delete), which keep their own behaviour; the click that ends a
+    drag never opens. The row shows a pointer cursor and tints on hover, except the row being
+    dragged; the grip's own hover stays visible on a tinted row. The title stays the one
+    keyboard-focusable open control.
+  - **The thumbnail cell**: the pack's own thumbnail (tooltip "Thumbnail"); with none, the
+    first sticker in a dashed frame ("No thumbnail: Telegram shows the first sticker"), or the
+    Missing art when that sticker is Missing ("... which is Missing"); a Missing thumbnail
+    file shows the Missing art ("The thumbnail file is Missing"); with no thumbnail and no
+    stickers, a neutral "None" ("No thumbnail and no stickers yet"). A pack whose check failed
+    shows the same "None" ("The pack could not be checked"): its files were never verified.
+  - **The status badge** comes from ONE issue rule (`model/pack-issues.ts`) that the Pack
+    view's green **Upload…** shares (ready = a Draft with no issues). Issues, most severe
+    first: N Missing stickers ("1 sticker is Missing" / "N stickers are Missing"); Thumbnail
+    Missing ("The thumbnail file is Missing"); over the limit, "N / 120" ("N stickers:
+    Telegram allows at most 120"); emoji issues, "1 emoji issue" / "N emoji issues" ("1
+    sticker's Emoji String is outside 1–20" / "N stickers' Emoji Strings are outside 1–20");
+    Empty ("No stickers yet"). With several, ONE badge: the most severe label plus " +N" (N =
+    the others), and the tooltip lists every line. Issues show on Live packs too. A Draft with
+    none reads **Ready to upload** (soft success tone; "Every check passes: ready for
+    @Stickers"); a Live pack with none shows no status badge. Issues are warn-toned.
+  - **Stored display order.** The list's order is stored in the Library (migration 0003) and
+    is display only: it never renames a folder or a sticker file. **New packs go at the
+    top.** Existing packs of an older Library are backfilled newest first, so the list reads
+    newest first from the upgrade on. Deleting a pack closes the gap.
+    The pack pickers (Send to pack, the Editor's save target) list packs alphabetically by
+    Title (case-insensitive, natural number order: "Pack 2" before "Pack 10"), not in the
+    stored order.
+  - **Drag to reorder**, from the row's **grip** only (six dots, a 32px-wide handle at the
+    row's left edge, tooltip "Drag to reorder"). No
+    Reorder mode or toggle. Pointer-only, like the Upload list's drag handle and the Pack
+    view's Reorder mode: a faded copy of the row follows the cursor, the dragged row fades, a
+    4px accent line between rows marks the drop, Esc mid-drag cancels, and releasing stores
+    the order and reloads. There is no keyboard route to it.
 - Pack header: **← Pack list** back button; Title always editable; Short Name editable only
   in Draft, with "🔒 Locked" beside its label (the full reason as its tooltip) so the header
   never changes height (owner decisions 2026-11-22); the Draft/Live badge and its button sit
@@ -334,7 +393,7 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
 - Pack-view messages that stay until dismissed (notices such as "Checked the pack folder…"
   and the import summary) have an **X** on the left as well as **Dismiss** on the right
   (owner decision 2026-11-22).
-- Desync checks on pack open + manual refresh only, never on app start (§4).
+- Desync checks on pack open, manual refresh and each show of the Pack list, never on app start (§4).
 - 120-sticker warning (the sticker count's warn state, above); pack deletion semantics per §3.
 
 ## 6. Editor
@@ -1103,7 +1162,7 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 1. **Scaffold**: Tauri app skeleton (Rust + TS), Windows build, SQLite, first-run library
    chooser, settings (path display, manual re-point, fresh-library creation).
 2. **Library core (Rust)**: schema (packs/stickers/thumbnail/emoji/status), order-encoded
-   filenames, crash-safe renames, desync detection (pack-open + manual refresh), Missing state.
+   filenames, crash-safe renames, desync detection (pack open, manual refresh and each show of the Pack list), Missing state.
 3. **Pack Manager UI**: pack list/create, Draft/Live toggle + short-name lock, pack view
    (Normal/Reorder modes, detail + aggregate panels, thumbnail slot), emoji edit/copy,
    explorer reveal, delete semantics, 120 warning, bulk import with validation.

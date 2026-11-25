@@ -57,3 +57,14 @@ export function dropPosition(from: number, slot: number): number | null {
   if (slot === from || slot === from + 1) return null;
   return (slot > from ? slot - 1 : slot) + 1;
 }
+
+/**
+ * The insertion slot under a pointer at height `y` in a vertical list: slot i
+ * means "before row i", slot n "after the last". Above a row's middle is
+ * before it, below is after (so gaps, edges and the space past the ends all
+ * resolve to the nearest sensible slot).
+ */
+export function rowSlotAt(rows: readonly Box[], y: number): number {
+  const index = rows.findIndex((r) => y < r.top + r.height / 2);
+  return index === -1 ? rows.length : index;
+}

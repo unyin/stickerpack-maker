@@ -2,7 +2,7 @@
 // per Library and reused, so an open pack survives switching tabs; showing
 // the tab again re-reads the pack list, or the open pack (the Editor may have
 // saved into it), but never re-scans an open pack for Missing files (desync
-// checks run on pack open and Refresh only, SPEC §4).
+// checks run on pack open, Refresh and each show of the Pack list, SPEC §4).
 import "../pack-manager/pack-manager.css";
 import { el, errorMessage } from "../ui";
 import { packMemory } from "../pack-manager/model/pack-memory";
@@ -71,6 +71,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
     openId = null;
     packMemory.openPackId = null;
     root.replaceChildren(list.element);
+    list.clearMessage(); // each show starts clear; openPack's showError comes after
     void list.reload();
   }
 
@@ -110,7 +111,10 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
       if (reveal) void showSticker(reveal.packId, reveal.stickerId);
       // The Editor may have saved into a pack meanwhile (SPM-10).
       else if (pack) pack.reload();
-      else void list.reload();
+      else {
+        list.clearMessage();
+        void list.reload();
+      }
     },
     dispose: () => {
       pack?.destroy();

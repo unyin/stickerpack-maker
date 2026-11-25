@@ -123,10 +123,11 @@ pub fn load_pack(conn: &Connection, pack_id: i64) -> Result<Pack, String> {
         .ok_or_else(|| format!("pack {pack_id} does not exist"))
 }
 
-/// All packs, ordered by id (creation order).
+/// All packs in the Pack list's stored display order (top first; `id` only
+/// breaks a tie that a healthy Library never has).
 pub fn load_packs(conn: &Connection) -> Result<Vec<Pack>, String> {
     let mut stmt = conn
-        .prepare("SELECT * FROM packs ORDER BY id")
+        .prepare("SELECT * FROM packs ORDER BY sort_order, id")
         .map_err(|e| format!("cannot query packs: {e}"))?;
     let rows = stmt
         .query_map([], pack_from_row)
