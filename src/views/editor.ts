@@ -266,19 +266,20 @@ function buildEditor(): HTMLElement {
   const fitButton = button("Fit", () =>
     resizeWholeImage(`Fit in ${constraints.side}`, (doc, c) => fitToBox(doc, c, constraints.side)),
   );
-  // Sizing tool 4 (SPEC §6): Fill is to Fit what CSS cover is to contain.
-  const fillButton = button("Fill", () =>
+  // Sizing tool 4 (SPEC §6): Cover is to Fit what CSS cover is to contain.
+  const fillButton = button("Cover", () =>
     resizeWholeImage(`Cover ${constraints.side}`, (doc, c) => fillToBox(doc, c, constraints.side)),
   );
-  const longestButton = button("Longest side", () =>
+  const longestButton = button("Long side", () =>
     resizeWholeImage(`Long side ${constraints.side}`, (doc, c) => scaleLongestSide(doc, c, constraints.side)),
   );
-  // The free-resize side-kind choice (CMT-152), instead of the old fixed
-  // "Longest side" label for the field.
+  // The free-resize side-kind choice (CMT-152). It reads as one sentence with
+  // the static "side"/"px" text and the field (SPEC §6, owner 2026-11-25):
+  // "[Long/Short] side [N] px Resize".
   const sideKind = el("select", { class: "editor-side-kind", "aria-label": "Which side the entered size is" }) as HTMLSelectElement;
   sideKind.append(
-    el("option", { value: "longest" }, "Longest side"),
-    el("option", { value: "shortest" }, "Shortest side"),
+    el("option", { value: "longest" }, "Long"),
+    el("option", { value: "shortest" }, "Short"),
   );
   sideKind.addEventListener("change", () => {
     freeSide = sideKind.value as ResizeSide;
@@ -294,17 +295,18 @@ function buildEditor(): HTMLElement {
     // The label is set in refresh(), from the side-kind choice.
   }) as HTMLInputElement;
   const resizeButton = button("Resize", () => freeResize());
-  const boxButton = button("Crop box", () => toggleBox());
+  const boxButton = button("Guide", () => toggleBox());
   // Labelled with the actual box size in refresh(): it is capped at the canvas.
   const cropButton = button("Crop", () => run(cropToBox));
   const resetViewButton = button("Reset view", () => stage?.fit());
-  const closeButton = button("Close", () => run(async () => void (await closeSession())));
+  // Close ends the session, so it carries the app's danger treatment (SPEC §6).
+  const closeButton = button("Close", () => run(async () => void (await closeSession())), "danger");
   const saveButton = button("Save…", () => run(saveSession), "primary");
   /** The Save button's idle title: what saving does in the session's mode. */
   const saveTitle = () =>
     constraints.mode === "thumbnail"
-      ? "Save the canvas as this pack's thumbnail (Ctrl+S)"
-      : "Save the canvas as a sticker in a pack (Ctrl+S)";
+      ? "Save… (Ctrl+S) — save the canvas as this pack's thumbnail"
+      : "Save… (Ctrl+S) — save the canvas as a sticker in a pack";
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
@@ -548,16 +550,21 @@ function buildEditor(): HTMLElement {
   const textTitle = "Type a new text layer in the chosen font, size and colour (Enter to finish, Shift+Enter for a new line)";
   const editTextTitle = "Edit the selected text layer's text (or double-click it)";
 
-  undoButton.title = "Undo (Ctrl+Z)";
-  redoButton.title = "Redo (Ctrl+Y)";
-  const resizeTitle = (kind: ResizeSide) =>
-    `Scale everything on the canvas together so its ${kind} side is the entered size (1–${IMPORT_MAX_SIDE} px); ` +
-    "the canvas size stays";
-  resizeButton.title = resizeTitle(freeSide);
+  // Tooltips follow the §2 contract: Name (Shortcut) — one-line description.
+  // Sizing and crop have no single-key shortcut, so their names stand alone.
+  undoButton.title = "Undo (Ctrl+Z) — step back: the selection's own steps first, then the document's changes";
+  redoButton.title = "Redo (Ctrl+Y) — step forward again: the selection's own steps first, then the document's changes";
+  const sideWord = () => (freeSide === "longest" ? "long" : "short");
+  const resizeTitle = () =>
+    `Resize — scale everything on the canvas together so its ${sideWord()} side is the entered size ` +
+    `(1–${IMPORT_MAX_SIDE} px); the canvas size stays`;
+  resizeButton.title = resizeTitle();
+  sideKind.title = "Long side — the entered size applies to the image's longest side; Short side — its shortest";
   resetViewButton.title = "Zoom and centre the canvas in view (changes the view only)";
-  boxButton.title = "Show or hide the crop box";
+  boxButton.title = "Show or hide the crop guide";
   const cropTitle = (size: string) =>
-    `Discard everything outside the ${size} box; drag the image to choose what stays. The canvas size stays`;
+    `Crop to ${size} — discard everything outside the ${size} box; drag the image to choose what stays. The canvas size stays`;
+  closeButton.title = "Close — end the editing session; asks first while there are unsaved changes";
   sideInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") freeResize();
   });
@@ -571,28 +578,57 @@ function buildEditor(): HTMLElement {
     openButton,
   );
 
+  // A thin vertical rule between two of the top row's groups. Its 8px
+  // margins on BOTH sides own the row's spacing (owner, 2026-11-25: the old
+  // group borders gave 8px left and 3px right); the row's own gap is 0.
+  const rule = () => el("span", { class: "editor-sep", "aria-hidden": "true" });
+
+  // The top row (SPEC §6 Layout): Undo, Redo | the sizing tools | the
+  // free-resize sentence | Guide, Crop to {size} | spacer | Save…, Close.
   const toolbar = el(
     "div",
     { class: "editor-toolbar" },
-    addButton,
-    undoButton,
-    redoButton,
+    el(
+      "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Session" },
+      undoButton,
+      redoButton,
+    ),
+    rule(),
     el(
       "span",
       { class: "editor-tool-group", role: "group", "aria-label": "Size" },
-      el("span", { class: "muted" }, "Size:"),
       fitButton,
       fillButton,
       longestButton,
-      el("label", { class: "editor-side" }, sideKind, sideInput, " px"),
+    ),
+    rule(),
+    el(
+      "span",
+      { class: "editor-tool-group", role: "group", "aria-label": "Free resize" },
+      el("span", { class: "editor-side" }, sideKind, " side", sideInput, " px"),
       resizeButton,
     ),
+    rule(),
     el(
       "span",
       { class: "editor-tool-group", role: "group", "aria-label": "Crop" },
       boxButton,
       cropButton,
     ),
+    rule(),
+    el("span", { class: "editor-spacer" }),
+    el("span", { class: "editor-session-actions", role: "group", "aria-label": "Session actions" }, saveButton, closeButton),
+  );
+
+  // The tools and their settings leave this row for the left tabbed panel in
+  // the next slice (SPEC §6 Layout; D2): until it exists they keep their
+  // wiring and state here, unseen, so nothing behaviourally changes in this
+  // pass and D2 only has to move them.
+  const parkedTools = el(
+    "div",
+    { class: "editor-tools-parked", hidden: true },
+    addButton,
     el(
       "span",
       { class: "editor-tool-group", role: "group", "aria-label": "Select and cut" },
@@ -634,14 +670,19 @@ function buildEditor(): HTMLElement {
       outlineEyedropper,
       el("label", { class: "editor-side" }, "Outline ", outlineWidthInput, " px"),
     ),
-    readout,
-    resetViewButton,
-    zoomLabel,
-    dirtyLabel,
-    el("span", { class: "editor-spacer" }),
-    // Save and Close stay together when the toolbar wraps.
-    el("span", { class: "editor-session-actions" }, saveButton, closeButton),
   );
+
+  // The bottom status strip (SPEC §6 Layout, owner 2026-11-25): the live
+  // readout on the left; zoom, Reset view and the unsaved-changes dot on the
+  // right, in that order. Placement only: every behaviour is unchanged.
+  const statusRight = el(
+    "span",
+    { class: "editor-status-right", role: "group", "aria-label": "View status" },
+    zoomLabel,
+    resetViewButton,
+    dirtyLabel,
+  );
+  const statusStrip = el("div", { class: "editor-status" }, readout, statusRight);
 
   const layersPanel = el(
     "aside",
@@ -655,7 +696,18 @@ function buildEditor(): HTMLElement {
   const workspace = el("div", { class: "editor-workspace" }, canvasHost, layersPanel);
   // The wheel over the typing overlay zooms the canvas like anywhere else (owner re-test 2026-11-22).
   const textOverlay = new TextEditOverlay(canvasHost, (e) => stage?.zoomAtClient(e.clientX, e.clientY, e.deltaY));
-  const view = el("section", { class: "view editor" }, toolbar, effectControls.element, message, empty, workspace);
+  const view = el(
+    "section",
+    { class: "view editor" },
+    toolbar,
+    // The reserved message row sits directly under the top row (SPEC §6).
+    message,
+    effectControls.element,
+    empty,
+    workspace,
+    statusStrip,
+    parkedTools,
+  );
 
   /**
    * Show a line in the message area: an error or blocked-action reason in
@@ -1859,10 +1911,12 @@ function buildEditor(): HTMLElement {
     empty.hidden = current !== null;
     workspace.hidden = current === null;
     toolbar.hidden = current === null;
+    // The status strip describes a session's canvas and view, so it goes with them.
+    statusStrip.hidden = current === null;
     openButton.disabled = busy;
     // The canvas tool buttons follow `tool` with or without a session, so
-    // after Close no button stays pressed on the hidden toolbar (SPM-8);
-    // the bar hides too, as its DOM is EffectControls' own.
+    // after Close no button stays pressed on the hidden top row or in the
+    // parked tools (SPM-8); the bar hides too, as its DOM is EffectControls' own.
     for (const [b, t] of [
       [moveToolButton, "move"],
       [rectToolButton, "rect"],
@@ -1898,18 +1952,21 @@ function buildEditor(): HTMLElement {
     // what saving does in this mode. The mode never changes mid-session, so
     // this is stable across refreshes.
     const side = constraints.side;
-    fitButton.textContent = `Fit to ${side}×${side}`;
-    fillButton.textContent = `Fill ${side}×${side}`;
-    longestButton.textContent = `Longest side ${side}`;
-    sideInput.setAttribute("aria-label", `${freeSide === "longest" ? "Longest" : "Shortest"} side in pixels`);
+    fitButton.textContent = `Fit in ${side}`;
+    fillButton.textContent = `Cover ${side}`;
+    longestButton.textContent = `Long side ${side}`;
+    const sideLabel = freeSide === "longest" ? "Long" : "Short";
+    sideInput.setAttribute("aria-label", `${sideLabel} side in pixels`);
+    sideInput.title = `${sideLabel} side — the entered size in pixels (1–${IMPORT_MAX_SIDE})`;
     const fitTitle =
-      `Scale everything on the canvas together, as one image, so its longest side is ${side} px; ` +
+      `Fit in ${side} — scale everything on the canvas together, as one image, so its longest side is ${side} px; ` +
       `the canvas becomes ${side}×${side} with transparent padding`;
     const fillTitle =
-      `Scale everything on the canvas together, as one image, so its shortest side is ${side} px; ` +
+      `Cover ${side} — scale everything on the canvas together, as one image, so its shortest side is ${side} px; ` +
       `the canvas becomes ${side}×${side} and anything beyond it is kept (drag the image to choose what shows)`;
     const longestTitle =
-      `Scale everything on the canvas together so its longest side is ${side} px; the canvas becomes the image (no padding)`;
+      `Long side ${side} — scale everything on the canvas together so its longest side is ${side} px; ` +
+      "the canvas becomes the image (no padding)";
     const single = current.selection.length === 1 ? current.selection[0] : null;
     const index = single ? layerIndex(doc, single) : -1;
     const blocker = mergeBlocker(current.selection);
@@ -1925,7 +1982,7 @@ function buildEditor(): HTMLElement {
       [fitButton, "fit", fitTitle],
       [fillButton, "fill", fillTitle],
       [longestButton, "longest", longestTitle],
-      [resizeButton, "free", resizeTitle(freeSide)],
+      [resizeButton, "free", resizeTitle()],
     ];
     for (const [button, tool, action] of sizing) {
       const reason = sizeToolBlocker(tool, doc, content, entered, constraints, freeSide);
@@ -2331,6 +2388,6 @@ function confirmScaleToFit(info: ImageInfo): Promise<boolean> {
   );
 }
 
-function button(label: string, onClick: () => void, variant?: "primary"): HTMLButtonElement {
+function button(label: string, onClick: () => void, variant?: "primary" | "danger"): HTMLButtonElement {
   return el("button", { class: variant ?? "secondary", onclick: onClick }, label) as HTMLButtonElement;
 }

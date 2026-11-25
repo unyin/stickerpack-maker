@@ -9,20 +9,50 @@
   gap: 10px;
 }
 
+/* The top row (SPEC §6 Layout): one line from the window's 1100px minimum
+   up, with the groups divided by 1px rules whose 8px margins own all the
+   spacing between groups. The window cannot go narrower (tauri.conf.json's
+   minWidth is 1100), so the row never needs to wrap. The row's buttons are
+   compact at the app's 14px type so eleven text actions fit (owner,
+   2026-11-25; the measured design). */
 .editor-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 0;
+  flex-wrap: nowrap;
+  font-size: 14px;
 }
 
+.editor-toolbar > * {
+  flex: none;
+}
+
+/* One group of controls inside the row; its own spacing only. */
 .editor-tool-group {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 8px;
-  border-left: 1px solid var(--border);
-  border-right: 1px solid var(--border);
+  gap: 4px;
+}
+
+/* The rule between two groups: 8px of space to the controls on both sides
+   (measured convention, owner 2026-11-25 — the old group borders gave 8px
+   left and 3px right), stretched to the row's height. */
+.editor-sep {
+  flex: none;
+  align-self: stretch;
+  width: 1px;
+  margin: 0 8px;
+  background: var(--border);
+}
+
+/* The row's own buttons: compact at the app's 14px type. The .view.editor
+   prefix out-specifies button.primary/.secondary/.danger whatever the
+   stylesheet order, so the row's padding is the announced one. */
+.view.editor .editor-toolbar button {
+  padding: 9px 4px;
+  font-size: 14px;
+  line-height: 17px;
+  white-space: nowrap;
 }
 
 .editor-side {
@@ -30,6 +60,7 @@
   align-items: center;
   gap: 4px;
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .editor-side-input {
@@ -44,20 +75,24 @@
 
 /* The free-resize side-kind choice (CMT-152), styled like the field it names. */
 .editor-side-kind {
-  padding: 6px 8px;
+  padding: 5px 3px;
   background: var(--panel);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
   font: inherit;
+  font-size: 14px;
 }
 
+/* The flexible spacer: Save… and Close stay anchored to the right edge. */
 .editor-spacer {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .editor-session-actions {
   display: inline-flex;
+  align-items: center;
   gap: 8px;
 }
 
@@ -72,8 +107,14 @@
   font-size: 14px;
 }
 
-.editor-message:empty {
-  display: none;
+/* The reserved message row (SPEC §2/§6, the CMT-290 fix): the row holds its
+   height whether or not there is a line to show, so the canvas never jumps
+   when a message appears or clears. A longer message grows the row instead
+   of clipping; the old collapse-when-empty rule is gone on purpose. */
+.view.editor .editor-message {
+  margin: 0;
+  min-height: 22px;
+  line-height: 20px;
 }
 
 /* A neutral note (e.g. after Crop converted text), not an error. */
@@ -207,7 +248,34 @@
   color: var(--danger-text);
 }
 
-/* The Crop box toggle shows its state. */
+/* The bottom status strip (SPEC §6 Layout, owner 2026-11-25): the readout on
+   the left, then the view cluster on the right — zoom, Reset view, the
+   unsaved-changes dot. One slim line, tokens only, in DOM (and so Tab) order. */
+.editor-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 14px;
+}
+
+.editor-status-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* A compact button keeps the strip one line (out-specifying button.secondary
+   whatever the stylesheet order, like the row's own rule). */
+.view.editor .editor-status button {
+  padding: 4px 10px;
+}
+
+/* The Guide toggle shows its state. */
 .editor-toolbar button[aria-pressed="true"] {
   border-color: var(--accent-ink);
   color: var(--accent-ink);
@@ -333,10 +401,64 @@
   color: var(--danger-text);
 }
 
-/* The save dialog (SPM-10): PNG / WEBP side by side. */
+/* The save dialog's PNG / WEBP choice (SPEC §6 Save, owner 2026-11-25): ONE
+   rectangle split into two halves by a 1px gap that shows the border colour
+   through — a fill swap, not a sliding thumb. The radios are still the real
+   control underneath (same name: arrow keys, Tab and the screen reader all
+   behave as a two-radio group); each half paints its radio's state.
+
+   Contrast, by construction from the tokens (both themes measured):
+   active text --accent-ink on the 12% accent tint is 4.9:1 light / 5.2:1
+   dark, and the same ink as the active half's inset rule is the >=3:1
+   boundary; inactive text --muted on --panel is 6.0:1 / 7.2:1. */
 .editor-save-format {
-  display: flex;
-  gap: 16px;
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--border);
+}
+
+.editor-format-half {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 84px;
+  padding: 7px 18px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.editor-format-half:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.editor-format-half:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+/* The inactive half's hover tint; a checked half keeps its own fill. */
+.editor-format-half:hover {
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+
+.editor-format-half:has(input:checked) {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--accent-ink);
+  font-weight: 600;
+  /* The active half's boundary at >=3:1 in both themes (the accent-ink
+     pattern primary buttons use). */
+  box-shadow: inset 0 0 0 1px var(--accent-ink);
+}
+
+/* The radios stay focusable; the visible ring is drawn on their half. */
+.editor-format-half:has(input:focus-visible) {
+  outline: 2px solid var(--accent-ink);
+  outline-offset: 2px;
 }
 
 /* The save dialog's "Replace #N / Save as a new sticker" choice (SPM-10). */

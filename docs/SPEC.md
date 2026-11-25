@@ -762,8 +762,11 @@ pass.
     the new picture. After any save the session edits the saved sticker, so the next save
     offers to replace it, a new sticker included. Thumbnail-mode sessions come with SPM-12.
   - A save as a new sticker appends it at the pack's end with an order-encoded file name
-    (ADR-0003) and an empty Emoji String (flagged in the Pack Manager, like bulk imports).
-    The Library core checks the file as a sticker once more before it enters the pack.
+    (ADR-0003) and the session's Emoji String — the one typed in the Emoji tab, held staged
+    until that save; with none typed the string is empty and the sticker is flagged in the
+    Pack Manager, like bulk imports (§Layout; the save dialog's hint follows the same
+    value). The Library core checks the file as a sticker once more before it enters the
+    pack.
   - After a save the dialog closes, the unsaved-changes flag clears, the session stays open,
     and a neutral note follows: for a new sticker it names the file, its position, the pack
     and the file size (a replace's note is above). A Pack Manager showing that pack re-reads
