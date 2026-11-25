@@ -199,7 +199,8 @@ stickers, Missing stickers, and the thumbnail.
   origin, so saving offers **Replace #N in <pack>** (the default), per §6.
 
 ### Missing stickers
-- Warning badge on the tile; panel banner with **Replace file** (the validated drop-in path)
+- Warning badge on the tile; the pack view's summary is the warn state of the toolbar's sticker
+  count (§5 Pack-level; owner decisions 2026-11-25); panel banner with **Replace file** (the validated drop-in path)
   and **Delete** (removes the slot and renumbers the pack to fill the gap). Edit and Send
   are disabled with the reason shown.
 
@@ -294,16 +295,29 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   fill against the page is 2.5:1 on `--bg` and 2.7:1 on `--panel` in light (dark 6.8:1, 6.1:1), the
   same as the old blue badge (~2.6:1), not pushed higher so it does not turn heavy (owner
   decisions 2026-11-25).
-- **The reserved notification area.** The pack view's red message line and its banners (the
-  over-120 warning, the Missing summary, the dismissible info notice, the "Not added:" list) share
-  ONE area above the sticker grid. It is a fixed height that always fits two single-line notices
-  (2 x (line + padding + border) + the gap + the scroller padding, written as a calc in
-  `.pm-notices`), never grows and never collapses when empty, so the grid's top edge never moves
-  when a notice appears or is dismissed (the Editor's reserved message row, §6, is the
-  precedent). Past two notices, or with a long "Not added:" list, it scrolls inside itself; Tab
-  to a Dismiss scrolls it into view, and a few pixels of padding keep focus rings unclipped. The
-  message line still has no close and stays until replaced; the dismissible banners keep the X
-  and Dismiss (owner decisions 2026-11-25). The Pack list is not part of this.
+- **The reserved notification area.** The pack view's red message line and its info notice share
+  ONE area above the sticker grid, and hold nothing else. Both are strictly single-line: a long
+  text ends in an ellipsis, with the full text in its tooltip (`title`) and, for the notice, in
+  its `role=status` text for screen readers. The area's height is exactly one message line + the
+  gap + one single-line notice + the focus-ring padding (a calc over the `--notice-*` properties
+  in `.pm-notices`). It never grows, never collapses (an empty message line still reserves its
+  row) and never scrolls: overflow is impossible by construction, not hidden, so the grid's top
+  edge never moves when a notice appears or is dismissed (the Editor's reserved message row, §6,
+  is the precedent). The message line still has no close and stays until replaced; the notice
+  keeps the X and Dismiss. The Pack list is not part of this (owner decisions 2026-11-25).
+- **The toolbar's sticker count carries the pack-level warnings.** The over-120 warning and the
+  Missing summary are no longer banners: when the pack has more than 120 stickers OR any Missing
+  sticker, the count ("125 stickers", same text and fixed width as before) takes the warn tone
+  (`--warn-*`) and shows a warning glyph inside its reserved width, so colour is never the only
+  signal and nothing in the toolbar moves. Its tooltip and accessible text give the reasons: the
+  over-120 text, and/or "N Missing.". The width fits the glyph and "999 stickers". Tiles keep their
+  Missing flags, and the detail panel keeps its own Missing banner (owner decisions 2026-11-25).
+- **The import notice and "Show…".** After an import, ONE notice reads as the import summary; when
+  files were rejected it is followed by a **Show…** link button. The text is truncated, never the
+  link. Show… opens a dialog titled "Not added" (the shared dialog, Close and Esc) listing each
+  rejected file with its reason and, where the Editor can import it, **Open in editor**. The list
+  belongs to the notice: Dismiss or the next action's notice replaces it. There is no separate
+  "Not added:" banner (owner decisions 2026-11-25).
 - **Tones.** One shared style per tint, so a colour edit propagates: `.tone-success` (a soft
   `--success-bg` fill, `--success-border`, `--success-text`) and `.tone-danger` (the `--danger-*`
   trio). In this change they style the copy button's success flash (green) and failure flash
@@ -317,11 +331,11 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   before "sticker10"), because Windows hands dropped files over in its own drag order, not
   Explorer's view order (owner decision 2026-11-21); invalid files rejected per-file with an
   "open in editor" option. Imported stickers get no emoji; empty-emoji stickers are flagged.
-- Pack-view messages that stay until dismissed (notices such as "Checked the pack folder…",
-  and the "Not added" list) have an **X** on the left as well as **Dismiss** on the right
+- Pack-view messages that stay until dismissed (notices such as "Checked the pack folder…"
+  and the import summary) have an **X** on the left as well as **Dismiss** on the right
   (owner decision 2026-11-22).
 - Desync checks on pack open + manual refresh only, never on app start (§4).
-- 120-sticker warning; pack deletion semantics per §3.
+- 120-sticker warning (the sticker count's warn state, above); pack deletion semantics per §3.
 
 ## 6. Editor
 
