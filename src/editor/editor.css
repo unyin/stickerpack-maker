@@ -380,7 +380,9 @@
      first row at the box's bottom, so rows rise as layers are added — the
      base never moves. The list is its own scroller so a full stack keeps
      the SAME bottom edge: the reversed flow starts at its bottom, showing
-     the base, with the newest rows above the fold. */
+     the base, with the newest rows above the fold. The DOM order still
+     reads base -> newest for assistive tech; only the visual order is
+     reversed, and with no focusable rows focus order is unaffected. */
   display: flex;
   flex-direction: column-reverse;
   height: 100%;
@@ -389,18 +391,22 @@
 }
 
 /* The layers box: exactly SEVEN rows tall (owner, from the test,
-   2026-11-25), the same cap as the Actions list. Fewer layers leave the
-   area above empty on the box's plain --bg (no stripes here); more scroll
-   inside. The 30px row is fixed rather than font-derived so the cap is
-   exact in the app's Windows UI font: 6px padding + an 18px line box. */
+   2026-11-25) — the owner expects no stack to need more than seven layers.
+   Fewer layers leave the area above empty on the box's plain --bg (no
+   stripes here); more scroll inside. The 30px row is fixed rather than
+   font-derived so the cap is exact in the app's Windows UI font: 6px
+   padding + an 18px line box. */
 .editor-layers-box {
   --editor-layer-rows: 7;
   --editor-layer-row-h: 30px;
+  /* Seven rows plus the 6px .editor-listbox adds around them: 2px padding and
+     a 1px border per side (not the 6px row padding above). */
+  --editor-layer-box-h: calc(var(--editor-layer-rows) * var(--editor-layer-row-h) + 6px);
   /* The cap, not a floor: at the window's 600px minimum height the box gives
      up rows before the action grid or hint below ever overflow the panel. */
   flex: 0 1 auto;
-  height: calc(var(--editor-layer-rows) * var(--editor-layer-row-h) + 6px);
-  max-height: calc(var(--editor-layer-rows) * var(--editor-layer-row-h) + 6px);
+  height: var(--editor-layer-box-h);
+  max-height: var(--editor-layer-box-h);
   overflow: hidden;
 }
 

@@ -265,10 +265,13 @@ pass.
     text-outline styling lives under Text, the Outline EFFECT tool under Effects.
   - Tool **settings live in the panel under their tool**: Warp's strength and radius while
     Warp is active, Outline's or Glow's controls with Apply/Cancel while that effect is active
-    (Layers and tools, below). The horizontal effect bar is **retired**: its appearing and
-    disappearing used to shift the canvas, the CMT-290 disease, and a change inside the panel
-    never moves it. Sliders stay wheel-scrollable with direct-entry fields (2026-11-23
-    decision), narrower for the panel (owner decision 2026-11-25).
+    (Layers and tools, below). The effect's `On: <layer>` target line **wraps within the
+    panel** at any name length, over as many lines as it needs; the owner accepts Apply/Cancel
+    being pushed down (owner ruling, from the Windows test, 2026-11-25). The horizontal effect
+    bar is **retired**: its appearing and disappearing used to shift the canvas, the CMT-290
+    disease, and a change inside the panel never moves it. Sliders stay wheel-scrollable with
+    direct-entry fields (2026-11-23 decision), narrower for the panel (owner decision
+    2026-11-25).
 - **Panel switching** (owner decision 2026-11-25): a tab click shows its category and stays
   there; ANY tool activation — its button, its shortcut, or the automatic return to Move after
   Cut, Apply or a discarded preview — surfaces that tool's category; opening text editing (Add
@@ -287,13 +290,22 @@ pass.
     edge, a two-column grid — the left column changes the stack's size (a tall **Add image as
     layer…**, its ellipsis marking the picker dialog, over **Delete**), the right column
     manipulates layers (**Move up**, **Move down**, **Merge selected**) (owner decision
-    2026-11-25). CMT-193's move of Add image as layer into the Layers panel lands here.
+    2026-11-25). CMT-193's move of Add image as layer into the Layers panel lands here. The
+    list displays **stack-bottom-first** and is **bottom-anchored**: the base image sits at the
+    box's bottom edge nearest the action buttons, newer layers rise above it, so adding a
+    layer fills fresh space and existing rows never shift, and the box caps at **seven rows**,
+    scrolling internally beyond (owner ruling, from the Windows test, 2026-11-25 — no more
+    than 7 layers expected).
   - **Actions**: a READ-ONLY list of every undoable document action, oldest first, with a
-    current-position marker. The history records a human-readable label IN-BAND at apply()
-    time (`{state, label}` entries). The selection's own steps (SPM-23) nest under a Select
-    entry and vanish with the trail's rules — the next document action clears them — and the
-    memory budget can drop the oldest entries. Clickable jump-to-state is a PLANNED LATER
-    promotion, not v1 (owner adopted the labels-now/read-only-now plan, 2026-11-25).
+    current-position marker. It prefills with **twenty zebra-striped lines** — empty decorative
+    rows filling to twenty — the history's view wanting size where the stack only needs its
+    rows (owner ruling, from the Windows test, 2026-11-25). Its scroll **tracks the current
+    action**: the current row is kept in view, never nudged when already visible, and a tab
+    reveal lands on the current row. The history records a human-readable label IN-BAND at
+    apply() time (`{state, label}` entries). The selection's own steps (SPM-23) nest under a
+    Select entry and vanish with the trail's rules — the next document action clears them —
+    and the memory budget can drop the oldest entries. Clickable jump-to-state is a PLANNED
+    LATER promotion, not v1 (owner adopted the labels-now/read-only-now plan, 2026-11-25).
   - **Emoji**: a typed text box, with a fixed five-row height that never resizes, for the
     session's sticker Emoji String — the anti-jump rule; an internal scrollbar is the overflow
     safety valve only. When the session edits an origin sticker, edits commit IMMEDIATELY on

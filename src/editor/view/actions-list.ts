@@ -150,7 +150,9 @@ export function renderActionList(list: HTMLElement, model: ActionListModel): voi
  */
 export function revealCurrentAction(list: HTMLElement): void {
   const current = list.querySelector<HTMLElement>(".is-current");
-  const box = list.parentElement;
+  // The scroll box is the list's own bounding box, wherever the caller nests
+  // it: find it by class, never by the DOM shape around the list.
+  const box = list.closest<HTMLElement>(".editor-listbox");
   if (!current || !box) return;
   const row = current.getBoundingClientRect();
   const view = box.getBoundingClientRect();

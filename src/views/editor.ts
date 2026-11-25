@@ -730,6 +730,8 @@ function buildEditor(): HTMLElement {
     /** A section for one tab, wired to its leaf; call show() once all exist. */
     readonly section: (name: K, ...children: HTMLElement[]) => HTMLElement;
     readonly show: (name: K) => void;
+    /** Work that needs the shown panel laid out, run after any successful show. */
+    readonly afterShow: Partial<Record<K, () => void>>;
   };
 
   /**
@@ -746,11 +748,13 @@ function buildEditor(): HTMLElement {
   ): TabGroup<K> {
     const buttons = {} as Record<K, HTMLButtonElement>;
     const sections = {} as Record<K, HTMLElement>;
+    const afterShow: Partial<Record<K, () => void>> = {};
     const show = (name: K): void => {
       for (const tab of names) {
         buttons[tab].setAttribute("aria-selected", String(tab === name));
         sections[tab].hidden = tab !== name;
       }
+      afterShow[name]?.();
     };
     for (const name of names) {
       buttons[name] = el(
@@ -787,7 +791,7 @@ function buildEditor(): HTMLElement {
       sections[name] = panel;
       return panel;
     };
-    return { buttons, row, section, show };
+    return { buttons, row, section, show, afterShow };
   }
 
   const leftTabs = tabSet(
@@ -938,10 +942,11 @@ function buildEditor(): HTMLElement {
     el("p", { class: "editor-note muted" }, "Read-only for now: jumping to an earlier step is planned."),
   );
   // The list is re-rendered on every session change even while its tab is
-  // hidden, where there is no layout to scroll; opening the tab runs after
-  // the tab set un-hides it, so the present row is found (owner, from the
-  // test, 2026-11-25).
-  rightTabs.buttons.actions.addEventListener("click", () => revealCurrentAction(actionsList));
+  // hidden, where there is no layout to scroll; the reveal runs on the tab
+  // SHOW path, so any route that lands on Actions — a click today, a
+  // programmatic show later — finds the present row (owner, from the test,
+  // 2026-11-25).
+  rightTabs.afterShow.actions = () => revealCurrentAction(actionsList);
 
   // Emoji: the session's Emoji String in a fixed five-row box (SPEC §6
   // Layout). It never resizes; its internal scrollbar is the overflow
