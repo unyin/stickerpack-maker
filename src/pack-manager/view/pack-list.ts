@@ -1,11 +1,37 @@
-// The pack list (SPEC §5): create, open, and delete packs, with Draft/Live
-// badges. Reads the database only; no desync checks here (SPEC §4).
-import { explorerLabel } from "../../icons";
+// The pack list (SPEC §5): create, open, reorder, and delete packs. Each time
+// it is shown, every pack gets the full open check (recovery, then desync
+// detection; SPEC §4, ADR-0004), and each row reports what it found: a
+// thumbnail, the Title and Short Name, a status badge that carries the pack's
+// issues (model/pack-issues.ts, the same rule as the Pack view's Upload…
+// button), the Draft/Live badge, Open in explorer, and Delete. The row's grip
+// drags it to a new place in the stored display order (pack-list-drag.ts).
+import { explorerLabel, icon } from "../../icons";
 import { el, errorMessage } from "../../ui";
-import { deletePack, listPacks, revealPack, type PackSummary } from "../api";
-import { packCountText, packDeleteMessage } from "../model/messages";
+import {
+  deletePack,
+  listPackFacts,
+  movePack,
+  revealPack,
+  type PackListEntry,
+} from "../api";
+import { packCountText, packDeleteMessage, thumbnailFormat } from "../model/messages";
+import { statusBadgeOf, type PackFacts } from "../model/pack-issues";
+import { rowThumbnail } from "../model/pack-row";
 import { confirmChoice } from "../../dialog";
 import { createPackDialog, statusBadge } from "./dialogs";
+import { cancelRowDrag, startRowDrag } from "./pack-list-drag";
+import { previewImage, Previews } from "./previews";
+
+/** The facts the issue rule reads, from a list entry. */
+function factsOf(pack: PackListEntry): PackFacts {
+  return {
+    status: pack.status,
+    stickerCount: pack.stickerCount,
+    missingCount: pack.missingCount,
+    thumbnailMissing: pack.thumbnailMissing,
+    emojiStrings: pack.emojiStrings,
+  };
+}
 
 export function buildPackList(onOpen: (packId: number) => void): {
   element: HTMLElement;
@@ -16,8 +42,10 @@ export function buildPackList(onOpen: (packId: number) => void): {
   const message = el("p", { class: "message", role: "alert" });
   const notice = el("p", { class: "pm-notice", role: "status" });
   const list = el("ul", { class: "pm-pack-list" });
+  // One preview cache per row (each pack has its own thumbnail and first sticker); dropped on every reload.
+  let previews: Previews[] = [];
   const newButton = el("button", { class: "primary", type: "button" }, "New pack…") as HTMLButtonElement;
-  // How many packs the Library holds; sticker counts live in each pack's view (owner, 2026-11-21).
+  // How many packs the Library holds.
   const packCount = el("span", { class: "pm-pack-count" });
   const element = el(
     "section",
@@ -34,7 +62,7 @@ export function buildPackList(onOpen: (packId: number) => void): {
     if (pack) onOpen(pack.id);
   });
 
-  async function remove(pack: PackSummary): Promise<void> {
+  async function remove(pack: PackListEntry): Promise<void> {
     const live = pack.status === "live";
     const ok = await confirmChoice(
       live ? "Delete this Live pack locally?" : "Delete this pack?",
@@ -57,8 +85,49 @@ export function buildPackList(onOpen: (packId: number) => void): {
     await reload();
   }
 
-  function row(pack: PackSummary): HTMLElement {
-    const open = el("button", { class: "pm-pack-open", type: "button", title: "Open this pack" },
+  /** The thumbnail cell: its own thumbnail, the first sticker standing in, the Missing art, or nothing. */
+  function thumbnailCell(pack: PackListEntry, cache: Previews): HTMLElement {
+    const choice = rowThumbnail({
+      thumbnail: pack.thumbnail,
+      thumbnailMissing: pack.thumbnailMissing,
+      firstSticker: pack.firstSticker,
+    });
+    const cell = el("div", { class: "pm-row-thumb", title: choice.title });
+    switch (choice.kind) {
+      case "own":
+        cell.append(previewImage(cache.thumbnailOf(pack.id, thumbnailFormat(pack.thumbnail)), "", "pm-row-img"));
+        break;
+      case "first":
+        cell.classList.add("fallback");
+        cell.append(previewImage(cache.sticker(choice.stickerId, pack.firstSticker?.format ?? "png"), "", "pm-row-img"));
+        break;
+      case "missing":
+        cell.append(el("div", { class: "pm-missing-art" }, "Missing"));
+        break;
+      case "none":
+        cell.append(el("div", { class: "pm-thumb-empty" }, "None"));
+        break;
+    }
+    return cell;
+  }
+
+  /** The status badge: the pack's issues or Ready to upload; a failed check reads as its own issue. */
+  function statusCell(pack: PackListEntry): HTMLElement {
+    const cell = el("span", { class: "pm-status-cell" });
+    if (pack.checkError !== null) {
+      cell.append(el("span", { class: "pm-badge pm-badge-issue", title: pack.checkError }, "Check failed"));
+      return cell;
+    }
+    const badge = statusBadgeOf(factsOf(pack));
+    if (badge) cell.append(el("span", { class: `pm-badge pm-badge-${badge.tone}`, title: badge.title }, badge.label));
+    return cell;
+  }
+
+  function row(pack: PackListEntry): HTMLElement {
+    const cache = new Previews();
+    previews.push(cache);
+    const grip = el("span", { class: "pm-grip", title: "Drag to reorder" }, icon("grip"));
+    const open = el("button", { class: "pm-pack-open", type: "button", title: `Open this pack — ${pack.title} (${pack.shortName})` },
       el("span", { class: "pm-pack-title" }, pack.title),
       el("span", { class: "muted pm-mono" }, pack.shortName),
     );
@@ -75,21 +144,45 @@ export function buildPackList(onOpen: (packId: number) => void): {
     });
     const del = el("button", { class: "secondary", type: "button", title: "Delete this pack" }, "Delete");
     del.addEventListener("click", () => void remove(pack));
-    return el(
+    const item = el(
       "li",
-      { class: "pm-pack-row" },
+      { class: "pm-pack-row", "data-id": String(pack.id) },
+      grip,
+      thumbnailCell(pack, cache),
       open,
+      statusCell(pack),
       statusBadge(pack.status),
       reveal,
       del,
     );
+    grip.addEventListener("pointerdown", (e) => startRowDrag(e, item, pack.id, { list, drop: (id, position) => void move(id, position) }));
+    return item;
   }
 
-  async function reload(): Promise<void> {
+  /** A row was dropped on a new place: store the order, then show the list again. */
+  async function move(packId: number, position: number): Promise<void> {
+    message.textContent = "";
     try {
-      const packs = await listPacks();
+      await movePack(packId, position);
+    } catch (err) {
+      message.textContent = errorMessage(err);
+    }
+    await reload();
+  }
+
+  // Reloads can overlap (a drop right after the list was shown): only the latest one paints.
+  let loads = 0;
+
+  async function reload(): Promise<void> {
+    const load = ++loads;
+    try {
+      const packs = await listPackFacts();
+      if (load !== loads) return;
       message.textContent = ""; // a successful load clears an earlier failure
       packCount.textContent = packCountText(packs.length);
+      cancelRowDrag();
+      for (const cache of previews) cache.clear();
+      previews = [];
       list.replaceChildren(...packs.map(row));
       if (packs.length === 0) list.append(el("li", { class: "pm-empty-item muted" }, "No packs yet. Create one to start."));
     } catch (err) {
