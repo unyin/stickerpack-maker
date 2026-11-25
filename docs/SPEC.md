@@ -206,6 +206,53 @@ stickers, Missing stickers, and the thumbnail.
   sticker, via Editor thumbnail mode), Replace, Delete, Open in explorer. Visually distinct
   slot at the end of the list; unnumbered file (§4).
 
+### Upload list
+Upload list is a dialog over the pack view, titled "Upload list", not a third pack view mode
+(the modes above stay Normal and Reorder). It lists the pack to upload it through @Stickers:
+every sticker in order with its emoji, to copy from. All of it is owner decisions 2026-11-25.
+- **Opening it.** The header button **Upload list…** (§5 Pack-level). It works in Draft and
+  Live. It is disabled when the pack has no stickers, a thumbnail alone not counting, with the
+  reason "The pack has no stickers yet" as its tooltip; enabled, its tooltip reads "Upload
+  list… — Every sticker in order with its emoji, for uploading through @Stickers" (§2). It
+  is disabled while the view is busy, like its header siblings. Opening it while Reorder is on
+  ends Reorder first. It is a modal built on the app's shared dialog (§2), so the pack view's
+  file-drop import ignores a file dropped on the window while it is open. It always opens
+  scrolled to the top; focus starts on the first enabled Open in explorer button (Close if
+  none); Esc or **Close** closes it. Light and dark themes.
+- **Lines above the list.** On a Draft pack, the muted note "This pack is a Draft: press Go Live
+  once @Stickers' /publish succeeds." Over 120 stickers, the pack-size message of §3 as a warning
+  line: informational, it blocks nothing. Both can show.
+- **The list.** A vertical scrollable list in pack order. Every sticker is one fixed-height
+  row, and no row carries a warning flag. Columns: the position (**#N**, sized for "#120"), a 56px
+  preview, an icon-only **Open in explorer** button, a **copy** button, and the **emoji box**,
+  the one flexible column. Tab order within a row: Open in explorer, copy, emoji box; Close is
+  last. The Open in explorer button shows only the "opens in another program" icon, named for
+  assistive technology "Open #N in explorer", with the tooltip "Open in explorer — Show this
+  file in File Explorer, selected" (§2, §4). The copy button and its feedback are the detail
+  panel's (✓ on success, red on failure).
+- **The emoji box.** A fixed two-row box that never resizes and scrolls inside past 20 emoji. It
+  saves like the detail panel's Emoji String box (§5 Detail panel): on change, every space
+  stripped, warn-only (never blocks), Enter ends the edit, through the same command, so the
+  edit reaches the Library and the pack view's tiles and panel. The dialog's preferred width fits
+  ten emoji per row, computed from the measured width of an emoji glyph in the emoji font
+  (re-fitted when fonts finish loading); it is capped at the window, so the emoji box shrinks and
+  nothing overflows sideways, with the copy button always fully visible.
+- **A Missing sticker.** Its row shows the Missing art on a dashed border; Open in explorer is
+  disabled with the Missing reason as its tooltip (§2), the preview cannot be dragged, and
+  the emoji box and copy still work.
+- **The thumbnail.** When the pack has one, it is the last entry: no #N, its preview, its Open
+  in explorer button, no copy button, and the muted text "Thumbnail — no emoji" where the
+  emoji box would be. If its file is Missing: the Missing art, Open in explorer disabled
+  with the tooltip "The thumbnail file is Missing; replace it first.", not draggable. With
+  no thumbnail there is no entry.
+- **Drag out.** Each present file's preview, stickers and the thumbnail, is a drag handle (grab
+  cursor, an accent outline on hover, tooltip "Drag to Telegram — Drag this file straight into
+  the @Stickers chat"). Pressing it and moving a few pixels starts a native OS file drag of that
+  file, so it can be dropped into Telegram Desktop. The webview names only a sticker or pack id;
+  the app resolves the path itself (as Open in explorer does), so the page can never ask to drag
+  an arbitrary file. Windows only (OLE drag and drop of the file); the cursor image is a small
+  PNG made by the app, since Windows may not decode WEBP. Other platforms do not drag.
+
 ### Pack-level
 - **UI conventions**: the app-wide dialog and dismissible-message rules are in §2.
 - Create pack (Title → auto Short Name, editable while Draft; new packs are Draft).
@@ -219,7 +266,13 @@ stickers, Missing stickers, and the thumbnail.
   open (owner decision 2026-11-21). Draft/Live manual toggle both ways, each direction
   confirmed (owner decision 2026-11-21); Draft→Live offers
   Go Live / Keep Draft, Keep Draft by default; Live→Draft offers Make Draft / Keep Live, Keep Live
-  by default (owner decision 2026-11-21).
+  by default (owner decision 2026-11-21). **Upload list…** sits immediately right of that
+  status button (Upload list, above). The Draft/Live badge and the status button each keep
+  a fixed width that fits the longer of their two labels ("Draft"/"Live", "Go Live"/"Revert
+  to Draft"), so toggling the status never moves Upload list…; the width is reserved by
+  laying the other label invisibly over the shown one, not by a pixel value, so it holds in
+  whatever font Windows draws. The header stays on one line at the 1100px window minimum
+  (owner decisions 2026-11-25).
 - **Bulk import**: drag-drop multiple images onto a pack, or pick them with Add images. Same
   validity rule as drop-in — valid files added as-is in natural filename order ("sticker2"
   before "sticker10"), because Windows hands dropped files over in its own drag order, not
