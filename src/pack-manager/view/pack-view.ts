@@ -132,6 +132,8 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   const stickerCount = el("span", { class: "muted pm-sticker-count" });
   const revealButton = el("button", { class: "secondary", type: "button", title: "Open this pack's folder in Explorer" }, ...explorerLabel()) as HTMLButtonElement;
   const banners = el("div", { class: "pm-banners" });
+  // The reserved notification area (pack-manager.css .pm-notices): the message line and the banners, above the grid.
+  const notices = el("div", { class: "pm-notices" }, message, banners);
   const grid = el("ol", { class: "pm-grid", "aria-label": "Stickers in pack order" });
   const panel = el("aside", { class: "pm-panel", "aria-label": "Selection" });
   const dropZone = el("div", { class: "pm-body" }, grid, panel);
@@ -146,7 +148,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   );
   // Reorder last: its label changes ("Done reordering"), so nothing may come after it (owner, 2026-11-22).
   const toolbar = el("div", { class: "pm-toolbar", role: "toolbar" }, refreshButton, addButton, stickerCount, revealButton, reorderButton);
-  const root = el("section", { class: "view pm-pack" }, header, toolbar, message, banners, dropZone);
+  const root = el("section", { class: "view pm-pack" }, header, toolbar, notices, dropZone);
 
   /** Run one Library action at a time, routing errors into the message line. */
   async function run(action: () => Promise<void>): Promise<void> {
@@ -617,9 +619,9 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     for (const b of [refreshButton, addButton, revealButton, statusButton, backButton]) b.disabled = busy;
     const uploadBlocker = uploadListBlocker(view.stickers.length);
     uploadButton.disabled = busy || uploadBlocker !== null;
-    // Green (a border and text tint, no fill; no size change) only while enabled and ready to go live.
+    // The success tone (green fill, border and text; no size change) only while enabled and ready to go live.
     const ready = !uploadButton.disabled && readyToGoLive(view);
-    uploadButton.classList.toggle("ready", ready);
+    uploadButton.classList.toggle("tone-success", ready);
     uploadButton.title = uploadBlocker ?? (ready ? UPLOAD_READY_TITLE : UPLOAD_LIST_TITLE);
     titleInput.disabled = busy;
     if (busy) shortInput.disabled = true;

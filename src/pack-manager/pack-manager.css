@@ -66,8 +66,8 @@
 
 .pm-badge-live {
   color: var(--accent-text);
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--live-bg);
+  border-color: var(--live-bg);
 }
 
 .pm-flag {
@@ -241,13 +241,6 @@
   padding-right: 12px;
 }
 
-/* Upload… while the pack is ready to go live: green border and text, no fill,
-   no size change; never green while disabled or Live (owner, 2026-11-25). */
-.pm-header-btn.ready {
-  border-color: var(--success-border);
-  color: var(--success-text);
-}
-
 /* A label that keeps the width of the longer of two (dialogs.ts reservedLabel):
    the other label sits in the same grid cell, invisible, so the Draft/Live badge
    ("Draft"/"Live") and the status button ("Go Live"/"Revert to Draft") keep one
@@ -297,14 +290,50 @@
   white-space: nowrap;
 }
 
+/* The reserved notification area (owner decisions 2026-11-25; the Editor's
+   reserved message row is the precedent, SPEC §2/§6): the red message line and
+   the banners live in ONE area above the sticker grid that never grows or
+   collapses, so the grid's top edge does not move when a notice appears or is
+   dismissed. Its height always fits TWO single-line banners:
+   2 x (line + 2 x banner padding + 2 x border) + the gap between them, plus
+   the scroller padding. Three or more notices, or a long "Not added:" list,
+   scroll inside it (Tab to a Dismiss scrolls it into view). The 5px padding is
+   the house pattern for a scroll container: it clips at its padding edge, so
+   the 4px focus ring of a child on the edge would be cut off (CMT-282, see
+   dialog.css); the equal negative margin keeps the visual spacing. */
+.pm-notices {
+  --notice-line: 20px;
+  --notice-pad-y: 8px;
+  --notice-border: 1px;
+  --notice-gap: 6px;
+  --notice-ring: 5px;
+  box-sizing: border-box;
+  flex: none;
+  height: calc(
+    2 * (var(--notice-line) + 2 * var(--notice-pad-y) + 2 * var(--notice-border)) + var(--notice-gap) +
+      2 * var(--notice-ring)
+  );
+  margin: calc(-1 * var(--notice-ring));
+  padding: var(--notice-ring);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--notice-gap);
+}
+
+/* The red message line is one row of the stack, one line tall. */
+.pm-notices > .message {
+  margin: 0;
+  flex: none;
+  line-height: var(--notice-line);
+  min-height: 0;
+}
+
 .pm-banners {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.pm-banners:empty {
-  display: none;
+  gap: var(--notice-gap, 6px);
+  flex: none;
 }
 
 .pm-banner {
@@ -313,7 +342,8 @@
   gap: 12px;
   justify-content: space-between;
   flex-wrap: wrap;
-  padding: 8px 12px;
+  padding: var(--notice-pad-y, 8px) 12px;
+  line-height: var(--notice-line, 20px);
   border-radius: 8px;
   font-size: 14px;
 }
@@ -655,17 +685,6 @@
   align-items: center;
   justify-content: center;
   flex: none;
-}
-
-/* Copied: green border and text, no fill, no size change (owner, 2026-11-25). */
-.pm-copy.copied {
-  border-color: var(--success-border);
-  color: var(--success-text);
-}
-
-.pm-copy.failed {
-  border-color: var(--danger-border);
-  color: var(--danger-text);
 }
 
 .pm-emoji-count {

@@ -51,13 +51,13 @@ function copyFlash(button: HTMLButtonElement, status: HTMLElement): (text: strin
     clearTimeout(restore); // a second click restarts the timer instead of leaving "Copied" stuck
     button.title = text;
     status.textContent = text;
-    button.classList.toggle("copied", ok);
-    button.classList.toggle("failed", !ok);
+    button.classList.toggle("tone-success", ok);
+    button.classList.toggle("tone-danger", !ok);
     button.replaceChildren(icon(ok ? "check" : "copy"));
     restore = setTimeout(() => {
       button.title = COPY_TITLE;
       status.textContent = "";
-      button.classList.remove("copied", "failed");
+      button.classList.remove("tone-success", "tone-danger");
       button.replaceChildren(icon("copy"));
     }, 1200);
   };

@@ -17,11 +17,18 @@
   --danger-border: #c25a53;
   /* 7.7:1 on --danger-bg: the text rule holds. */
   --danger-text: #8a2c26;
-  /* Success tint (owner, 2026-11-25): a border and text colour, never a fill,
-     for a successful copy and a pack ready to go live. Measured on --panel and
-     --bg: text 5.4:1 and 5.0:1, boundary 3.5:1 and 3.3:1. */
+  /* Success tone (owner, 2026-11-25), the green counterpart of the --danger
+     trio: a soft fill, a boundary and text, used through .tone-success below.
+     Text on --success-bg 4.7:1 (on --panel 5.4:1, --bg 5.0:1); boundary 3.5:1
+     on --panel and 3.3:1 on --bg. */
+  --success-bg: #e6f5ec;
   --success-text: #1f7a45;
   --success-border: #3d9a62;
+  /* The Live badge fill, ONE value for both themes (so nothing changes between
+     them, like --accent-text): --accent-text on it 6.1:1; against the page
+     2.5:1 on --bg and 2.7:1 on --panel, matching the old blue badge's ~2.6:1
+     on purpose (owner, 2026-11-25: not heavier); dark 6.8:1 and 6.1:1. */
+  --live-bg: #2ab560;
   /* Warn-only conditions (Missing, emoji count, pack size): SPM-3. */
   --warn-bg: #fff6e0;
   --warn-border: #a87b0e;
@@ -79,7 +86,9 @@
      --danger-text stays 8.8:1 on the fill. */
   --danger-border: #b8625b;
   --danger-text: #f0b9b6;
-  /* Text 9.4:1 on --panel, 10.4:1 on --bg; boundary 4.8:1 and 5.3:1. */
+  /* Text 9.4:1 on --panel, 10.4:1 on --bg, 7.2:1 on --success-bg; boundary
+     4.8:1 and 5.3:1. */
+  --success-bg: #1b3a2b;
   --success-text: #8fd4a8;
   --success-border: #4a9a6c;
   --warn-bg: #33290f;
@@ -254,6 +263,39 @@ button.danger {
   padding: 8px 18px;
   border-radius: 8px;
   cursor: pointer;
+}
+
+/* Tones (owner decisions 2026-11-25): ONE style per tint, so a colour edit
+   propagates to every consumer. Add the class to a button or a box; the fill,
+   boundary and text come from the tokens. The button selector ties with
+   button.secondary and comes after it, so the tone wins. Hover keeps the fill
+   (button.secondary:hover would swap in --bg and wipe the tint, and a flash or
+   the ready Upload… must stay readable) and darkens the boundary to the text
+   colour instead, which keeps >= 3:1. Only the copy button and Upload… use
+   these so far; the other tinted controls are v2 (SPEC §9, Unified tone
+   styles). */
+.tone-success,
+button.tone-success {
+  background: var(--success-bg);
+  border-color: var(--success-border);
+  color: var(--success-text);
+}
+
+.tone-danger,
+button.tone-danger {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+button.tone-success:hover {
+  background: var(--success-bg);
+  border-color: var(--success-text);
+}
+
+button.tone-danger:hover {
+  background: var(--danger-bg);
+  border-color: var(--danger-text);
 }
 
 /* Disabled look for every button. It comes after the button.primary,
