@@ -29,6 +29,11 @@
   gap: 10px;
   max-height: 65vh;
   overflow: auto;
+  /* This is a scroll container, so it clips at its padding edge; the
+     focused child's ring reaches 2px outline + 2px offset = 4px past its
+     border box and was cut off where a child sat on the content edge
+     (CMT-282, the save dialog's New pack…). 5px leaves a pixel of slack. */
+  padding: 5px;
 }
 
 .app-dialog-body p {

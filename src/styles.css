@@ -12,7 +12,10 @@
   /* A pressed toggle on hover: --accent-text stays 5.2:1 on it. */
   --accent-hover: #1f9bdc;
   --danger-bg: #fdf0ef;
-  --danger-border: #e5a3a0;
+  /* The boundary meets the 3:1 UI rule on the surfaces it sits on (SPM-15):
+     4.0:1 on --bg and 4.3:1 on --panel; the old #e5a3a0 was 1.95:1. */
+  --danger-border: #c25a53;
+  /* 7.7:1 on --danger-bg: the text rule holds. */
   --danger-text: #8a2c26;
   /* Warn-only conditions (Missing, emoji count, pack size): SPM-3. */
   --warn-bg: #fff6e0;
@@ -67,7 +70,9 @@
   --muted: #9aafc2;
   --accent-ink: #2aabee;
   --danger-bg: #38201e;
-  --danger-border: #8a4a44;
+  /* 4.2:1 on --bg, 3.8:1 on --panel (SPM-15); the old #8a4a44 was 2.70/2.44.
+     --danger-text stays 8.8:1 on the fill. */
+  --danger-border: #b8625b;
   --danger-text: #f0b9b6;
   --warn-bg: #33290f;
   --warn-border: #9c7a22;
@@ -232,7 +237,8 @@ button.secondary:hover {
   background: var(--bg);
 }
 
-/* Used by the shared dialog and the Pack Manager, so it lives here. */
+/* Used by the shared dialog and the Pack Manager, so it lives here. The
+   boundary passes 3:1 on --bg and --panel in both themes (SPM-15). */
 button.danger {
   background: var(--danger-bg);
   color: var(--danger-text);
