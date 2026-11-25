@@ -131,6 +131,16 @@ export class EditorSession {
     return this.history.actionTrail();
   }
 
+  /**
+   * The selection's step states for the Actions panel (SPM-15), oldest
+   * first, with the current state's position. Read-only, like actionTrail:
+   * each Region state carries its own contributions, so the panel derives
+   * every step's label from the states themselves.
+   */
+  selectionTrail(): { readonly states: readonly (Region | null)[]; readonly currentIndex: number } {
+    return { states: [...this.regionPast, this.selectedRegion], currentIndex: this.regionPast.length };
+  }
+
   get canRedo(): boolean {
     return this.history.canRedo;
   }

@@ -136,7 +136,8 @@
    a strip inside it. The four text leaves total wider than 192px and
    OVERHANG the panel's right edge over the canvas — the owner-accepted state
    until the labels become icons (owner decision 2026-11-25); the leaves are
-   deliberately not shrunk. */
+   deliberately not shrunk. The leaf and body styles below are shared with
+   the right Layers/Actions/Emoji panel (D3), whose three leaves fit. */
 .editor-tools {
   flex: none;
   width: 192px;
@@ -192,7 +193,8 @@
      wider than the field (a dropdown may overlay the canvas, long names stay
      readable), and an overflow container would clip it and scroll the panel
      sideways. Every category fits the body at the window's 600px minimum
-     height, so nothing needs to scroll here. */
+     height, so nothing needs to scroll here. The right panel shares this
+     body; its lists scroll inside their own boxes instead. */
   overflow: visible;
   background: var(--panel);
   border: 1px solid var(--border);
@@ -335,28 +337,44 @@
   overflow: hidden;
 }
 
+/* The right tabbed panel (SPEC §6 Layout, SPM-15 D3): 240px, with the same
+   browser-style tab leaves and body as the tools panel. Layers is the
+   default; the Emoji leaf is the one place the modes' geometry differs —
+   it hides in Thumbnail mode (owner decision 2026-11-25). */
 .editor-layers {
+  flex: none;
   width: 240px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--panel);
 }
 
-.editor-layers h2 {
-  margin: 0;
-  font-size: 15px;
+/* One right-panel tab's content: a plain block under the leaves. */
+.editor-tabpanel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* A bordered box around a whole list — the layer rows, the action history.
+   Buttons that act on a list sit BELOW its box, never inside it (owner
+   decision 2026-11-25). The box scrolls on its own; the row hover swaps to
+   --panel inside, where the box's own --bg would swallow it. */
+.editor-listbox {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 
 .editor-layers-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow: auto;
-  flex: 1;
 }
 
 .editor-layers-list li {
@@ -371,6 +389,10 @@
 
 .editor-layers-list li:hover {
   background: var(--bg);
+}
+
+.editor-listbox .editor-layers-list li:not(.selected):hover {
+  background: var(--panel);
 }
 
 .editor-layers-list li.selected {
@@ -406,19 +428,148 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The layer actions under the box, outside it (SPEC §6 Layout, owner
+   decision 2026-11-25): two equal columns, three rows. The left column
+   changes the stack's size — the tall Add image as layer… (rows 1–2) over
+   Delete; the right column manipulates layers — Move up, Move down, Merge
+   selected. Equal columns hold "Merge selected" without clipping at 240px. */
 .editor-layer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 4px;
+  align-items: stretch;
 }
 
-.editor-layer-actions button {
-  padding: 6px 10px;
+/* Compact cells at the panel's narrow width; the .view.editor prefix
+   out-specifies button.primary/.secondary whatever the stylesheet order. */
+.view.editor .editor-layer-actions button {
+  padding: 4px 6px;
+  font-size: 12.5px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/* The tall add button's label wraps to two lines and reads left-justified
+   inside its square-ish cell; it is a picker command, so its ellipsis is
+   part of the copy. */
+.view.editor .editor-layer-actions .editor-cell-add {
+  grid-area: 1 / 1 / 3 / 2;
+  text-align: left;
+  white-space: normal;
+}
+
+.editor-cell-delete {
+  grid-area: 3 / 1;
+}
+
+.editor-cell-up {
+  grid-area: 1 / 2;
+}
+
+.editor-cell-down {
+  grid-area: 2 / 2;
+}
+
+.editor-cell-merge {
+  grid-area: 3 / 2;
 }
 
 .editor-hint {
   margin: 0;
   font-size: 13px;
+}
+
+/* A muted note under a panel list (the Actions tab's planned-promotion
+   annotation), quieter than the hint above a control. */
+.editor-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* The Actions tab's read-only history (SPM-15 D3): oldest first, one row per
+   action, the present on the accent fill with a "current" badge. The
+   selection's steps sit indented under their Select entry. Nothing here is
+   clickable. */
+.editor-actions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.editor-actions-list > li {
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.editor-actions-list > li:nth-child(odd):not(.is-current) {
+  background: var(--panel);
+}
+
+.editor-actions-list > li.is-current {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.editor-actions-badge {
+  margin-left: 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.editor-actions-sub {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 3px 0 0 6px;
+  padding-left: 10px;
+  list-style: none;
+  font-size: 12.5px;
+  border-left: 1px solid var(--border);
+}
+
+.editor-actions-sub li {
+  padding: 2px 0;
+}
+
+.editor-actions-empty {
+  font-style: italic;
+}
+
+/* The Emoji tab's box (SPEC §6 Layout): a FIXED five-row height that never
+   follows the string — the anti-jump rule. Five 30px lines plus the 6px
+   padding and 1px border on each side are the 164px; the internal scrollbar
+   is the safety valve for a pathological entry only. */
+.editor-emoji-label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.editor-emoji-input {
+  display: block;
+  width: 100%;
+  height: 164px;
+  padding: 6px 8px;
+  line-height: 30px;
+  font-family: var(--font-emoji);
+  font-size: 22px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  resize: none;
+  overflow-y: auto;
+}
+
+.editor-emoji-input:disabled {
+  opacity: 0.6;
 }
 
 .view.editor [hidden] {

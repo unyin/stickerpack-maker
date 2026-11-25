@@ -179,6 +179,7 @@ import { TextEditOverlay } from "../editor/view/text-edit";
 import { FontPicker } from "../editor/view/font-picker";
 import { EffectControls } from "../editor/view/effect-controls";
 import { shortcutLabel, shortcutOf, type ShortcutAction } from "../editor/model/shortcuts";
+import { actionList, renderActionList } from "../editor/view/actions-list";
 import { eyedropperButton } from "../editor/view/eyedropper";
 import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
 import { WarpPress } from "../editor/view/warp-brush";
@@ -188,6 +189,9 @@ import { el, errorMessage, withMessage } from "../ui";
 
 /** The left tools panel's categories (SPEC §6 Layout): one visible at a time. */
 type ToolsPanelTab = "select" | "paint" | "effects" | "text";
+
+/** The right panel's tabs (SPEC §6 Layout, SPM-15 D3): Layers is the default. */
+type RightPanelTab = "layers" | "actions" | "emoji";
 
 /**
  * The category a tool surfaces when it is activated — its button, its
@@ -273,7 +277,9 @@ function buildEditor(): HTMLElement {
   const readout = el("span", { class: "editor-readout", "aria-live": "polite" });
 
   const openButton = button("Open image", () => run(openImage), "primary");
-  const addButton = button("Add image as layer", () => run(addImageAsLayer), "primary");
+  // The ellipsis marks the image picker dialog it opens (SPEC §6 Layout, D3).
+  const addButton = button("Add image as layer…", () => run(addImageAsLayer), "primary");
+  addButton.title = "Add image as layer… — pick an image and place it on top of the canvas at its native pixel size";
   const undoButton = button("Undo", () => {
     clearNote();
     session?.undoSelectionFirst();
@@ -806,10 +812,149 @@ function buildEditor(): HTMLElement {
   );
   showPanel(panelTab);
 
-  // Add image as layer stays parked, hidden, for the next slice (SPEC §6
-  // Layout; D3 moves it into the Layers panel). It keeps its wiring and
-  // state here so nothing behaviourally changes in this pass.
-  const parkedLayerTools = el("div", { class: "editor-tools-parked", hidden: true }, addButton);
+  // ---- The right tabbed panel (SPEC §6 Layout, SPM-15 D3) ----
+  //
+  // The same browser-style tab leaves stuck on the panel's top edge as the
+  // tools panel (owner decision 2026-11-25): Layers is the default, Actions
+  // is a read-only history, Emoji is the session's Emoji String box. The
+  // Emoji leaf is the ONE place the modes' geometry differs — it hides in
+  // Thumbnail mode, because that mode has no sticker to hold the string
+  // (owner decision 2026-11-25). The Editor view is built once and cached,
+  // so that visibility is recomputed from `constraints.mode` on EVERY
+  // refresh(), never set once; a Thumbnail session handing off to a Sticker
+  // session must bring the leaf back (owner's live-test note). The panel
+  // goes back to Layers whenever the visible tab set changes.
+  let rightTab: RightPanelTab = "layers";
+  // The Emoji leaf's last applied hidden state; null until the first session.
+  let emojiLeafHidden: boolean | null = null;
+
+  const rightTabButton = (name: RightPanelTab, label: string): HTMLButtonElement =>
+    el(
+      "button",
+      {
+        class: "editor-tool-tab",
+        type: "button",
+        role: "tab",
+        id: `editor-layer-tab-${name}`,
+        "aria-selected": "false",
+        "aria-controls": `editor-layer-panel-${name}`,
+        onclick: () => showRightTab(name),
+      },
+      label,
+    ) as HTMLButtonElement;
+  const layersTab = rightTabButton("layers", "Layers");
+  const actionsTab = rightTabButton("actions", "Actions");
+  const emojiTab = rightTabButton("emoji", "Emoji");
+  layersTab.title = "The layer stack, top first; click a row to select a layer (Ctrl-click toggles)";
+  actionsTab.title = "Every undoable action this session, oldest first (read-only for now)";
+  emojiTab.title = "The sticker's Emoji String — 1–20 emoji, empty allowed";
+  const rightSection = (name: RightPanelTab, ...children: HTMLElement[]): HTMLElement =>
+    el(
+      "section",
+      {
+        class: "editor-tabpanel",
+        role: "tabpanel",
+        id: `editor-layer-panel-${name}`,
+        "aria-labelledby": `editor-layer-tab-${name}`,
+        hidden: true,
+      },
+      ...children,
+    );
+
+  // Layers: the list in its bounding box, the actions BELOW the box's bottom
+  // edge and outside it (owner decision 2026-11-25), then the hint. The grid
+  // cells are the owner's r6 split: Add (a tall, picker-opening cell across
+  // rows 1–2) over Delete on the left, Move up / Move down / Merge selected
+  // in the right column (editor.css owns the placement).
+  addButton.classList.add("editor-cell-add");
+  deleteButton.classList.add("editor-cell-delete");
+  upButton.classList.add("editor-cell-up");
+  downButton.classList.add("editor-cell-down");
+  mergeButton.classList.add("editor-cell-merge");
+  const layersSection = rightSection(
+    "layers",
+    el("div", { class: "editor-listbox" }, layersList),
+    el(
+      "div",
+      { class: "editor-layer-actions", role: "group", "aria-label": "Layer actions" },
+      addButton,
+      deleteButton,
+      upButton,
+      downButton,
+      mergeButton,
+    ),
+    layerHint,
+  );
+
+  // Actions: a READ-ONLY list of the document trail with the selection's
+  // steps nested under Select (see src/editor/view/actions-list.ts).
+  const actionsList = el("ol", { class: "editor-actions-list", "aria-label": "Action history" });
+  const actionsSection = rightSection(
+    "actions",
+    el("div", { class: "editor-listbox" }, actionsList),
+    el("p", { class: "editor-note muted" }, "Read-only for now: jumping to an earlier step is planned."),
+  );
+
+  // Emoji: the session's Emoji String in a fixed five-row box (SPEC §6
+  // Layout). It never resizes; its internal scrollbar is the overflow
+  // safety valve only. Validation is warn-only and lands in the message row.
+  const emojiLabel = el("label", { class: "editor-emoji-label", for: "editor-emoji-input" }, "Emoji String");
+  const emojiInput = el("textarea", {
+    class: "editor-emoji-input",
+    id: "editor-emoji-input",
+    rows: "5",
+    spellcheck: "false",
+    "aria-label": "Emoji String",
+  }) as HTMLTextAreaElement;
+  emojiInput.addEventListener("keydown", (e) => {
+    // Enter commits and gives up focus, so the editor's shortcuts work at
+    // once (the house rule); a textarea must never take a newline here.
+    if (e.key !== "Enter" || e.shiftKey) return;
+    e.preventDefault();
+    emojiInput.blur(); // the blur handler commits
+  });
+  emojiInput.addEventListener("blur", () => void commitEmoji());
+  const emojiSection = rightSection(
+    "emoji",
+    emojiLabel,
+    emojiInput,
+    el(
+      "p",
+      { class: "editor-hint muted" },
+      "1–20 emoji — a warning shows past 20; empty is allowed. The box holds five rows and never resizes.",
+    ),
+  );
+
+  const rightTabButtons: Record<RightPanelTab, HTMLButtonElement> = {
+    layers: layersTab,
+    actions: actionsTab,
+    emoji: emojiTab,
+  };
+  const rightSections: Record<RightPanelTab, HTMLElement> = {
+    layers: layersSection,
+    actions: actionsSection,
+    emoji: emojiSection,
+  };
+  /** Show one right-panel tab; its leaf and section follow. */
+  function showRightTab(name: RightPanelTab): void {
+    rightTab = name;
+    for (const [tab, button] of Object.entries(rightTabButtons)) button.setAttribute("aria-selected", String(tab === name));
+    for (const [tab, section] of Object.entries(rightSections)) section.hidden = tab !== name;
+  }
+
+  const layersPanel = el(
+    "aside",
+    { class: "editor-layers", "aria-label": "Layers, actions and emoji" },
+    el(
+      "div",
+      { class: "editor-tabrow", role: "tablist", "aria-label": "Layers, actions and emoji" },
+      layersTab,
+      actionsTab,
+      emojiTab,
+    ),
+    el("div", { class: "editor-tools-body" }, layersSection, actionsSection, emojiSection),
+  );
+  showRightTab(rightTab);
 
   // The bottom status strip (SPEC §6 Layout, owner 2026-11-25): the live
   // readout on the left; zoom, Reset view and the unsaved-changes dot on the
@@ -823,15 +968,6 @@ function buildEditor(): HTMLElement {
   );
   const statusStrip = el("div", { class: "editor-status" }, readout, statusRight);
 
-  const layersPanel = el(
-    "aside",
-    { class: "editor-layers" },
-    el("h2", {}, "Layers"),
-    layersList,
-    el("div", { class: "editor-layer-actions" }, upButton, downButton, mergeButton, deleteButton),
-    layerHint,
-  );
-
   const workspace = el("div", { class: "editor-workspace" }, toolsPanel, canvasHost, layersPanel);
   // The wheel over the typing overlay zooms the canvas like anywhere else (owner re-test 2026-11-22).
   const textOverlay = new TextEditOverlay(canvasHost, (e) => stage?.zoomAtClient(e.clientX, e.clientY, e.deltaY));
@@ -844,7 +980,6 @@ function buildEditor(): HTMLElement {
     empty,
     workspace,
     statusStrip,
-    parkedLayerTools,
   );
 
   /**
@@ -856,6 +991,30 @@ function buildEditor(): HTMLElement {
   function say(text: string, tone: "error" | "note" = "error", ...extra: (Node | string)[]): void {
     message.replaceChildren(text, ...extra);
     message.classList.toggle("is-note", tone === "note");
+  }
+
+  /**
+   * Commit the Emoji String box (SPEC §6 Layout): Enter or blur commits —
+   * staged for a fresh image, written straight through for an origin
+   * sticker — and the warn-only count warning shows in the message row
+   * (never a block). A blur with no change is not a command and clears
+   * nothing; a blocked box never writes.
+   */
+  async function commitEmoji(): Promise<void> {
+    const current = emoji;
+    if (!current || current.blocked || busy) return;
+    const typed = emojiInput.value;
+    if (typed === current.value) return; // nothing changed
+    try {
+      const stored = await current.commit(typed);
+      if (emoji !== current) return; // the session changed under the await
+      emojiInput.value = stored;
+      const warning = current.warning;
+      if (warning) say(warning, "note");
+      else if (message.classList.contains("is-note")) say(""); // the warning (or note) it replaced
+    } catch (err) {
+      say(errorMessage(err));
+    }
   }
 
   /**
@@ -1011,6 +1170,13 @@ function buildEditor(): HTMLElement {
         : { kind: "staged" },
       emojiStore,
     );
+    const startedEmoji = emoji;
+    // An origin sticker's string is read once; the box shows it when it
+    // arrives (a gone origin disables the box with its reason). A staged
+    // session resolves at once and paints the empty box.
+    void startedEmoji.load().then(() => {
+      if (emoji === startedEmoji) refresh();
+    });
     session = new EditorSession(newDocument(picked.image, picked.name, startCanvas(set)));
     refresh(); // show the workspace so the stage measures its real size
     stage = new EditorStage(canvasHost, session);
@@ -2064,6 +2230,8 @@ function buildEditor(): HTMLElement {
     toolbar.hidden = current === null;
     // The tools panel is part of the workspace: gone with no session, like it.
     toolsPanel.hidden = current === null;
+    // The right panel too: Layers, Actions and Emoji all describe a session.
+    layersPanel.hidden = current === null;
     // The status strip describes a session's canvas and view, so it goes with them.
     statusStrip.hidden = current === null;
     openButton.disabled = busy;
@@ -2087,6 +2255,7 @@ function buildEditor(): HTMLElement {
     }
     if (!current) {
       layersList.replaceChildren();
+      actionsList.replaceChildren();
       effectControls.hide();
       return;
     }
@@ -2100,6 +2269,30 @@ function buildEditor(): HTMLElement {
       basis = next;
     }
     renderLayers(current);
+    // The right panel's tab set (SPEC §6 Layout): the Emoji leaf hides in
+    // Thumbnail mode, recomputed on EVERY refresh from the session's mode —
+    // the view is built once and cached, so a Thumbnail session handing off
+    // to a Sticker session must bring the leaf back (owner's live-test
+    // note). The panel goes back to Layers whenever the set changes.
+    const emojiHidden = constraints.mode === "thumbnail";
+    if (emojiHidden !== emojiLeafHidden) {
+      emojiLeafHidden = emojiHidden;
+      emojiTab.hidden = emojiHidden;
+      showRightTab("layers");
+    }
+    // The Actions tab: the document trail and the live selection trail,
+    // rendered read-only on every change (SPM-15 D3).
+    renderActionList(actionsList, actionList(current.actionTrail(), current.selectionTrail()));
+    // The Emoji tab: what the session's box holds now. A blocked box (a gone
+    // or other-Library origin) stays visible, disabled with its reason as
+    // the tooltip (§2). The typed text wins while the box has focus.
+    const emojiBox = emoji;
+    const emojiBlock = emojiBox?.blocked ?? null;
+    emojiInput.disabled = busy || emojiBox === null || emojiBlock !== null;
+    emojiInput.title =
+      emojiBlock?.message ??
+      "Emoji String — Enter or leaving the box commits it; 1–20 emoji (a warning shows past 20), empty allowed";
+    if (emojiBox && document.activeElement !== emojiInput) emojiInput.value = emojiBox.value;
     const doc = current.doc;
     // The toolbar's mode-dependent labels (SPEC §6): the sizing tools take
     // their side from the active constraint set, and Save's idle title says
@@ -2382,6 +2575,7 @@ function buildEditor(): HTMLElement {
     // The Emoji tab's sticker id is old too: never look it up in the new Library (SPM-15).
     emoji?.forgetOrigin();
     libraryGeneration++; // a saved note's link now points into the old Library
+    refresh(); // the Emoji box shows its disabled reason at once
   };
 
   refresh();
