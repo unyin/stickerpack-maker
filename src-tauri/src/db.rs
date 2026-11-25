@@ -2,7 +2,8 @@
 //!
 //! The runner maintains `schema_migrations` and applies the embedded SQL
 //! files from `src-tauri/migrations` in order, once each: 0001 bootstraps
-//! the meta table (SPM-1), 0002 adds the domain schema (SPM-2).
+//! the meta table (SPM-1), 0002 adds the domain schema (SPM-2), 0003 the
+//! Pack list's stored display order (SPM-25).
 
 use std::fs;
 use std::path::Path;
@@ -19,6 +20,7 @@ pub const SCHEMA_KIND: &str = "stickerpack-library";
 const MIGRATIONS: &[(&str, &str)] = &[
     ("0001_init", include_str!("../migrations/0001_init.sql")),
     ("0002_domain", include_str!("../migrations/0002_domain.sql")),
+    ("0003_pack_order", include_str!("../migrations/0003_pack_order.sql")),
 ];
 
 /// Create the database file (and parent folders) and apply pending migrations.

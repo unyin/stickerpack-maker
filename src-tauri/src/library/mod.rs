@@ -165,6 +165,60 @@ mod tests {
     }
 
     #[test]
+    fn upgrading_a_library_from_before_pack_order_backfills_it_newest_first() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path();
+        // A Library as the build before SPM-25 left it: migrations 1 and 2 only.
+        fs::create_dir_all(dir).unwrap();
+        let mut conn = rusqlite::Connection::open(db_path(dir)).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE schema_migrations (
+                 version INTEGER PRIMARY KEY, name TEXT NOT NULL,
+                 applied_at TEXT NOT NULL DEFAULT (datetime('now')));",
+        )
+        .unwrap();
+        let tx = conn.transaction().unwrap();
+        for (version, name, sql) in [
+            (1, "0001_init", include_str!("../../migrations/0001_init.sql")),
+            (2, "0002_domain", include_str!("../../migrations/0002_domain.sql")),
+        ] {
+            tx.execute_batch(sql).unwrap();
+            tx.execute("INSERT INTO schema_migrations (version, name) VALUES (?1, ?2)", [&version.to_string(), name]).unwrap();
+        }
+        tx.execute_batch(
+            "INSERT INTO packs (id, title, short_name) VALUES (1, 'One', 'one'), (2, 'Two', 'two'), (5, 'Five', 'five');
+             INSERT INTO stickers (pack_id, position, file_name, format, emoji_string)
+                 VALUES (2, 1, '001.png', 'png', 'x');",
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        drop(conn);
+        for name in ["one", "two", "five"] {
+            fs::create_dir(dir.join(name)).unwrap();
+        }
+
+        let mut conn = open(dir).unwrap();
+        assert!(db::is_current(&conn).unwrap());
+        // Existing packs keep their rows and stickers; the list reads newest first.
+        let list = packs::pack_summaries(&conn).unwrap();
+        assert_eq!(
+            list.iter().map(|p| (p.pack.short_name.as_str(), p.sticker_count)).collect::<Vec<_>>(),
+            [("five", 0), ("two", 1), ("one", 0)]
+        );
+        // A new pack still goes on top of the backfilled order.
+        packs::create_pack(&mut conn, dir, "Six", None).unwrap();
+        assert_eq!(packs::pack_summaries(&conn).unwrap()[0].pack.title, "Six");
+    }
+
+    #[test]
+    fn a_fresh_library_has_the_pack_order_column() {
+        let root = tempfile::tempdir().unwrap();
+        create_fresh(root.path()).unwrap();
+        let conn = open(root.path()).unwrap();
+        assert!(conn.prepare("SELECT sort_order FROM packs").is_ok());
+    }
+
+    #[test]
     fn open_rejects_folder_without_library() {
         let root = tempfile::tempdir().unwrap();
         assert!(open(root.path()).is_err());

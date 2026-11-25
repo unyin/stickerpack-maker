@@ -14,7 +14,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 use tauri::State;
 
-use crate::library::desync::{self, PackView, PresenceMemo};
+use crate::library::desync::{self, PackListEntry, PackView, PresenceMemo};
 use crate::library::packs::{self, LeftoverFolder, PackSummary};
 use crate::library::schema::{Pack, PackStatus, Sticker};
 use crate::library::stickers::{self, FileError, NewSticker, SendFailure, SendReport};
@@ -127,6 +127,28 @@ fn pack_of(conn: &Connection, sticker_id: i64) -> Result<i64, String> {
 
 // ---- Pack list ----
 
+/// The Pack list's rows: every pack gets the full open check (recovery, then
+/// desync detection; SPEC §4) and comes back as plain facts in the stored
+/// display order (SPM-25).
+#[tauri::command(async)]
+pub fn list_pack_facts(config: State<'_, SharedConfig>, lock: State<'_, LibraryLock>) -> Result<Vec<PackListEntry>, String> {
+    with_library(&config, &lock, |conn, dir| desync::list_pack_facts(conn, dir, lock.memo()))
+}
+
+/// Move a pack to 1-based `new_position` in the Pack list (1 = top). Display
+/// order only: no folder or file changes.
+#[tauri::command(async)]
+pub fn move_pack(
+    pack_id: i64,
+    new_position: i64,
+    config: State<'_, SharedConfig>,
+    lock: State<'_, LibraryLock>,
+) -> Result<(), String> {
+    with_library(&config, &lock, |conn, _| packs::move_pack(conn, pack_id, new_position).map(|_| ()))
+}
+
+/// The pack summaries (database only, no checks) in the stored order: for the
+/// pack pickers, which only need titles and counts.
 #[tauri::command(async)]
 pub fn list_packs(config: State<'_, SharedConfig>, lock: State<'_, LibraryLock>) -> Result<Vec<PackSummary>, String> {
     with_library(&config, &lock, |conn, _| packs::pack_summaries(conn))
