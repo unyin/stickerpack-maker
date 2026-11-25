@@ -221,11 +221,7 @@
 .pm-title-input {
   font-size: 18px;
   font-weight: 600;
-  /* Narrowed from its natural ~273px (260px minimum) so the header, now with
-     Upload list… and the reserved status widths, still fits one line at the
-     1100px window floor (SPM-21, owner decision 2026-11-25: one line there). */
-  width: 230px;
-  min-width: 220px;
+  min-width: 260px;
 }
 
 /* Right after the Short Name it belongs with (owner, 2026-11-21). */
