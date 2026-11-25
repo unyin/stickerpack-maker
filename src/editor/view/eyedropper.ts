@@ -11,6 +11,8 @@ import { icon } from "../../icons";
 
 /** The button's meaning, as its tooltip and aria-label (owner-vetoable copy, one place). */
 const PICK_FROM_CANVAS = "Pick a colour from the canvas";
+/** The §2 tooltip: Name — description (SPEC §6 Layout). */
+const PICK_TITLE = `Eyedropper — ${PICK_FROM_CANVAS}`;
 
 /**
  * An icon-only button that starts a canvas colour pick: the view wires
@@ -23,7 +25,7 @@ const PICK_FROM_CANVAS = "Pick a colour from the canvas";
 export function eyedropperButton(pick: () => void, enroll: { disabled: boolean }[]): HTMLButtonElement {
   const button = el(
     "button",
-    { class: "editor-eyedropper", type: "button", title: PICK_FROM_CANVAS, "aria-label": PICK_FROM_CANVAS },
+    { class: "editor-eyedropper", type: "button", title: PICK_TITLE, "aria-label": PICK_FROM_CANVAS },
     icon("eyedropper"),
   ) as HTMLButtonElement;
   enroll.push(button);

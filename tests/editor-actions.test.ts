@@ -6,9 +6,9 @@ import { expect, test } from "bun:test";
 import type { RgbaImage } from "../src/editor/model/image";
 import { startCanvas, STICKER } from "../src/editor/model/constraints";
 import { addRasterLayer, newDocument } from "../src/editor/model/document";
-import { EditorSession } from "../src/editor/model/session";
+import { EditorSession, type SelectionTrail } from "../src/editor/model/session";
 import { rectRegion, type ComposedRegion, type Region } from "../src/editor/model/region";
-import { actionList, SESSION_START, type SelectionTrail } from "../src/editor/view/actions-list";
+import { actionList, SESSION_START } from "../src/editor/view/actions-list";
 
 function image(width: number, height: number): RgbaImage {
   return { width, height, pixels: new Uint8ClampedArray(width * height * 4) };
@@ -74,6 +74,25 @@ test("a composed step is named by its own contribution; a lasso is not a rectang
   };
   const model = actionList({ labels: [null], currentIndex: 0 }, { states: [null, lasso, wand], currentIndex: 2 });
   expect(model.rows.slice(1).map((r) => r.text)).toEqual(["Select", "+ lasso region", "+ wand region"]);
+});
+
+test("a polygon's drawing tool names it; the axis-aligned geometry is only the fallback", () => {
+  // A lasso that happens to be a box is still a lasso, and a rectangle with
+  // an irregular outline is still a rectangle: the tool that drew it wins.
+  const lasso: Region = {
+    kind: "compose",
+    contributions: [{ kind: "poly", op: "add", feather: false, shape: "lasso", points: box(0, 0, 2, 2).points }],
+    outlines: [],
+  };
+  const rect: Region = {
+    kind: "compose",
+    contributions: [
+      { kind: "poly", op: "add", feather: false, shape: "rectangle", points: [{ x: 0, y: 0 }, { x: 3, y: 1 }, { x: 1, y: 4 }] },
+    ],
+    outlines: [],
+  };
+  const model = actionList({ labels: [null], currentIndex: 0 }, { states: [null, lasso, rect], currentIndex: 2 });
+  expect(model.rows.slice(1).map((r) => r.text)).toEqual(["Select", "+ lasso region", "+ rectangle region"]);
 });
 
 test("no selection, or a trail cleared by a document edit, means no Select row", () => {

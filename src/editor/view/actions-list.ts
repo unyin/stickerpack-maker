@@ -15,14 +15,8 @@
 // refresh; this module only renders what the session holds.
 import { el } from "../../ui";
 import type { ActionTrail } from "../model/history";
-import type { Contribution, Region } from "../model/region";
-import type { Point } from "../model/document";
-
-/** The selection's step states, oldest first, with the current state's position (EditorSession.selectionTrail). */
-export interface SelectionTrail {
-  readonly states: readonly (Region | null)[];
-  readonly currentIndex: number;
-}
+import type { Contribution, PolyContribution, Region } from "../model/region";
+import type { SelectionTrail } from "../model/session";
 
 /** One row of the list. */
 export interface ActionRow {
@@ -79,15 +73,17 @@ function stepText(state: Region | null): string | null {
 /** One contribution's row: its sign and the tool's region name. */
 function contributionText(contribution: Contribution): string {
   const sign = contribution.op === "subtract" ? "−" : "+";
-  return `${sign} ${contribution.kind === "wand" ? "wand region" : polygonName(contribution.points)}`;
+  return `${sign} ${contribution.kind === "wand" ? "wand region" : polygonName(contribution)}`;
 }
 
 /**
- * A polygon step's name: Rectangle draws an axis-aligned four-corner box
- * (PolyContribution keeps only the points, not the tool), anything else is
- * a Lasso.
+ * A polygon step's name, from the tool that drew it; a contribution without
+ * one (a plain region carried into a compose) falls back to the geometry:
+ * Rectangle draws an axis-aligned four-corner box, anything else is a Lasso.
  */
-function polygonName(points: readonly Point[]): string {
+function polygonName(contribution: PolyContribution): string {
+  if (contribution.shape) return `${contribution.shape} region`;
+  const points = contribution.points;
   const box =
     points.length === 4 &&
     points.every((p, i) => {

@@ -79,23 +79,23 @@ export class EffectControls {
   constructor(private readonly handlers: EffectControlHandlers) {
     this.applyButton = el("button", { class: "primary", onclick: () => handlers.apply() }, "Apply") as HTMLButtonElement;
     this.cancelButton = el("button", { class: "secondary", onclick: () => handlers.cancel() }, "Cancel") as HTMLButtonElement;
-    this.cancelButton.title = "Discard the preview and go back to the Move tool";
+    this.cancelButton.title = "Cancel — Discard the preview and go back to the Move tool";
     this.outlineBlock = this.block(
       "Outline settings",
-      this.color("Outline colour", () => this.outline.color, (c) => (this.outline.color = c)),
-      this.slider("Width", OUTLINE_WIDTH, "px", () => this.outline.width, (v) => (this.outline.width = v)),
+      this.color("Outline colour", "The outline's colour", () => this.outline.color, (c) => (this.outline.color = c)),
+      this.slider("Width", "The outline's width in px", OUTLINE_WIDTH, "px", () => this.outline.width, (v) => (this.outline.width = v)),
     );
     this.glowBlock = this.block(
       "Glow settings",
-      this.color("Glow colour", () => this.glow.color, (c) => (this.glow.color = c)),
-      this.slider("Radius", GLOW_RADIUS, "px", () => this.glow.radius, (v) => (this.glow.radius = v)),
-      this.slider("Softness", GLOW_SOFTNESS, "%", () => this.glow.softness, (v) => (this.glow.softness = v)),
-      this.slider("Opacity", GLOW_OPACITY, "%", () => this.glow.opacity, (v) => (this.glow.opacity = v)),
+      this.color("Glow colour", "The glow's colour", () => this.glow.color, (c) => (this.glow.color = c)),
+      this.slider("Radius", "The glow's radius in px", GLOW_RADIUS, "px", () => this.glow.radius, (v) => (this.glow.radius = v)),
+      this.slider("Softness", "How soft the glow's edge is, in percent", GLOW_SOFTNESS, "%", () => this.glow.softness, (v) => (this.glow.softness = v)),
+      this.slider("Opacity", "The glow's opacity, in percent", GLOW_OPACITY, "%", () => this.glow.opacity, (v) => (this.glow.opacity = v)),
     );
     this.warpBlock = this.block(
       "Warp settings",
-      this.slider("Strength", WARP_STRENGTH, "%", () => this.brush.strength, (v) => (this.brush.strength = v)),
-      this.slider("Radius", WARP_RADIUS, "px", () => this.brush.radius, (v) => (this.brush.radius = v)),
+      this.slider("Strength", "How much the bulge magnifies, in percent", WARP_STRENGTH, "%", () => this.brush.strength, (v) => (this.brush.strength = v)),
+      this.slider("Radius", "The bulge's radius in px", WARP_RADIUS, "px", () => this.brush.radius, (v) => (this.brush.radius = v)),
       el("span", { class: "muted" }, "Click to bulge; drag to size it (Shift: strength, up = more). Choose the layer in Layers."),
     );
     this.blocks = { outline: this.outlineBlock, glow: this.glowBlock, warp: this.warpBlock };
@@ -141,11 +141,11 @@ export class EffectControls {
     // Outline and Glow directly above the Apply/Cancel pair.
     this.blocks[kind].append(this.target);
     this.applyButton.disabled = busy || blocker !== null;
-    this.applyButton.title =
-      blocker ??
-      (state.textTarget && kind === "outline"
+    const applyAction =
+      state.textTarget && kind === "outline"
         ? "Set the outline style on the text layer (one undo step); it stays editable text"
-        : `Bake the ${kind} into the layer's pixels (one undo step)`);
+        : `Bake the ${kind} into the layer's pixels (one undo step)`;
+    this.applyButton.title = blocker !== null ? `Apply — ${blocker}` : `Apply — ${applyAction}`;
     this.cancelButton.disabled = busy;
     for (const input of this.inputs) input.disabled = busy;
     this.target.textContent = blocker ?? (state.targetName ? `On: ${state.targetName}` : "");
@@ -176,8 +176,13 @@ export class EffectControls {
    * A colour picker with its eyedropper beside it (owner decision
    * 2026-11-23); the preview follows while the picker is open.
    */
-  private color(label: string, get: () => string, set: (c: string) => void): HTMLElement {
-    const input = el("input", { class: "editor-color-input", type: "color", "aria-label": label, title: label }) as HTMLInputElement;
+  private color(label: string, description: string, get: () => string, set: (c: string) => void): HTMLElement {
+    const input = el("input", {
+      class: "editor-color-input",
+      type: "color",
+      "aria-label": label,
+      title: `${label} — ${description}`,
+    }) as HTMLInputElement;
     input.value = get();
     input.addEventListener("input", () => {
       if (!isHexColor(input.value)) return;
@@ -212,19 +217,28 @@ export class EffectControls {
    * once (as the text controls do). The panel's width puts the name above
    * the slider row; the controls and their behaviour are the bar's own.
    */
-  private slider(label: string, range: Range, unit: string, get: () => number, set: (v: number) => void): HTMLElement {
+  private slider(
+    label: string,
+    description: string,
+    range: Range,
+    unit: string,
+    get: () => number,
+    set: (v: number) => void,
+  ): HTMLElement {
     const input = el("input", {
       type: "range",
       min: String(range.min),
       max: String(range.max),
       step: "1",
       "aria-label": label,
+      title: `${label} — ${description}`,
     }) as HTMLInputElement;
     const field = el("input", {
       class: "editor-effect-value editor-effect-entry",
       type: "text",
       inputmode: "numeric",
       "aria-label": `${label} value`,
+      title: `${label} value — Type a whole number, or drag the slider`,
     }) as HTMLInputElement;
     const sync = (): void => {
       const value = get();

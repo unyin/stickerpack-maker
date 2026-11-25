@@ -241,9 +241,11 @@ pass.
 - **One top row** (the Editor toolbar), left to right: **Undo**, **Redo** | **Fit in 512**,
   **Cover 512**, **Long side 512** | the free-resize cluster, reading as one sentence —
   **[Long/Short] side [N] px Resize** | **Guide**, **Crop to {size}** | a flexible spacer |
-  **Save…**, **Close**. Thin vertical rules divide neighbouring groups, exactly 8px from the
-  controls on both sides (owner decision 2026-11-25). Undo, Redo, Save… and Close become icons
-  in a later pass; the seven renamed sizing and crop controls stay text (owner decision
+  **Save…**, **Close**. Thin vertical rules divide neighbouring groups: rules 1–3 sit
+  exactly 8px from the controls on both sides; the fourth sits after the flexible spacer,
+  8px from **Save…** on its right and 8px from the spacer on its left (owner decision
+  2026-11-25). Undo, Redo, Save… and Close become icons in a later pass; the seven renamed
+  sizing and crop controls stay text (owner decision
   2026-11-25). The row holds its one line from the window's 1100px minimum up (Window, below).
 - **The reserved message row** sits under the top row: fixed minimum height, never collapsed
   (§2; the CMT-290 canvas jump).

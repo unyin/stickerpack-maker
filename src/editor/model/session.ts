@@ -6,6 +6,12 @@ import { layerImage, layerIndex, textLayersOf, type Doc, type TextLayer } from "
 import { DEFAULT_HISTORY_BUDGET, History, type ActionTrail } from "./history";
 import type { Region } from "./region";
 
+/** The selection's step states, oldest first, with the current state's position (EditorSession.selectionTrail). */
+export interface SelectionTrail {
+  readonly states: readonly (Region | null)[];
+  readonly currentIndex: number;
+}
+
 /** Pixel buffers of a document (text renderings and restore sources too), for the history's memory budget. */
 function buffersOf(doc: Doc): ArrayBufferLike[] {
   return doc.layers.flatMap((l) => {
@@ -137,7 +143,7 @@ export class EditorSession {
    * each Region state carries its own contributions, so the panel derives
    * every step's label from the states themselves.
    */
-  selectionTrail(): { readonly states: readonly (Region | null)[]; readonly currentIndex: number } {
+  selectionTrail(): SelectionTrail {
     return { states: [...this.regionPast, this.selectedRegion], currentIndex: this.regionPast.length };
   }
 
