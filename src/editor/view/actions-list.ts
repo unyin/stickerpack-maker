@@ -22,6 +22,7 @@ import { el } from "../../ui";
 import type { ActionTrail } from "../model/history";
 import type { Contribution, PolyContribution, Region } from "../model/region";
 import type { SelectionTrail } from "../model/session";
+import { revealRow } from "./reveal";
 
 /** One row of the list. */
 export interface ActionRow {
@@ -154,12 +155,5 @@ export function revealCurrentAction(list: HTMLElement): void {
   // it: find it by class, never by the DOM shape around the list.
   const box = list.closest<HTMLElement>(".editor-listbox");
   if (!current || !box) return;
-  const row = current.getBoundingClientRect();
-  const view = box.getBoundingClientRect();
-  // A sub-pixel overhang is a rounding artefact, not a hidden row: keep it
-  // in view without a scroll, so a no-op render never nudges the list.
-  const above = view.top - row.top;
-  const below = row.bottom - view.bottom;
-  if (above > 0.5) box.scrollTop = Math.floor(box.scrollTop - above);
-  else if (below > 0.5) box.scrollTop = Math.ceil(box.scrollTop + below);
+  revealRow(box, current);
 }

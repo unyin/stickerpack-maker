@@ -377,10 +377,11 @@
   padding: 0;
   /* The stack bottom-first (owner, from the test, 2026-11-25): the DOM runs
      base -> newest (the model's own order) and column-reverse draws the
-     first row at the box's bottom, so rows rise as layers are added — the
-     base never moves. The list is its own scroller so a full stack keeps
-     the SAME bottom edge: the reversed flow starts at its bottom, showing
-     the base, with the newest rows above the fold. The DOM order still
+     first row at the box's bottom, so rows rise as layers are added — a
+     row's place in the flow never changes. The list is its own scroller so a
+     full stack keeps the SAME box bottom edge; the reversed flow starts at
+     its bottom, and the render then reveals the selected row (see
+     revealSelectedLayer), which may be above the fold. The DOM order still
      reads base -> newest for assistive tech; only the visual order is
      reversed, and with no focusable rows focus order is unaffected. */
   display: flex;
@@ -410,10 +411,33 @@
   overflow: hidden;
 }
 
-/* Only the box above gives way at the minimum height: the grid's cells keep
-   their measured height and the hint keeps its lines. */
+/* The Actions box: exactly the list's prefill, TWENTY rows tall, so the box
+   ends with its content instead of stretching to the panel's bottom (owner,
+   from the second test, 2026-11-25); the plain panel background shows below
+   it. --editor-action-rows must equal ACTION_LIST_ROWS in
+   src/editor/view/actions-list.ts — the two move together. Twenty 26px rows
+   (an 18px line box plus the 8px row padding) and the 19 1px gaps between
+   them, plus the 6px .editor-listbox adds (2px padding and a 1px border per
+   side). More real rows than the prefill scroll inside, as before; at the
+   window's 600px minimum the flex cap gives way like the Layers box. */
+.editor-actions-box {
+  --editor-action-rows: 20;
+  --editor-action-row-h: 26px;
+  --editor-action-gap-h: 1px;
+  --editor-action-box-h: calc(
+    var(--editor-action-rows) * var(--editor-action-row-h) + (var(--editor-action-rows) - 1) *
+      var(--editor-action-gap-h) + 6px
+  );
+  flex: 0 1 auto;
+  height: var(--editor-action-box-h);
+  max-height: var(--editor-action-box-h);
+}
+
+/* Only the boxes above give way at the minimum height: the tips below them
+   and the Layers grid's cells keep their measured height and lines. */
 .editor-layers .editor-layer-actions,
-.editor-layers .editor-hint {
+.editor-layers .editor-hint,
+.editor-layers .editor-note {
   flex: none;
 }
 
@@ -543,8 +567,11 @@
   font-size: 13px;
 }
 
+/* The row's line box is fixed, like the layers rows', so the twenty-row cap
+   is exact in any UI font: 18px + 8px padding = the box's 26px row height. */
 .editor-actions-list > li {
   padding: 4px 8px;
+  line-height: 18px;
   border-radius: 4px;
 }
 

@@ -180,6 +180,7 @@ import { FontPicker } from "../editor/view/font-picker";
 import { EffectControls } from "../editor/view/effect-controls";
 import { shortcutLabel, shortcutOf, type ShortcutAction } from "../editor/model/shortcuts";
 import { actionList, renderActionList, revealCurrentAction } from "../editor/view/actions-list";
+import { revealRow } from "../editor/view/reveal";
 import { EYEDROPPER_STEM, EYEDROPPER_TITLE, eyedropperButton } from "../editor/view/eyedropper";
 import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
 import { WarpPress } from "../editor/view/warp-brush";
@@ -932,13 +933,18 @@ function buildEditor(): HTMLElement {
     ),
     layerHint,
   );
+  // The list reveals the focused layer on every render (see renderLayers);
+  // while the tab is hidden there is no layout to scroll, so the SHOW path
+  // does it too — the same pattern as the Actions tab below (owner, second
+  // test, 2026-11-25).
+  rightTabs.afterShow.layers = () => revealSelectedLayer(layersList, session?.selection.at(-1) ?? null);
 
   // Actions: a READ-ONLY list of the document trail with the selection's
   // steps nested under Select (see src/editor/view/actions-list.ts).
   const actionsList = el("ol", { class: "editor-actions-list", "aria-label": "Action history" });
   const actionsSection = rightSection(
     "actions",
-    el("div", { class: "editor-listbox" }, actionsList),
+    el("div", { class: "editor-listbox editor-actions-box" }, actionsList),
     el("p", { class: "editor-note muted" }, "Read-only for now: jumping to an earlier step is planned."),
   );
   // The list is re-rendered on every session change even while its tab is
@@ -2238,6 +2244,25 @@ function buildEditor(): HTMLElement {
     });
   }
 
+  /**
+   * Scroll the layers list so the selected row is in view (owner, second
+   * test, 2026-11-25): the stack jumps to whichever layer is focused, so a
+   * layer added past seven rows scrolls into view, and selecting an
+   * out-of-view row scrolls to it. The LAST selection is the focused one
+   * (Ctrl-click appends); no selection is a no-op, and a hidden tab's
+   * zero-size rects make it one too — the panel's afterShow hook runs it when
+   * Layers comes back.
+   */
+  function revealSelectedLayer(list: HTMLElement, id: string | null): void {
+    if (id === null) return;
+    for (const row of list.children) {
+      if (row instanceof HTMLElement && row.dataset.layerId === id) {
+        revealRow(list, row);
+        return;
+      }
+    }
+  }
+
   function renderLayers(current: EditorSession): void {
     const doc = current.doc;
     // The single selected layer's current size, live (CMT-152); null with
@@ -2248,12 +2273,15 @@ function buildEditor(): HTMLElement {
       // is the BOTTOM row of the box (nearest the action grid), each newer
       // layer stacks above it, the newest at the content's top edge. The
       // list's CSS packs the rows to the box's bottom, so a new layer fills
-      // fresh space ABOVE and the existing rows never move (owner, from the
-      // test, 2026-11-25).
+      // fresh space ABOVE (owner, from the test, 2026-11-25); the reveal
+      // below then scrolls that focused row into view.
       ...doc.layers.map((layer) => {
         const item = el(
           "li",
-          { class: current.selection.includes(layer.id) ? "selected" : "" },
+          {
+            class: current.selection.includes(layer.id) ? "selected" : "",
+            "data-layer-id": layer.id,
+          },
           el("span", { class: "editor-layer-kind" }, layer.kind === "raster" ? "Image" : "Text"),
           el("span", { class: "editor-layer-name" }, layer.name),
         );
@@ -2268,6 +2296,7 @@ function buildEditor(): HTMLElement {
         return item;
       }),
     );
+    revealSelectedLayer(layersList, current.selection.at(-1) ?? null);
   }
 
   function refresh(): void {
