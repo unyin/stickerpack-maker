@@ -210,10 +210,10 @@ stickers, Missing stickers, and the thumbnail.
 Upload list is a dialog over the pack view, titled "Upload list", not a third pack view mode
 (the modes above stay Normal and Reorder). It lists the pack to upload it through @Stickers:
 every sticker in order with its emoji, to copy from. All of it is owner decisions 2026-11-25.
-- **Opening it.** The header button **Upload list…** (§5 Pack-level). It works in Draft and
+- **Opening it.** The header button **Upload…** (§5 Pack-level). It works in Draft and
   Live. It is disabled when the pack has no stickers, a thumbnail alone not counting, with the
-  reason "The pack has no stickers yet" as its tooltip; enabled, its tooltip reads "Upload
-  list… — Every sticker in order with its emoji, for uploading through @Stickers" (§2). It
+  reason "The pack has no stickers yet" as its tooltip; enabled, its tooltip reads "Upload…
+  — Every sticker in order with its emoji, for uploading through @Stickers" (§2). It
   is disabled while the view is busy, like its header siblings. Opening it while Reorder is on
   ends Reorder first. It is a modal built on the app's shared dialog (§2), so the pack view's
   file-drop import ignores a file dropped on the window while it is open. It always opens
@@ -266,13 +266,14 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   open (owner decision 2026-11-21). Draft/Live manual toggle both ways, each direction
   confirmed (owner decision 2026-11-21); Draft→Live offers
   Go Live / Keep Draft, Keep Draft by default; Live→Draft offers Make Draft / Keep Live, Keep Live
-  by default (owner decision 2026-11-21). **Upload list…** sits immediately right of that
+  by default (owner decision 2026-11-21). **Upload…** sits immediately right of that
   status button (Upload list, above). The Draft/Live badge and the status button each keep
   a fixed width that fits the longer of their two labels ("Draft"/"Live", "Go Live"/"Revert
-  to Draft"), so toggling the status never moves Upload list…; the width is reserved by
+  to Draft"), so toggling the status never moves Upload…; the width is reserved by
   laying the other label invisibly over the shown one, not by a pixel value, so it holds in
   whatever font Windows draws. The header stays on one line at the 1100px window minimum
-  (owner decisions 2026-11-25).
+  (owner decisions 2026-11-25). Those two buttons, and no other, take 12px of side padding
+  instead of the app-wide 18px, to make that fit.
 - **Bulk import**: drag-drop multiple images onto a pack, or pick them with Add images. Same
   validity rule as drop-in — valid files added as-is in natural filename order ("sticker2"
   before "sticker10"), because Windows hands dropped files over in its own drag order, not

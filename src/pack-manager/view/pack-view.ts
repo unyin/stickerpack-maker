@@ -121,9 +121,9 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   // Beside the "Short Name" label, so showing it never changes the header's height (owner, 2026-11-22).
   const shortNote = el("span", { class: "muted pm-lock-note" });
   const badgeHost = el("span", {});
-  const statusButton = el("button", { class: "secondary", type: "button" }) as HTMLButtonElement;
+  const statusButton = el("button", { class: "secondary pm-header-btn", type: "button" }) as HTMLButtonElement;
   // Right of the status button (owner, 2026-11-25); works in Draft and Live.
-  const uploadButton = el("button", { class: "secondary", type: "button" }, "Upload list…") as HTMLButtonElement;
+  const uploadButton = el("button", { class: "secondary pm-header-btn", type: "button" }, "Upload…") as HTMLButtonElement;
   const backButton = el("button", { class: "secondary", type: "button", title: "Back to the list of packs" }, "← Pack list") as HTMLButtonElement;
   const reorderButton = el("button", { class: "secondary pm-toggle", type: "button", "aria-pressed": "false" }, "Reorder") as HTMLButtonElement;
   const refreshButton = el("button", { class: "secondary", type: "button", title: "Check the pack folder for files changed outside the app" }, icon("refresh"), "Refresh") as HTMLButtonElement;

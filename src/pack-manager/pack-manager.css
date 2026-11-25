@@ -235,9 +235,18 @@
 /* A label that keeps the width of the longer of two (dialogs.ts reservedLabel):
    the other label sits in the same grid cell, invisible, so the Draft/Live badge
    ("Draft"/"Live") and the status button ("Go Live"/"Revert to Draft") keep one
-   width and Upload list… beside them never moves when the status toggles (owner,
+   width and Upload… beside them never moves when the status toggles (owner,
    2026-11-25). Measured by the browser in the font actually drawn, so no pixel
    width to get wrong with Windows fonts. */
+/* Tighter side padding (12px, not the app-wide 18px) on exactly the two header
+   buttons after the Short Name: the status button and Upload…, so the header
+   fits one line at the 1100px window floor (owner decision 2026-11-25). The
+   app-wide button padding is untouched. */
+.pm-header-btn {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
 .pm-reserve {
   display: inline-grid;
   justify-items: center;

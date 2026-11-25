@@ -10,7 +10,7 @@ export function uploadListBlocker(stickerCount: number): string | null {
 }
 
 /** The enabled tooltip, per the §2 contract "Name (Shortcut) — one-line description". */
-export const UPLOAD_LIST_TITLE = "Upload list… — Every sticker in order with its emoji, for uploading through @Stickers";
+export const UPLOAD_LIST_TITLE = "Upload… — Every sticker in order with its emoji, for uploading through @Stickers";
 
 /** A Draft pack's reminder (owner-approved wording, 2026-11-25); null for a Live pack. */
 export function draftNote(status: PackStatus): string | null {
