@@ -35,7 +35,7 @@ import {
 import {
   fileNameOf,
   importSummary,
-  missingSummary,
+  countWarningText,
   REVEAL_BUSY,
   REVEAL_GONE,
   SHORT_NAME_LOCKED,
@@ -54,9 +54,10 @@ import {
   type SelectionState,
 } from "../model/selection";
 import { emojiCountWarning, emojiWarning } from "../model/emoji";
+import { readyToGoLive, UPLOAD_LIST_TITLE, UPLOAD_READY_TITLE, uploadListBlocker } from "../model/upload-list";
 import { importOrder } from "../model/import-order";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
-import { dialogOpen } from "../../dialog";
+import { dialogOpen, openDialog } from "../../dialog";
 import {
   confirmGoLive,
   confirmRevertToDraft,
@@ -65,10 +66,12 @@ import {
   editChoiceDialog,
   invalidFileDialog,
   sendDialog,
+  reservedLabel,
   statusBadge,
   stickerChoiceDialog,
   thumbnailSourceDialog,
 } from "./dialogs";
+import { openUploadList } from "./upload-list";
 import { aggregatePanel, detailPanel, emptyPanel, thumbnailPanel, type PanelActions } from "./panels";
 import { previewImage, Previews } from "./previews";
 import { cancelReorderDrag, startReorderDrag, type ReorderDragHost } from "./reorder-drag";
@@ -103,8 +106,13 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   let mode: Mode = "normal";
   let selection: SelectionState = NO_SELECTION;
   let busy = false;
-  let rejected: FileError[] = [];
+  // The info notice and the rejected files its Show… link opens: ONE state, so the list can never outlive its notice.
   let notice = "";
+  let rejected: FileError[] = [];
+  const setNotice = (text: string, rejectedFiles: FileError[] = []): void => {
+    notice = text;
+    rejected = text ? rejectedFiles : [];
+  };
   const previews = new Previews();
 
   const message = el("p", { class: "message", role: "alert" });
@@ -118,15 +126,24 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   // Beside the "Short Name" label, so showing it never changes the header's height (owner, 2026-11-22).
   const shortNote = el("span", { class: "muted pm-lock-note" });
   const badgeHost = el("span", {});
-  const statusButton = el("button", { class: "secondary", type: "button" }) as HTMLButtonElement;
+  const statusButton = el("button", { class: "secondary pm-header-btn", type: "button" }) as HTMLButtonElement;
+  // Right of the status button (owner, 2026-11-25); works in Draft and Live.
+  const uploadButton = el("button", { class: "secondary pm-header-btn", type: "button" }, "Upload…") as HTMLButtonElement;
   const backButton = el("button", { class: "secondary", type: "button", title: "Back to the list of packs" }, "← Pack list") as HTMLButtonElement;
   const reorderButton = el("button", { class: "secondary pm-toggle", type: "button", "aria-pressed": "false" }, "Reorder") as HTMLButtonElement;
   const refreshButton = el("button", { class: "secondary", type: "button", title: "Check the pack folder for files changed outside the app" }, icon("refresh"), "Refresh") as HTMLButtonElement;
   const addButton = el("button", { class: "secondary", type: "button", title: "Add sticker files at the end of the pack (or drop them onto the pack)" }, "Add images…") as HTMLButtonElement;
   // Fixed width so nothing after it moves (why that width: .pm-sticker-count in pack-manager.css).
-  const stickerCount = el("span", { class: "muted pm-sticker-count" });
+  // The warn state (tone + glyph + reasons) lives inside that width (owner decisions 2026-11-25).
+  const countText = el("span", { class: "pm-count-text" });
+  const countReasons = el("span", { class: "sr-only" });
+  const stickerCount = el("span", { class: "muted pm-sticker-count" }, countText, icon("warning"), countReasons);
   const revealButton = el("button", { class: "secondary", type: "button", title: "Open this pack's folder in Explorer" }, ...explorerLabel()) as HTMLButtonElement;
   const banners = el("div", { class: "pm-banners" });
+  // The reserved notification area (pack-manager.css .pm-notices): the message line and ONE info notice, above the grid.
+  const notices = el("div", { class: "pm-notices" }, message, banners);
+  // Single-line with an ellipsis, so the full text is the tooltip (the text itself stays complete for screen readers).
+  new MutationObserver(() => (message.title = message.textContent ?? "")).observe(message, { childList: true, characterData: true, subtree: true });
   const grid = el("ol", { class: "pm-grid", "aria-label": "Stickers in pack order" });
   const panel = el("aside", { class: "pm-panel", "aria-label": "Selection" });
   const dropZone = el("div", { class: "pm-body" }, grid, panel);
@@ -137,11 +154,11 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     backButton,
     el("label", { class: "pm-header-field" }, el("span", { class: "field-label" }, "Title"), titleInput),
     el("label", { class: "pm-header-field pm-short-field" }, el("span", { class: "pm-field-head" }, el("span", { class: "field-label" }, "Short Name"), shortNote), shortInput),
-    el("div", { class: "pm-header-status" }, badgeHost, statusButton),
+    el("div", { class: "pm-header-status" }, badgeHost, statusButton, uploadButton),
   );
   // Reorder last: its label changes ("Done reordering"), so nothing may come after it (owner, 2026-11-22).
   const toolbar = el("div", { class: "pm-toolbar", role: "toolbar" }, refreshButton, addButton, stickerCount, revealButton, reorderButton);
-  const root = el("section", { class: "view pm-pack" }, header, toolbar, message, banners, dropZone);
+  const root = el("section", { class: "view pm-pack" }, header, toolbar, notices, dropZone);
 
   /** Run one Library action at a time, routing errors into the message line. */
   async function run(action: () => Promise<void>): Promise<void> {
@@ -203,7 +220,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
         view = { ...view, pack: await setPackShortName(packId, rustTrim(shortInput.value)) };
         previews.clear(); // the folder moved
         if (view.pack.folderRenameFrom) {
-          notice = "The Short Name changed, but the folder could not be renamed yet (it may be open in Explorer). Close it and press Refresh.";
+          setNotice("The Short Name changed, but the folder could not be renamed yet (it may be open in Explorer). Close it and press Refresh.");
         }
       } finally {
         shortInput.value = view.pack.shortName;
@@ -226,6 +243,11 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       view = { ...view, pack: await setPackStatus(packId, toLive ? "live" : "draft") };
     }),
   );
+  uploadButton.addEventListener("click", () => {
+    // Someone done reordering may click it at once: it ends Reorder first (owner, 2026-11-25).
+    if (mode === "reorder") setMode("normal");
+    void openUploadList(view, previews, { saveEmoji: persistEmoji });
+  });
   backButton.addEventListener("click", () => host.back());
   revealButton.addEventListener("click", () => void run(() => revealPack(packId)));
 
@@ -243,7 +265,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       previews.clear();
       setView(await openPack(packId));
       const missing = view.stickers.filter((s) => s.missing).length;
-      notice = missing ? `Checked the pack folder: ${missing} Missing.` : "Checked the pack folder: every file is in place.";
+      setNotice(missing ? `Checked the pack folder: ${missing} Missing.` : "Checked the pack folder: every file is in place.");
     }),
   );
   addButton.addEventListener("click", () =>
@@ -259,8 +281,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   async function importPaths(paths: string[]): Promise<void> {
     const result = await importStickers(packId, importOrder(paths));
     setView(result.view);
-    rejected = result.rejected;
-    notice = importSummary(result.addedIds.length, result.rejected.length);
+    setNotice(importSummary(result.addedIds.length, result.rejected.length), result.rejected);
   }
 
   let unlistenDrop: (() => void) | null = null;
@@ -322,13 +343,13 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     const next = await replaceSticker(sticker.id, path);
     previews.forget(sticker.id);
     setView(next);
-    notice = `Sticker #${sticker.position} replaced.`;
+    setNotice(`Sticker #${sticker.position} replaced.`);
   }
 
   async function remove(stickers: StickerView[]): Promise<void> {
     if (!(await confirmStickerDelete(stickers, previews))) return;
     setView(await deleteStickers(packId, stickers.map((s) => s.id)));
-    notice = `Deleted ${stickerCountText(stickers.length)}.`;
+    setNotice(`Deleted ${stickerCountText(stickers.length)}.`);
   }
 
   /** Delete the thumbnail and its file, after the confirmation (SPM-12). */
@@ -336,7 +357,24 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     if (!(await confirmThumbnailDelete(view, previews))) return;
     previews.forgetThumbnail();
     setView(await deleteThumbnail(packId));
-    notice = "Thumbnail deleted.";
+    setNotice("Thumbnail deleted.");
+  }
+
+  /**
+   * Save a sticker's Emoji String into the Library and the view; resolves with
+   * the stored string (the core strips every space), rejects with the reason.
+   * Shared by the detail panel and the Upload list.
+   */
+  async function persistEmoji(sticker: StickerView, emojiString: string): Promise<string> {
+    const saved = await setEmojiString(sticker.id, emojiString);
+    view = {
+      ...view,
+      stickers: view.stickers.map((x) =>
+        x.id === saved.id ? { ...x, emojiString: saved.emojiString, emojiWarning: emojiCountWarning(saved.emojiString) } : x,
+      ),
+    };
+    render(); // the tiles' flags and the detail panel follow the edit
+    return saved.emojiString;
   }
 
   const actions: PanelActions = {
@@ -360,7 +398,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
           previews.clear();
           setView(await loadPackView(packId));
         }
-        notice = sent.text;
+        setNotice(sent.text);
       }),
     reveal: (s) => void run(() => revealSticker(s.id)),
     remove: (stickers) => void run(() => remove(stickers)),
@@ -369,17 +407,11 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     // The Rust LibraryLock serializes it with that action.
     saveEmoji: async (s, emojiString) => {
       try {
-        const saved = await setEmojiString(s.id, emojiString);
-        view = {
-          ...view,
-          stickers: view.stickers.map((x) =>
-            x.id === saved.id ? { ...x, emojiString: saved.emojiString, emojiWarning: emojiCountWarning(saved.emojiString) } : x,
-          ),
-        };
+        await persistEmoji(s, emojiString);
       } catch (err) {
         message.textContent = errorMessage(err);
+        render();
       }
-      render();
     },
     revealThumbnail: () => void run(() => revealThumbnail(packId)),
     editThumbnail: () => void run(() => editThumbnail()),
@@ -470,7 +502,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     drop: (id: number, from: number, position: number) =>
       void run(async () => {
         setView(await reorderSticker(id, position));
-        notice = `Moved sticker #${from + 1} to #${position}; files renamed to match.`;
+        setNotice(`Moved sticker #${from + 1} to #${position}; files renamed to match.`);
       }),
   };
 
@@ -499,68 +531,64 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   // ---- Render ----
 
   /**
-   * A dismissible banner: an X on the left (owner, 2026-11-22: the Dismiss
-   * link alone sits far away on the right), the message, then Dismiss.
-   * Either one runs `clear` to reset the banner's state, then re-renders.
-   * The live-region role sits on the message only, so a screen reader
-   * announces the message, not the two Dismiss controls.
+   * The ONE info notice, strictly single-line: an X on the left (owner,
+   * 2026-11-22: the Dismiss link alone sits far away on the right), the text
+   * (an ellipsis when it does not fit, the full text in its title), an
+   * optional extra control kept visible beside it, then Dismiss. Either close
+   * control clears the notice (and the rejected files tied to it).
+   * The live-region role sits on the text only, so a screen reader announces
+   * the text, not the controls.
    */
-  function dismissibleBanner(
-    kind: "info" | "warn",
-    role: "status" | "alert",
-    body: Array<Node | string>,
-    clear: () => void,
-    extraClass = "",
-  ): HTMLElement {
+  function noticeBanner(text: string, extra: HTMLElement | null): HTMLElement {
     const dismiss = () => {
-      clear();
+      setNotice("");
       render();
     };
     const close = el("button", { class: "pm-banner-close", type: "button", title: "Dismiss", "aria-label": "Dismiss this message" }, icon("close"));
     const link = el("button", { class: "pm-link", type: "button" }, "Dismiss");
     close.addEventListener("click", dismiss);
     link.addEventListener("click", dismiss);
-    const classes = ["pm-banner", `pm-banner-${kind}`, extraClass].filter(Boolean).join(" ");
-    return el("div", { class: classes }, close, el("div", { class: "pm-banner-body", role }, ...body), link);
+    const body = el("span", { class: "pm-banner-body", role: "status", title: text }, text);
+    return el("div", { class: "pm-banner pm-banner-info" }, close, el("div", { class: "pm-banner-main" }, body, ...(extra ? [extra] : [])), link);
+  }
+
+  /** The files an import rejected, each with its reason, in the shared dialog (SPEC §5). */
+  function showRejected(): void {
+    const files = rejected;
+    const dlg = openDialog(
+      "Not added",
+      [
+        el(
+          "ul",
+          { class: "pm-rejected-list" },
+          ...files.map((r) => {
+            const row = el("li", {}, el("span", { class: "pm-mono" }, fileNameOf(r.path)), ` ${r.reason}. `);
+            // Only files the Editor can import get the button.
+            if (editorCanImport(r.path)) {
+              const openButton = el("button", { class: "pm-link", type: "button" }, "Open in editor");
+              openButton.addEventListener("click", () => {
+                dlg.close("close");
+                host.openInEditor(r.path);
+              });
+              row.append(openButton);
+            }
+            return row;
+          }),
+        ),
+      ],
+      [{ label: "Close", value: "close", variant: "primary" }],
+      "close",
+      { defaultChoice: "close" },
+    );
   }
 
   function renderBanners(): void {
-    const items: HTMLElement[] = [];
-    const size = warningText(view.packSizeWarning);
-    if (size) items.push(el("div", { class: "pm-banner pm-banner-warn", role: "status" }, size));
-    const missing = missingSummary(view.stickers.filter((s) => s.missing).length);
-    if (missing) items.push(el("div", { class: "pm-banner pm-banner-warn", role: "status" }, missing));
-    if (notice) {
-      items.push(dismissibleBanner("info", "status", [notice], () => (notice = "")));
-    }
+    let show: HTMLElement | null = null;
     if (rejected.length) {
-      items.push(
-        dismissibleBanner(
-          "warn",
-          "alert",
-          [
-            el("strong", {}, "Not added:"),
-            el(
-              "ul",
-              {},
-              ...rejected.map((r) => {
-                const row = el("li", {}, el("span", { class: "pm-mono" }, fileNameOf(r.path)), ` ${r.reason}. `);
-                // Only files the Editor can import get the button.
-                if (editorCanImport(r.path)) {
-                  const open = el("button", { class: "pm-link", type: "button" }, "Open in editor");
-                  open.addEventListener("click", () => host.openInEditor(r.path));
-                  row.append(open);
-                }
-                return row;
-              }),
-            ),
-          ],
-          () => (rejected = []),
-          "pm-rejected",
-        ),
-      );
+      show = el("button", { class: "pm-link", type: "button", title: "Show… — List the files that were not added, with the reasons" }, "Show…");
+      show.addEventListener("click", showRejected);
     }
-    banners.replaceChildren(...items);
+    banners.replaceChildren(...(notice ? [noticeBanner(notice, show)] : []));
   }
 
   function renderPanel(): void {
@@ -580,9 +608,9 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     shortInput.title = live ? SHORT_NAME_LOCKED : "Editable while Draft; renames the pack folder";
     shortNote.textContent = live ? "🔒 Locked" : ""; // short label (owner, 2026-11-22); the tooltip has the reason
     shortNote.title = live ? SHORT_NAME_LOCKED : ""; // the full reason, even if the note is ever cut off
-    badgeHost.replaceChildren(statusBadge(pack.status));
-    // Labels match the dialogs they open ("Go Live?" / "Revert to Draft?").
-    statusButton.textContent = live ? "Revert to Draft" : "Go Live";
+    badgeHost.replaceChildren(statusBadge(pack.status, true));
+    // Labels match the dialogs they open ("Go Live?" / "Revert to Draft?"); each reserves the other's width.
+    statusButton.replaceChildren(live ? reservedLabel("Revert to Draft", "Go Live") : reservedLabel("Go Live", "Revert to Draft"));
     statusButton.title = live
       ? "The pack does not exist on Telegram (unlocks the Short Name)"
       : "The pack now exists on Telegram (locks the Short Name)";
@@ -591,9 +619,19 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     reorderButton.setAttribute("aria-pressed", String(reorder));
     reorderButton.disabled = view.stickers.length < 2 && !reorder;
     reorderButton.title = reorderButton.disabled ? "Reordering needs at least two stickers" : "Drag stickers into a new order (Esc to finish)";
-    stickerCount.textContent = stickerCountText(view.stickers.length);
+    countText.textContent = stickerCountText(view.stickers.length);
+    const countWarning = countWarningText(warningText(view.packSizeWarning), view.stickers.filter((x) => x.missing).length);
+    stickerCount.classList.toggle("warn", countWarning !== null);
+    stickerCount.title = countWarning ?? "";
+    countReasons.textContent = countWarning ? `. ${countWarning}` : "";
     root.classList.toggle("reorder", reorder);
     for (const b of [refreshButton, addButton, revealButton, statusButton, backButton]) b.disabled = busy;
+    const uploadBlocker = uploadListBlocker(view.stickers.length);
+    uploadButton.disabled = busy || uploadBlocker !== null;
+    // The success tone (green fill, border and text; no size change) only while enabled and ready to go live.
+    const ready = !uploadButton.disabled && readyToGoLive(view);
+    uploadButton.classList.toggle("tone-success", ready);
+    uploadButton.title = uploadBlocker ?? (ready ? UPLOAD_READY_TITLE : UPLOAD_LIST_TITLE);
     titleInput.disabled = busy;
     if (busy) shortInput.disabled = true;
 

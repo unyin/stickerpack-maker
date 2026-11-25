@@ -123,6 +123,14 @@ export const revealSticker = (stickerId: number) => invoke<void>("reveal_sticker
 export const revealThumbnail = (packId: number) => invoke<void>("reveal_thumbnail", { packId });
 /** The pack view after deleting the thumbnail (row cleared, file removed). */
 export const deleteThumbnail = (packId: number) => invoke<PackView>("delete_thumbnail", { packId });
+/**
+ * Start a native OS file drag of the sticker's file (Upload list, SPM-21).
+ * Resolves when the drag ends, dropped or cancelled. Rust resolves the id to
+ * the path, so the webview can never name a file to drag.
+ */
+export const dragSticker = (stickerId: number) => invoke<void>("drag_sticker", { stickerId });
+/** The same for the pack's thumbnail file. */
+export const dragThumbnail = (packId: number) => invoke<void>("drag_thumbnail", { packId });
 export const revealPack = (packId: number) => invoke<void>("reveal_pack", { packId });
 export const stickerImage = (stickerId: number) => invoke<ArrayBuffer>("sticker_image", { stickerId });
 export const thumbnailImage = (packId: number) => invoke<ArrayBuffer>("thumbnail_image", { packId });

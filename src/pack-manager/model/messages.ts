@@ -70,12 +70,16 @@ export function warningText(warning: Warning | null, subject?: string): string |
   return warning.kind === "packSize" ? packSizeText(warning.count, subject) : null;
 }
 
-/** The pack-level Missing banner, or null when nothing is Missing. */
-export function missingSummary(missing: number): string | null {
-  if (missing === 0) return null;
-  return missing === 1
-    ? "1 sticker is Missing: its file is not in the pack folder. Select it to replace or delete it."
-    : `${missing} stickers are Missing: their files are not in the pack folder. Select one to replace or delete it.`;
+/**
+ * Why the toolbar's sticker count shows its warn state (SPEC §5), or null when
+ * nothing is wrong: the over-120 text (`size`, from packSizeText) and/or a
+ * short Missing count. It is the count's tooltip and accessible description.
+ */
+export function countWarningText(size: string | null, missing: number): string | null {
+  const parts: string[] = [];
+  if (size) parts.push(size);
+  if (missing > 0) parts.push(`${missing} Missing.`);
+  return parts.length ? parts.join(" ") : null;
 }
 
 export const MISSING_REASON = "This sticker's file is Missing; replace it first.";

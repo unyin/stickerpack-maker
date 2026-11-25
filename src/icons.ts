@@ -14,6 +14,11 @@ const PATHS = {
   copy: ["M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1z", "M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"],
   /** Done: a check mark. */
   check: ["M5 12l5 5L20 7"],
+  /** Warning: a triangle with an exclamation mark (the sticker count's warn state).
+   * Stem and dot spaced by rendering, not by viewBox arithmetic: at the count's
+   * 16px, in Chromium at 100/125/150% scaling, the dot separates from both the
+   * stem and the base (centre-column ink dips to <=0.25 on each side). */
+  warning: ["M12 4L3 20h18z", "M12 10v2.5", "M12 16v.01"],
   /** Close: an X. */
   close: ["M6 6l12 12", "M18 6L6 18"],
   /** Eyedropper: the native colour picker's own glyph, traced from the owner's

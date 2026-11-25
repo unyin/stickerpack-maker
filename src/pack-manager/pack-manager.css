@@ -66,8 +66,8 @@
 
 .pm-badge-live {
   color: var(--accent-text);
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--live-bg);
+  border-color: var(--live-bg);
 }
 
 .pm-flag {
@@ -232,6 +232,34 @@
   min-height: 38px;
 }
 
+/* Tighter side padding (12px, not the app-wide 18px) on exactly the two header
+   buttons after the Short Name: the status button and Upload…, so the header
+   fits one line at the 1100px window floor (owner decision 2026-11-25). The
+   app-wide button padding is untouched. */
+.pm-header-btn {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+/* A label that keeps the width of the longer of two (dialogs.ts reservedLabel):
+   the other label sits in the same grid cell, invisible, so the Draft/Live badge
+   ("Draft"/"Live") and the status button ("Go Live"/"Revert to Draft") keep one
+   width and Upload… beside them never moves when the status toggles (owner,
+   2026-11-25). Measured by the browser in the font actually drawn, so no pixel
+   width to get wrong with Windows fonts. */
+.pm-reserve {
+  display: inline-grid;
+  justify-items: center;
+}
+
+.pm-reserve > * {
+  grid-area: 1 / 1;
+}
+
+.pm-reserve-twin {
+  visibility: hidden;
+}
+
 .pm-toolbar {
   display: flex;
   align-items: center;
@@ -252,24 +280,139 @@
   border-color: var(--accent-hover);
 }
 
-/* Fixed width up to "999 stickers", so the buttons after it never move
-   (owner, 2026-11-22). The owner expects the count never to exceed 3
-   digits; 120 stickers is only a warning (shared/limits.json), not a cap. */
+/* The toolbar's sticker count: a FIXED width, so nothing after it ever moves
+   (owner, 2026-11-22), including when it takes its warn state (owner
+   decisions 2026-11-25: over 120 stickers and/or any Missing; the warning left
+   the notification area). The width is the longest realistic text ("999
+   stickers": the owner expects at most 3 digits, 120 is only a warning, see
+   shared/limits.json) + the gap + the warning glyph + the side padding and
+   border the warn tone needs; the border is always there (transparent when
+   clean), so the text never shifts between states. The text sits at the start,
+   the glyph at the end, both always laid out; only the glyph's visibility and
+   the tone change. Colour is never the only signal: the glyph, and the
+   reasons in the tooltip and the accessible text. */
 .pm-sticker-count {
-  width: 13ch;
+  --count-glyph: 16px;
+  --count-gap: 6px;
+  --count-pad: 8px;
+  --count-border: 1px;
+  box-sizing: border-box;
+  /* Contains the .sr-only reasons span (absolute), as the scroll container does. */
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--count-gap);
+  width: calc(13ch + var(--count-gap) + var(--count-glyph) + 2 * (var(--count-pad) + var(--count-border)));
+  padding: 3px var(--count-pad);
+  border: var(--count-border) solid transparent;
+  border-radius: 8px;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-.pm-banners {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.pm-sticker-count .pm-count-text {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-.pm-banners:empty {
-  display: none;
+.pm-sticker-count .icon {
+  width: var(--count-glyph);
+  height: var(--count-glyph);
+  visibility: hidden;
+}
+
+.pm-sticker-count.warn {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border-color: var(--warn-border);
+  cursor: help;
+}
+
+.pm-sticker-count.warn .icon {
+  visibility: visible;
+}
+
+/* The reserved notification area (owner decisions 2026-11-25; the Editor's
+   reserved message row is the precedent, SPEC §2/§6): ONE area above the sticker
+   grid that holds only the red message line and ONE info notice, each strictly
+   single-line (a long text ends in an ellipsis, the full text in its title).
+   Its height is exactly one message line + the gap + one single-line notice +
+   the focus-ring padding, so it never grows, never collapses when empty and
+   NEVER scrolls: overflow is impossible by construction (a fixed height, rows
+   of fixed height, nothing in it that can wrap), not hidden, and the grid's
+   top edge does not move when a notice appears or is dismissed. The over-120
+   warning and the Missing summary are not here: they live on the toolbar's
+   sticker count. The area clips nothing, so focus rings are never cut; the
+   ring padding is kept so the rings sit inside the reserved space.
+
+   The metrics are defined on .pm, so every banner (here and in the detail
+   panels) and the height calc below read the same values: one edit moves
+   both. INVARIANT: every child of the notice (X button, Dismiss link, Show…
+   link, text line) must stay no taller than --notice-line, or the single line
+   outgrows its reserved row. */
+.pm {
+  --notice-line: 20px;
+  --notice-pad-y: 8px;
+  --notice-border: 1px;
+  --notice-gap: 6px;
+}
+
+.pm-notices {
+  --notice-ring: 5px;
+  --notice-banner: calc(var(--notice-line) + 2 * var(--notice-pad-y) + 2 * var(--notice-border));
+  box-sizing: border-box;
+  flex: none;
+  height: calc(var(--notice-line) + var(--notice-gap) + var(--notice-banner) + 2 * var(--notice-ring));
+  margin: calc(-1 * var(--notice-ring));
+  padding: var(--notice-ring);
+  display: flex;
+  flex-direction: column;
+  gap: var(--notice-gap);
+}
+
+/* The red message line: one row, always laid out (even empty, so the notice
+   below it never moves), one line with an ellipsis. */
+.pm .pm-notices > .message,
+.pm .pm-notices > .message:empty {
+  display: block;
+  box-sizing: border-box;
+  margin: 0;
+  flex: none;
+  height: var(--notice-line);
+  min-height: 0;
+  line-height: var(--notice-line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pm-banners {
+  flex: none;
+  height: var(--notice-banner);
+}
+
+.pm-notices .pm-banner {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+/* The notice's middle: the text (truncated, never the link) then Show… right
+   after it. */
+.pm-banner-main {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pm-banner-main > .pm-banner-body {
+  flex: 0 1 auto;
+}
+
+.pm-banner-main > button.pm-link {
+  flex: none;
 }
 
 .pm-banner {
@@ -278,7 +421,8 @@
   gap: 12px;
   justify-content: space-between;
   flex-wrap: wrap;
-  padding: 8px 12px;
+  padding: var(--notice-pad-y) 12px;
+  line-height: var(--notice-line);
   border-radius: 8px;
   font-size: 14px;
 }
@@ -287,38 +431,56 @@
   margin: 0;
 }
 
-.pm-banner ul {
-  margin: 4px 0 0;
+.pm-rejected-list {
+  margin: 0;
   padding-left: 18px;
 }
 
 .pm-banner-warn {
   background: var(--warn-bg);
   color: var(--warn-text);
-  border: 1px solid var(--warn-border);
+  border: var(--notice-border) solid var(--warn-border);
 }
 
-.pm-banner-warn button.pm-link {
-  color: var(--warn-text);
-}
-
-/* A dismissible banner: X | message | Dismiss. The message takes the space
-   between, so both close controls stay at the edges. */
+/* A dismissible banner: X | main | Dismiss. The flex is on .pm-banner-main,
+   which takes the space between (the text truncates, then Show…), so both
+   close controls stay at the edges. */
 .pm-banner-body {
-  flex: 1 1 0;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The X on the left (owner, 2026-11-22). Inherits the banner's text colour,
    so it matches in the info and warning banners and in both themes. */
 .pm-banner-close {
   flex: none;
+  box-sizing: border-box;
+  width: var(--notice-line);
+  height: var(--notice-line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
-  padding: 2px;
+  padding: 0;
   color: inherit;
   cursor: pointer;
   border-radius: 4px;
+}
+
+.pm-banner-close .icon {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+/* The Dismiss link: a box exactly one line tall, whatever the font. */
+.pm-banner > button.pm-link,
+.pm-banner-main > button.pm-link {
+  box-sizing: border-box;
+  height: var(--notice-line);
+  line-height: var(--notice-line);
 }
 
 .pm-banner-close:focus-visible {
@@ -329,7 +491,7 @@
 .pm-banner-info {
   background: var(--panel);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: var(--notice-border) solid var(--border);
 }
 
 .pm-body {
@@ -622,11 +784,6 @@
   flex: none;
 }
 
-.pm-copy.failed {
-  border-color: var(--danger-border);
-  color: var(--danger-text);
-}
-
 .pm-emoji-count {
   font-size: 13px;
   color: var(--muted);
@@ -775,4 +932,190 @@
 
 .pm .message {
   margin: 0;
+}
+
+/* ---- Upload list dialog (SPM-21; frame: src/dialog.css) ---- */
+
+/* The frame's body scrolls as a whole; here only the list scrolls, so the
+   notes above it and Close below stay in view. Preferred width --ul-w is set
+   from the measured emoji glyph (upload-list.ts) and capped at the viewport:
+   the emoji column is the one that shrinks, so nothing overflows sideways. */
+.app-dialog.ul-dialog {
+  width: min(var(--ul-w, 720px), calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+}
+
+.app-dialog.ul-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.ul-dialog .app-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: hidden;
+}
+
+.ul-note {
+  font-size: 13px;
+}
+
+.ul-note.warn {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border: 1px solid var(--warn-border);
+}
+
+.ul-error:empty {
+  display: none;
+}
+
+.ul-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 6px 4px 4px; /* room for the focus rings */
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  scrollbar-gutter: stable;
+  /* Containing block for the entries' absolutely positioned .sr-only copy
+     status spans. Without it their containing block is the modal dialog, which
+     a scroll container between them and it does not clip, so they stretched the
+     dialog's own scroll area down to the last entry (a second scrollbar). */
+  position: relative;
+}
+
+/* One fixed-height row (owner, 2026-11-25): 88px border-box = 2px border, 6px
+   padding and a 72px content box, which holds the emoji box exactly. The emoji
+   column is the only flexible one. The first column fits "#120". */
+.ul-entry {
+  flex: none;
+  height: 88px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 38px 56px 38px 38px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  min-width: 0;
+  padding: 6px 10px;
+  background: var(--panel);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+}
+
+.ul-entry > * {
+  min-width: 0;
+}
+
+.ul-entry.missing {
+  border-style: dashed;
+  border-color: var(--warn-border);
+}
+
+.ul-entry.thumb {
+  background: var(--bg);
+  border-style: dashed;
+}
+
+.ul-entry.thumb.missing {
+  border-color: var(--warn-border);
+}
+
+.ul-entry .pm-pos {
+  align-self: center;
+  white-space: nowrap;
+}
+
+.ul-entry .pm-tile-img,
+.ul-entry .pm-missing-art {
+  width: 56px;
+  height: 56px;
+}
+
+.ul-entry .pm-missing-art {
+  font-size: 11px;
+}
+
+.ul-thumb-note {
+  align-self: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.ul-copy-cell {
+  display: flex;
+}
+
+/* The shared 38px icon buttons. The disabled-hover rule in styles.css pads
+   0 20px, which would squeeze the icon out of a 38px box. */
+.ul-entry .ul-open,
+.ul-entry .pm-copy {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.ul-entry .ul-open.secondary:disabled:hover {
+  padding: 0;
+}
+
+/* The fixed two-row emoji box: fluid width, never resizes, scrolls inside
+   past 20 emoji. 72px = the row's content box; two lines of 22px at 1.25 plus
+   the box's padding and border fit it. The detail panel's measured, fixed
+   width does not apply here. */
+.ul-emoji-wrap {
+  display: block;
+}
+
+.ul-entry .pm-emoji-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 72px;
+  display: block;
+  font-size: 22px;
+  line-height: 1.25;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* The preview is a drag handle (owner, 2026-11-25): grab cursor and a hover
+   outline, only when its file is there. Missing keeps the default cursor. */
+.ul-prev {
+  display: block;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  outline: 1px solid transparent;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+}
+
+.ul-prev.draggable {
+  cursor: grab;
+}
+
+.ul-prev.draggable:active {
+  cursor: grabbing;
+}
+
+.ul-prev.draggable:hover {
+  outline-color: var(--accent-ink);
+}
+
+.ul-prev .pm-tile-img {
+  display: block;
 }

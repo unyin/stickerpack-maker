@@ -1,7 +1,7 @@
 // The pack view's side panel (SPEC §5): one selection -> panel paradigm for
 // stickers, Missing stickers, and the thumbnail. Single selection shows the
 // detail panel, several the aggregate panel, the thumbnail slot its own.
-import { explorerLabel, icon } from "../../icons";
+import { explorerLabel } from "../../icons";
 import { el } from "../../ui";
 import type { PackView, StickerView } from "../api";
 import { emojiCount, emojiWarning, EMOJI_MAX } from "../model/emoji";
@@ -15,19 +15,11 @@ import {
   stickerCountText,
   thumbnailFormat,
 } from "../model/messages";
+import { bindEmojiSave, copyButton, measureEmojiGlyph } from "./emoji-field";
 import { previewImage, type Previews } from "./previews";
-
-const COPY_TITLE = "Copy to clipboard";
-
-/** Ordinary single-codepoint emoji drawn by the emoji font; no flags (two boxed letters in Segoe UI Emoji) or VS16 sequences (text-style base glyph). */
-const EMOJI_WIDTH_SAMPLES = ["😀", "👍", "🤔", "😎"];
 
 /** Box width in glyph widths: five per row fit, six do not, with room for spacing. */
 const EMOJI_BOX_GLYPH_WIDTHS = 5.5;
-
-/** A measured glyph outside these multiples of the font size is not a real measurement (see emojiBoxWidth). */
-const EMOJI_GLYPH_MIN_RATIO = 0.8;
-const EMOJI_GLYPH_MAX_RATIO = 1.6;
 
 /** First-paint width in px: EMOJI_BOX_GLYPH_WIDTHS × 30 px, about Segoe UI Emoji at 24 px. Keep in step with `.pm-emoji-input` in pack-manager.css. */
 const EMOJI_BOX_FALLBACK_WIDTH = 165;
@@ -120,28 +112,9 @@ export function detailPanel(sticker: StickerView, previews: Previews, actions: P
   };
   requestAnimationFrame(fit);
   void document.fonts.ready.then(fit);
-  input.addEventListener("change", () => void actions.saveEmoji(sticker, input.value));
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault(); // no line breaks in an Emoji String
-      input.blur();
-    }
-  });
+  bindEmojiSave(input, (value) => void actions.saveEmoji(sticker, value));
   live();
-  const copy = el(
-    "button",
-    { class: "secondary pm-copy", type: "button", title: COPY_TITLE, "aria-label": "Copy the Emoji String to the clipboard" },
-    icon("copy"),
-  ) as HTMLButtonElement;
-  // Polite live region: the icon swap alone is invisible to screen readers.
-  const copyStatus = el("span", { class: "sr-only", role: "status" });
-  const flash = copyFlash(copy, copyStatus);
-  copy.addEventListener("click", () => {
-    void navigator.clipboard.writeText(input.value).then(
-      () => flash("Copied", true),
-      () => flash("Copy failed", false),
-    );
-  });
+  const { button: copy, status: copyStatus } = copyButton(() => input.value, "Copy the Emoji String to the clipboard");
 
   const missingReason = missing ? MISSING_REASON : null;
   const banner = missing
@@ -251,38 +224,11 @@ export function thumbnailPanel(view: PackView, previews: Previews, actions: Pane
 
 /**
  * Content width of the Emoji String box for five emoji per row (owner,
- * 2026-11-21). A textarea wraps by width, not by count. An emoji font draws
- * its glyphs at one width, but the width differs between fonts (Segoe UI
- * Emoji, Noto, Twemoji), so measure a few ordinary emoji in the box's own font
- * and take the widest; EMOJI_BOX_GLYPH_WIDTHS glyph widths fit five per row
- * but not six. A canvas that rejects the font measures in its 10px default,
- * so a glyph far narrower than the font size (or far wider: it would overflow
- * the panel) is not a real measurement: fall back.
+ * 2026-11-21). A textarea wraps by width, not by count, so size it from the
+ * measured glyph: EMOJI_BOX_GLYPH_WIDTHS glyph widths fit five per row but not
+ * six. Falls back when the glyph cannot be measured (measureEmojiGlyph).
  */
 function emojiBoxWidth(fontSize: string, fontFamily: string): number {
-  const ctx = document.createElement("canvas").getContext("2d");
-  if (!ctx) return EMOJI_BOX_FALLBACK_WIDTH;
-  ctx.font = `${fontSize} ${fontFamily}`;
-  const widest = Math.max(...EMOJI_WIDTH_SAMPLES.map((e) => ctx.measureText(e).width));
-  const size = parseFloat(fontSize);
-  if (!(widest >= size * EMOJI_GLYPH_MIN_RATIO && widest <= size * EMOJI_GLYPH_MAX_RATIO)) return EMOJI_BOX_FALLBACK_WIDTH;
-  return Math.ceil(widest * EMOJI_BOX_GLYPH_WIDTHS);
-}
-
-/** Briefly show the copy result: check icon on success, a red button on failure, and a screen-reader announcement. */
-function copyFlash(button: HTMLButtonElement, status: HTMLElement): (text: string, ok: boolean) => void {
-  let restore: ReturnType<typeof setTimeout> | undefined; // per panel, like the button it restores
-  return (text, ok) => {
-    clearTimeout(restore); // a second click restarts the timer instead of leaving "Copied" stuck
-    button.title = text;
-    status.textContent = text;
-    button.classList.toggle("failed", !ok);
-    button.replaceChildren(icon(ok ? "check" : "copy"));
-    restore = setTimeout(() => {
-      button.title = COPY_TITLE;
-      status.textContent = "";
-      button.classList.remove("failed");
-      button.replaceChildren(icon("copy"));
-    }, 1200);
-  };
+  const glyph = measureEmojiGlyph(fontSize, fontFamily);
+  return glyph === null ? EMOJI_BOX_FALLBACK_WIDTH : Math.ceil(glyph * EMOJI_BOX_GLYPH_WIDTHS);
 }

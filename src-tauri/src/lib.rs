@@ -1,6 +1,8 @@
 mod commands;
 mod config;
 mod db;
+/// Drag-out of sticker files into other apps (SPM-21, the Upload list).
+mod drag_commands;
 /// Pack Manager commands (SPM-3) over the Library core.
 mod pack_commands;
 /// The Editor's save command (SPM-10): editor pixel work + the Library core.
@@ -112,6 +114,8 @@ pub fn run() {
             pack_commands::reveal_thumbnail,
             pack_commands::sticker_image,
             pack_commands::thumbnail_image,
+            drag_commands::drag_sticker,
+            drag_commands::drag_thumbnail,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
