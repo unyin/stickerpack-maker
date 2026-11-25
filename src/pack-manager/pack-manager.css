@@ -232,12 +232,6 @@
   min-height: 38px;
 }
 
-/* A label that keeps the width of the longer of two (dialogs.ts reservedLabel):
-   the other label sits in the same grid cell, invisible, so the Draft/Live badge
-   ("Draft"/"Live") and the status button ("Go Live"/"Revert to Draft") keep one
-   width and Upload… beside them never moves when the status toggles (owner,
-   2026-11-25). Measured by the browser in the font actually drawn, so no pixel
-   width to get wrong with Windows fonts. */
 /* Tighter side padding (12px, not the app-wide 18px) on exactly the two header
    buttons after the Short Name: the status button and Upload…, so the header
    fits one line at the 1100px window floor (owner decision 2026-11-25). The
@@ -247,6 +241,19 @@
   padding-right: 12px;
 }
 
+/* Upload… while the pack is ready to go live: green border and text, no fill,
+   no size change; never green while disabled or Live (owner, 2026-11-25). */
+.pm-header-btn.ready {
+  border-color: var(--success-border);
+  color: var(--success-text);
+}
+
+/* A label that keeps the width of the longer of two (dialogs.ts reservedLabel):
+   the other label sits in the same grid cell, invisible, so the Draft/Live badge
+   ("Draft"/"Live") and the status button ("Go Live"/"Revert to Draft") keep one
+   width and Upload… beside them never moves when the status toggles (owner,
+   2026-11-25). Measured by the browser in the font actually drawn, so no pixel
+   width to get wrong with Windows fonts. */
 .pm-reserve {
   display: inline-grid;
   justify-items: center;
@@ -650,8 +657,8 @@
   flex: none;
 }
 
-.pm-copy.copied,
-.pm-header-btn.ready {
+/* Copied: green border and text, no fill, no size change (owner, 2026-11-25). */
+.pm-copy.copied {
   border-color: var(--success-border);
   color: var(--success-text);
 }
