@@ -15,7 +15,7 @@ import {
   REVERT_TO_DRAFT_WARNING,
   matchPacks,
   MISSING_REASON,
-  missingSummary,
+  countWarningText,
   packCountText,
   packDeleteMessage,
   packSizeText,
@@ -190,9 +190,10 @@ test("import and send reports say what happened", () => {
   expect(importSummary(0, 1)).toContain(`1 file is not a valid sticker`);
   expect(importSummary(0, 1)).toContain(`${limits.sticker.side} px`);
   expect(importSummary(0, 2)).toContain(`2 files are not valid stickers`);
-  expect(missingSummary(0)).toBeNull();
-  expect(missingSummary(1)).toContain("1 sticker is Missing: its file");
-  expect(missingSummary(3)).toContain("3 stickers are Missing");
+  expect(countWarningText(null, 0)).toBeNull();
+  expect(countWarningText(null, 2)).toBe("2 Missing.");
+  expect(countWarningText(packSizeText(125), 0)).toBe(packSizeText(125));
+  expect(countWarningText(packSizeText(125), 2)).toBe(`${packSizeText(125)} 2 Missing.`);
   const report = { copied: [], originalsDeleted: true, unfinished: "x", targetSizeWarning: null };
   expect(sendReportText(report, "Dogs")).toContain("Moved 0 stickers to “Dogs”. Not finished: x.");
 });

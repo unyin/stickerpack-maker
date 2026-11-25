@@ -280,33 +280,75 @@
   border-color: var(--accent-hover);
 }
 
-/* Fixed width up to "999 stickers", so the buttons after it never move
-   (owner, 2026-11-22). The owner expects the count never to exceed 3
-   digits; 120 stickers is only a warning (shared/limits.json), not a cap. */
+/* The toolbar's sticker count: a FIXED width, so nothing after it ever moves
+   (owner, 2026-11-22), including when it takes its warn state (owner
+   decisions 2026-11-25: over 120 stickers and/or any Missing; the warning left
+   the notification area). The width is the longest realistic text ("999
+   stickers": the owner expects at most 3 digits, 120 is only a warning, see
+   shared/limits.json) + the gap + the warning glyph + the side padding and
+   border the warn tone needs; the border is always there (transparent when
+   clean), so the text never shifts between states. The text sits at the start,
+   the glyph at the end, both always laid out; only the glyph's visibility and
+   the tone change. Colour is never the only signal: the glyph, and the
+   reasons in the tooltip and the accessible text. */
 .pm-sticker-count {
-  width: 13ch;
+  --count-glyph: 16px;
+  --count-gap: 6px;
+  --count-pad: 8px;
+  --count-border: 1px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--count-gap);
+  width: calc(13ch + var(--count-gap) + var(--count-glyph) + 2 * (var(--count-pad) + var(--count-border)));
+  padding: 3px var(--count-pad);
+  border: var(--count-border) solid transparent;
+  border-radius: 8px;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-/* The reserved notification area (owner decisions 2026-11-25; the Editor's
-   reserved message row is the precedent, SPEC §2/§6): the red message line and
-   the banners live in ONE area above the sticker grid that never grows or
-   collapses, so the grid's top edge does not move when a notice appears or is
-   dismissed. Its height always fits TWO single-line banners:
-   2 x (line + 2 x banner padding + 2 x border) + the gap between them, plus
-   the scroller padding. Three or more notices, or a long "Not added:" list,
-   scroll inside it (Tab to a Dismiss scrolls it into view). The 5px padding is
-   the house pattern for a scroll container: it clips at its padding edge, so
-   the 4px focus ring of a child on the edge would be cut off (CMT-282, see
-   dialog.css); the equal negative margin keeps the visual spacing.
+.pm-sticker-count .pm-count-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 
-   The banner metrics are defined on .pm, so every banner (here and in the
-   detail panels) and the height calc below read the same values: one edit
-   moves both. INVARIANT: every banner child (X button, Dismiss link, message
-   line) must stay no taller than --notice-line, or a single-line banner
-   outgrows the reserved height. */
+.pm-sticker-count .icon {
+  width: var(--count-glyph);
+  height: var(--count-glyph);
+  visibility: hidden;
+}
+
+.pm-sticker-count.warn {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border-color: var(--warn-border);
+  cursor: help;
+}
+
+.pm-sticker-count.warn .icon {
+  visibility: visible;
+}
+
+/* The reserved notification area (owner decisions 2026-11-25; the Editor's
+   reserved message row is the precedent, SPEC §2/§6): ONE area above the sticker
+   grid that holds only the red message line and ONE info notice, each strictly
+   single-line (a long text ends in an ellipsis, the full text in its title).
+   Its height is exactly one message line + the gap + one single-line notice +
+   the focus-ring padding, so it never grows, never collapses when empty and
+   NEVER scrolls: overflow is impossible by construction (a fixed height, rows
+   of fixed height, nothing in it that can wrap), not hidden, and the grid's
+   top edge does not move when a notice appears or is dismissed. The over-120
+   warning and the Missing summary are not here: they live on the toolbar's
+   sticker count. The area clips nothing, so focus rings are never cut; the
+   ring padding is kept so the rings sit inside the reserved space.
+
+   The metrics are defined on .pm, so every banner (here and in the detail
+   panels) and the height calc below read the same values: one edit moves
+   both. INVARIANT: every child of the notice (X button, Dismiss link, Show…
+   link, text line) must stay no taller than --notice-line, or the single line
+   outgrows its reserved row. */
 .pm {
   --notice-line: 20px;
   --notice-pad-y: 8px;
@@ -316,32 +358,58 @@
 
 .pm-notices {
   --notice-ring: 5px;
+  --notice-banner: calc(var(--notice-line) + 2 * var(--notice-pad-y) + 2 * var(--notice-border));
   box-sizing: border-box;
   flex: none;
-  height: calc(
-    2 * (var(--notice-line) + 2 * var(--notice-pad-y) + 2 * var(--notice-border)) + var(--notice-gap) +
-      2 * var(--notice-ring)
-  );
+  height: calc(var(--notice-line) + var(--notice-gap) + var(--notice-banner) + 2 * var(--notice-ring));
   margin: calc(-1 * var(--notice-ring));
   padding: var(--notice-ring);
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--notice-gap);
 }
 
-/* The red message line is one row of the stack, one line tall. */
-.pm-notices > .message {
+/* The red message line: one row, always laid out (even empty, so the notice
+   below it never moves), one line with an ellipsis. */
+.pm .pm-notices > .message,
+.pm .pm-notices > .message:empty {
+  display: block;
+  box-sizing: border-box;
   margin: 0;
   flex: none;
-  line-height: var(--notice-line);
+  height: var(--notice-line);
   min-height: 0;
+  line-height: var(--notice-line);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pm-banners {
+  flex: none;
+  height: var(--notice-banner);
+}
+
+.pm-notices .pm-banner {
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+/* The notice's middle: the text (truncated, never the link) then Show… right
+   after it. */
+.pm-banner-main {
+  flex: 1 1 0;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: var(--notice-gap);
+  align-items: center;
+  gap: 10px;
+}
+
+.pm-banner-main > .pm-banner-body {
+  flex: 0 1 auto;
+}
+
+.pm-banner-main > button.pm-link {
   flex: none;
 }
 
@@ -361,8 +429,8 @@
   margin: 0;
 }
 
-.pm-banner ul {
-  margin: 4px 0 0;
+.pm-rejected-list {
+  margin: 0;
   padding-left: 18px;
 }
 
@@ -379,8 +447,10 @@
 /* A dismissible banner: X | message | Dismiss. The message takes the space
    between, so both close controls stay at the edges. */
 .pm-banner-body {
-  flex: 1 1 0;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The X on the left (owner, 2026-11-22). Inherits the banner's text colour,
@@ -407,7 +477,8 @@
 }
 
 /* The Dismiss link: a box exactly one line tall, whatever the font. */
-.pm-banner > button.pm-link {
+.pm-banner > button.pm-link,
+.pm-banner-main > button.pm-link {
   box-sizing: border-box;
   height: var(--notice-line);
   line-height: var(--notice-line);
