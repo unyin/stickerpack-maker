@@ -38,7 +38,7 @@ test("Sticker mode saves only with the longest side exactly the sticker side", (
   const over = saveBlocker({ width: S + 88, height: 400 }, STICKER);
   expect(over).toContain("Save is blocked");
   expect(over).toContain("88 px over");
-  expect(over).toContain(`Fit to ${S}×${S} or Longest side ${S}`);
+  expect(over).toContain(`Fit in ${S} or Long side ${S}`);
   expect(saveBlocker({ width: S - 1, height: S - 1 }, STICKER)).toContain("1 px under");
 });
 
@@ -73,8 +73,8 @@ test("Thumbnail mode saves only exactly square, and only Fit is offered as the f
   expect(saveBlocker({ width: T, height: T }, THUMBNAIL)).toBeNull();
   const off = saveBlocker({ width: T, height: T + 2 }, THUMBNAIL)!;
   expect(off).toContain("height 2 px over");
-  expect(off).toContain(`Fit to ${T}×${T} fixes it`);
-  expect(off).not.toContain("Longest side");
+  expect(off).toContain(`Fit in ${T} fixes it`);
+  expect(off).not.toContain("Long side");
 });
 
 const sticker = { id: 9, packId: 2, position: 4, fileName: "004.png", format: "png" as const, emojiString: "" };

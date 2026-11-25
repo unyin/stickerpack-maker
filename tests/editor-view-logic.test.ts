@@ -130,7 +130,7 @@ test("Longest side is greyed out with a reason when the set needs a square canva
   const thumb = newDocument(image(300, 200), "b", startCanvas(THUMBNAIL));
   const T = THUMBNAIL.side;
   expect(sizeToolBlocker("fit", thumb, content, NaN, THUMBNAIL)).toBeNull();
-  const reason = `A thumbnail must be exactly ${T}×${T}, so use Fit to ${T}×${T}.`;
+  const reason = `A thumbnail must be exactly ${T}×${T}, so use Fit in ${T}.`;
   expect(sizeToolBlocker("longest", thumb, content, NaN, THUMBNAIL)).toBe(reason);
   expect(sizeToolBlocker("longest", thumb, null, NaN, THUMBNAIL)).toBe(reason);
   // Free resize is the same in both modes.

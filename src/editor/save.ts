@@ -98,8 +98,8 @@ export const FORMAT_LABEL: Record<SaveFormat, string> = { png: "PNG", webp: "WEB
  */
 export function saveBlocker(canvas: Size, set: ConstraintSet): string | null {
   if (constraintStatus(canvas, set).ok) return null;
-  const fit = `Fit to ${set.side}×${set.side}`;
-  const fix = set.square ? `${fit} fixes it.` : `${fit} or Longest side ${set.side} fixes it.`;
+  const fit = `Fit in ${set.side}`;
+  const fix = set.square ? `${fit} fixes it.` : `${fit} or Long side ${set.side} fixes it.`;
   return `Save is blocked: ${readoutText(canvas, set)}. ${fix}`;
 }
 

@@ -131,6 +131,194 @@
   background: var(--panel);
 }
 
+/* The left tabbed tools panel (SPEC §6 Layout, SPM-15 D2): 192px wide; the
+   browser-style tab leaves stuck on its top edge are part of the panel, not
+   a strip inside it. The four text leaves total wider than 192px and
+   OVERHANG the panel's right edge over the canvas — the owner-accepted state
+   until the labels become icons (owner decision 2026-11-25); the leaves are
+   deliberately not shrunk. */
+.editor-tools {
+  flex: none;
+  width: 192px;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-tabrow {
+  position: relative;
+  z-index: 1; /* the leaves paint over the canvas, not under it */
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  padding-left: 5px;
+}
+
+.editor-tool-tab {
+  padding: 4px 6px;
+  font-size: 12.5px;
+  line-height: 16px;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+}
+
+.editor-tool-tab:hover {
+  color: var(--text);
+}
+
+/* The active leaf merges into the body: no bottom border, panel background,
+   and its 1px overlap swallows the body's top border. */
+.editor-tool-tab[aria-selected="true"] {
+  position: relative;
+  z-index: 1;
+  margin-bottom: -1px;
+  padding: 7px 6px 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.editor-tools-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px;
+  /* NOT a scroll container: the font picker's open list is deliberately
+     wider than the field (a dropdown may overlay the canvas, long names stay
+     readable), and an overflow container would clip it and scroll the panel
+     sideways. Every category fits the body at the window's 600px minimum
+     height, so nothing needs to scroll here. */
+  overflow: visible;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0 8px 8px 8px;
+}
+
+/* One category, as a bordered section with a mini-heading (the mockup's
+   convention). Exactly one section is visible at a time. */
+.editor-tool-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.editor-tool-section-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* A settings block's own mini-heading (Outline settings, Warp settings…). */
+.editor-tool-subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* Tool buttons: a full-width list, because the categories read as lists in
+   the narrow panel. A pressed tool carries the app's state look here (the
+   toolbar's own rule is scoped to .editor-toolbar). */
+.editor-tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.view.editor .editor-tool-list button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13.5px;
+  text-align: left;
+}
+
+.editor-tool-list button[aria-pressed="true"] {
+  border-color: var(--accent-ink);
+  color: var(--accent-ink);
+}
+
+/* A labelled field row in the narrow panel. Every row shares one left inset:
+   the Feather checkbox's own 4px UA margin is the source, so the rows that
+   carry fields take the same 4px (the mockup's measured convention). */
+.editor-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: 13.5px;
+}
+
+.editor-field-indent {
+  padding-left: 4px;
+}
+
+/* A visible caption for a swatch that would otherwise be ambiguous. */
+.editor-cap {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.editor-panel-sep {
+  width: 100%;
+  height: 0;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* Panel number fields: 72px, so a four-digit entry (the font size's 1000)
+   clears the spinner and every field of the category keeps one column. */
+.view.editor .editor-tools .editor-side-input {
+  width: 72px;
+  padding: 4px 6px;
+}
+
+/* The font picker fills its section instead of overflowing; its open list
+   may be wider than the field (a dropdown may overlay the canvas, and long
+   font names stay readable). */
+.view.editor .editor-tools .font-picker-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.view.editor .editor-tools .font-picker-list {
+  width: 300px;
+  max-width: none;
+}
+
+/* A slider row in the panel: the name owns its own line above the slider,
+   value field and unit (the app's one-line row would not fit 192px). */
+.editor-slider {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font-size: 13.5px;
+}
+
+.editor-slider > .editor-slider-name {
+  flex: 1 0 100%;
+}
+
+.editor-slider input[type="range"] {
+  flex: 1 1 60px;
+  width: auto;
+  min-width: 0;
+}
+
 .editor-workspace {
   flex: 1;
   min-height: 0;
@@ -325,41 +513,29 @@
   border-radius: 6px;
 }
 
-/* The effect tools' options bar (SPM-8): under the toolbar while Outline,
-   Glow or Warp is active. */
-.editor-effect-bar {
+/* The effect tools' settings (SPM-8, mounted in the tools panel since
+   SPM-15 D2): one block per tool, under Outline/Glow in Effects and Warp in
+   Paint. The horizontal bar is retired — a change here never moves the
+   canvas (the CMT-290 disease). */
+.editor-effect-settings {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Apply and Cancel are centred in the panel body (owner revision r3). */
+.editor-effect-actions {
+  display: flex;
   flex-wrap: wrap;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
-  /* Every tool's bar has the height of the one with buttons, so switching
-     between Outline, Glow and Warp does not shift the canvas. */
-  min-height: 52px;
-  box-sizing: border-box;
+  justify-content: center;
+  gap: 6px;
 }
 
-.editor-effect-bar[hidden],
-.editor-effect-group[hidden],
-.editor-effect-bar button[hidden] {
-  display: none;
+.editor-effect-actions button {
+  padding-inline: 16px;
 }
 
-.editor-effect-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.editor-effect-group input[type="range"] {
-  width: 110px;
-}
-
-/* Fixed width, so the bar does not jump while a slider's value changes. */
+/* Fixed width, so a slider's row does not jump while its value changes. */
 .editor-effect-value {
   display: inline-block;
   min-width: 52px;
@@ -382,7 +558,7 @@
 }
 
 .editor-effect-target {
-  font-size: 14px;
+  font-size: 13.5px;
 }
 
 /* A colour picker and the eyedropper beside it (owner decision 2026-11-23). */

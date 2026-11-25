@@ -178,12 +178,34 @@ import type { CanvasTool } from "../editor/model/tools";
 import { TextEditOverlay } from "../editor/view/text-edit";
 import { FontPicker } from "../editor/view/font-picker";
 import { EffectControls } from "../editor/view/effect-controls";
+import { shortcutLabel, shortcutOf, type ShortcutAction } from "../editor/model/shortcuts";
 import { eyedropperButton } from "../editor/view/eyedropper";
 import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
 import { WarpPress } from "../editor/view/warp-brush";
 import { moveWarpGesture, startWarpGesture, warpReadout, type WarpGesture } from "../editor/model/warp";
 import { confirmChoice } from "../dialog";
 import { el, errorMessage, withMessage } from "../ui";
+
+/** The left tools panel's categories (SPEC §6 Layout): one visible at a time. */
+type ToolsPanelTab = "select" | "paint" | "effects" | "text";
+
+/**
+ * The category a tool surfaces when it is activated — its button, its
+ * shortcut, or an automatic return to Move (SPEC §6 Layout, owner decision
+ * 2026-11-25). The reverse direction does not exist: a tab click shows its
+ * category and never changes the tool.
+ */
+const TOOL_PANEL: Record<CanvasTool, ToolsPanelTab> = {
+  move: "select",
+  rect: "select",
+  lasso: "select",
+  wand: "select",
+  erase: "paint",
+  restore: "paint",
+  warp: "paint",
+  outline: "effects",
+  glow: "effects",
+};
 
 let root: HTMLElement | null = null;
 
@@ -318,20 +340,33 @@ function buildEditor(): HTMLElement {
   const wandToolButton = button("Wand", () => setTool("wand"));
   const cutButton = button("Cut", () => run(cutSelection));
   const pasteButton = button("Paste", () => run(pasteFromButton));
-  moveToolButton.title = "Drag layers to move them, or empty space to pan";
-  rectToolButton.title = "Drag on the canvas to select a rectangle to cut";
-  lassoToolButton.title =
-    "Click to place points, drag to draw freehand; click the start point, double-click or press Enter to close (Backspace removes the last point or stroke, Esc cancels)";
-  wandToolButton.title =
-    "Click to select the colour-similar pixels of the selected image layer (or the base image); drag to set the tolerance; Shift adds a region, Alt removes one";
+  // Tooltips follow the §2 contract: Name (Shortcut) — one-line description
+  // (SPEC §6 Layout). The single-key tool shortcuts are the table's own.
+  const toolTitle = (name: string, action: ShortcutAction, description: string): string => {
+    const key = shortcutLabel(action);
+    return key ? `${name} (${key}) — ${description}` : `${name} — ${description}`;
+  };
+  moveToolButton.title = toolTitle("Move", "move", "Drag layers to move them, or empty space to pan");
+  rectToolButton.title = toolTitle("Rectangle", "rect", "Drag on the canvas to select a rectangle to cut");
+  lassoToolButton.title = toolTitle(
+    "Lasso",
+    "lasso",
+    "Click to place points, drag to draw freehand; click the start point, double-click or press Enter to close (Backspace removes the last point or stroke, Esc cancels)",
+  );
+  wandToolButton.title = toolTitle(
+    "Wand",
+    "wand",
+    "Click to select the colour-similar pixels of the selected image layer (or the base image); drag to set the tolerance; Shift adds a region, Alt removes one",
+  );
   const cutTitle = "Move the selected pixels into a new floating layer at the same spot";
   // Effect tools (SPM-8): each targets the selected layer, else the base image.
   const outlineToolButton = button("Outline", () => setTool("outline"));
   const glowToolButton = button("Glow", () => setTool("glow"));
   const warpToolButton = button("Warp", () => setTool("warp"));
-  outlineToolButton.title = "Outline the selected layer (or the base image): preview, then Apply";
-  glowToolButton.title = "Give the selected layer (or the base image) a fuzzy glow: preview, then Apply";
-  warpToolButton.title = "Enlarge parts of the selected layer (or the base image) with a bulge brush";
+  outlineToolButton.title = toolTitle("Outline", "outline", "Outline the selected layer (or the base image): preview, then Apply");
+  glowToolButton.title = toolTitle("Glow", "glow", "Give the selected layer (or the base image) a fuzzy glow: preview, then Apply");
+  warpToolButton.title = toolTitle("Warp", "warp", "Enlarge parts of the selected layer (or the base image) with a bulge brush");
+
   const effectControls = new EffectControls({
     change: () => refresh(),
     pick: (apply) => stage?.beginColorPick(apply),
@@ -477,8 +512,12 @@ function buildEditor(): HTMLElement {
     "Make the background of the selected image layer (or the base image) transparent; works offline after a one-time model download";
   const eraseToolButton = button("Erase", () => setTool("erase"));
   const restoreToolButton = button("Restore", () => setTool("restore"));
-  eraseToolButton.title = "Paint on the selected image layer (or the base image) to make it transparent";
-  restoreToolButton.title = "Paint on the selected image layer (or the base image) to bring back what was removed or erased";
+  eraseToolButton.title = toolTitle("Erase", "erase", "Paint on the selected image layer (or the base image) to make it transparent");
+  restoreToolButton.title = toolTitle(
+    "Restore",
+    "restore",
+    "Paint on the selected image layer (or the base image) to bring back what was removed or erased",
+  );
   const brushSizeInput = el("input", {
     class: "editor-side-input",
     type: "number",
@@ -621,56 +660,156 @@ function buildEditor(): HTMLElement {
     el("span", { class: "editor-session-actions", role: "group", "aria-label": "Session actions" }, saveButton, closeButton),
   );
 
-  // The tools and their settings leave this row for the left tabbed panel in
-  // the next slice (SPEC §6 Layout; D2): until it exists they keep their
-  // wiring and state here, unseen, so nothing behaviourally changes in this
-  // pass and D2 only has to move them.
-  const parkedTools = el(
-    "div",
-    { class: "editor-tools-parked", hidden: true },
-    addButton,
+  // ---- The left tabbed tools panel (SPEC §6 Layout, SPM-15 D2) ----
+  //
+  // Browser-style tab leaves on the panel's own top edge: the active leaf
+  // merges into the body (its bottom border interrupts the body's top
+  // border, body background), the inactive leaves are shorter and dimmer on
+  // --bg. One category is visible at a time; Select is the default. The four
+  // text leaves total wider than the 192px panel and OVERHANG its right edge
+  // over the canvas — the owner-accepted state until the labels become icons
+  // (owner decision 2026-11-25); the leaves are deliberately not shrunk
+  // (editor.css carries the same note).
+  //
+  // `panelTab` is panel state, not tool state: a tab click shows its
+  // category and STAYS until another rule fires. Tool activations surface
+  // their category through setTool (below), and opening text editing
+  // surfaces Text (editText), so nothing else ever moves the panel.
+  let panelTab: ToolsPanelTab = "select";
+  const tabButton = (name: ToolsPanelTab, label: string): HTMLButtonElement =>
     el(
-      "span",
-      { class: "editor-tool-group", role: "group", "aria-label": "Select and cut" },
-      moveToolButton,
-      rectToolButton,
-      lassoToolButton,
-      wandToolButton,
-      cutButton,
-      pasteButton,
-      el("label", { class: "editor-side" }, "Tolerance ", toleranceInput, " %"),
-      el("label", { class: "editor-side" }, featherInput, " Feather"),
-    ),
+      "button",
+      {
+        class: "editor-tool-tab",
+        type: "button",
+        role: "tab",
+        id: `editor-tool-tab-${name}`,
+        "aria-selected": "false",
+        "aria-controls": `editor-tool-panel-${name}`,
+        onclick: () => showPanel(name),
+      },
+      label,
+    ) as HTMLButtonElement;
+  const selectTab = tabButton("select", "Select");
+  const paintTab = tabButton("paint", "Paint");
+  const effectsTab = tabButton("effects", "Effects");
+  const textTab = tabButton("text", "Text");
+  textTab.title = toolTitle("Text", "text-tab", "the text tools and style controls");
+  const toolList = (...buttons: HTMLElement[]): HTMLElement => el("div", { class: "editor-tool-list" }, ...buttons);
+  const toolSection = (name: ToolsPanelTab, title: string, ...children: HTMLElement[]): HTMLElement =>
     el(
-      "span",
-      { class: "editor-tool-group", role: "group", "aria-label": "Effects" },
-      outlineToolButton,
-      glowToolButton,
-      warpToolButton,
-    ),
+      "section",
+      {
+        class: "editor-tool-section",
+        role: "tabpanel",
+        id: `editor-tool-panel-${name}`,
+        "aria-labelledby": `editor-tool-tab-${name}`,
+        hidden: true,
+      },
+      el("h3", { class: "editor-tool-section-title" }, title),
+      ...children,
+    );
+
+  // Select: the four selection tools, their two fields, then Cut and Paste.
+  const selectSection = toolSection(
+    "select",
+    "Select",
+    toolList(moveToolButton, rectToolButton, lassoToolButton, wandToolButton),
+    el("label", { class: "editor-field editor-field-indent" }, "Tolerance ", toleranceInput, " %"),
+    // The checkbox's own 4px UA inset is the row convention's source: every
+    // field row takes the same 4px, so they share one left inset.
+    el("label", { class: "editor-field" }, featherInput, " Feather"),
+    el("hr", { class: "editor-panel-sep" }),
+    toolList(cutButton, pasteButton),
+  );
+
+  // Paint: the refine brushes with their size, background removal (it stays
+  // with its brushes, owner decision 2026-11-25), and Warp's settings.
+  const paintSection = toolSection(
+    "paint",
+    "Paint",
+    toolList(eraseToolButton, restoreToolButton, warpToolButton),
+    el("label", { class: "editor-field editor-field-indent" }, "Brush ", brushSizeInput, " px"),
+    toolList(removeBackgroundButton, cancelDownloadButton),
+    effectControls.warpBlock,
+  );
+
+  // Effects: the two effect tools, each one's settings beneath, then the
+  // Apply/Cancel pair centred in the panel (owner revision r3).
+  const effectsSection = toolSection(
+    "effects",
+    "Effects",
+    toolList(outlineToolButton, glowToolButton),
+    effectControls.outlineBlock,
+    effectControls.glowBlock,
+    effectControls.actions,
+  );
+
+  // Text: the two text actions and the six style controls. The two colour
+  // rows gain small visible captions because an unlabelled swatch is
+  // ambiguous once it leaves a labelled toolbar row; inputs, aria-labels and
+  // titles are the app's own.
+  const textSection = toolSection(
+    "text",
+    "Text",
+    toolList(textButton, editTextButton),
+    fontPicker.element,
+    el("label", { class: "editor-field editor-field-indent" }, "Size ", fontSizeInput, " px"),
     el(
-      "span",
-      { class: "editor-tool-group", role: "group", "aria-label": "Background" },
-      removeBackgroundButton,
-      cancelDownloadButton,
-      eraseToolButton,
-      restoreToolButton,
-      el("label", { class: "editor-side" }, "Brush ", brushSizeInput, " px"),
-    ),
-    el(
-      "span",
-      { class: "editor-tool-group", role: "group", "aria-label": "Text" },
-      textButton,
-      editTextButton,
-      fontPicker.element,
-      el("label", { class: "editor-side" }, fontSizeInput, " px"),
+      "div",
+      { class: "editor-field editor-field-indent" },
+      el("span", { class: "editor-cap" }, "Text colour"),
       colorInput,
       textEyedropper,
+    ),
+    el(
+      "div",
+      { class: "editor-field editor-field-indent" },
+      el("span", { class: "editor-cap" }, "Outline colour"),
       outlineColorInput,
       outlineEyedropper,
-      el("label", { class: "editor-side" }, "Outline ", outlineWidthInput, " px"),
     ),
+    el("label", { class: "editor-field editor-field-indent" }, "Outline ", outlineWidthInput, " px"),
   );
+
+  const tabButtons: Record<ToolsPanelTab, HTMLButtonElement> = {
+    select: selectTab,
+    paint: paintTab,
+    effects: effectsTab,
+    text: textTab,
+  };
+  const panelSections: Record<ToolsPanelTab, HTMLElement> = {
+    select: selectSection,
+    paint: paintSection,
+    effects: effectsSection,
+    text: textSection,
+  };
+  /** Show one category; the tab leaves and the body follow. */
+  function showPanel(name: ToolsPanelTab): void {
+    panelTab = name;
+    for (const [tab, button] of Object.entries(tabButtons)) button.setAttribute("aria-selected", String(tab === name));
+    for (const [tab, section] of Object.entries(panelSections)) section.hidden = tab !== name;
+  }
+
+  const toolsPanel = el(
+    "aside",
+    { class: "editor-tools", "aria-label": "Tools" },
+    el(
+      "div",
+      { class: "editor-tabrow", role: "tablist", "aria-label": "Tool categories" },
+      selectTab,
+      paintTab,
+      effectsTab,
+      textTab,
+    ),
+    el("div", { class: "editor-tools-body" }, selectSection, paintSection, effectsSection, textSection),
+  );
+  showPanel(panelTab);
+
+  // Add image as layer stays parked, hidden, for the next slice (SPEC §6
+  // Layout; D3 moves it into the Layers panel). It keeps its wiring and
+  // state here so nothing behaviourally changes in this pass.
+  const parkedLayerTools = el("div", { class: "editor-tools-parked", hidden: true }, addButton);
 
   // The bottom status strip (SPEC §6 Layout, owner 2026-11-25): the live
   // readout on the left; zoom, Reset view and the unsaved-changes dot on the
@@ -693,7 +832,7 @@ function buildEditor(): HTMLElement {
     layerHint,
   );
 
-  const workspace = el("div", { class: "editor-workspace" }, canvasHost, layersPanel);
+  const workspace = el("div", { class: "editor-workspace" }, toolsPanel, canvasHost, layersPanel);
   // The wheel over the typing overlay zooms the canvas like anywhere else (owner re-test 2026-11-22).
   const textOverlay = new TextEditOverlay(canvasHost, (e) => stage?.zoomAtClient(e.clientX, e.clientY, e.deltaY));
   const view = el(
@@ -702,11 +841,10 @@ function buildEditor(): HTMLElement {
     toolbar,
     // The reserved message row sits directly under the top row (SPEC §6).
     message,
-    effectControls.element,
     empty,
     workspace,
     statusStrip,
-    parkedTools,
+    parkedLayerTools,
   );
 
   /**
@@ -1189,6 +1327,10 @@ function buildEditor(): HTMLElement {
     tool = next;
     basis = session && effectKindOf(next) ? effectBasis(session.doc, session.selection) : null;
     stage?.setTool(next);
+    // EVERY tool activation surfaces its category (SPEC §6 Layout): the
+    // buttons and the single-key shortcuts both land here, and so do the
+    // automatic returns to Move after Cut, Apply and a discarded preview.
+    showPanel(TOOL_PANEL[next]);
     refresh();
   }
 
@@ -1666,6 +1808,11 @@ function buildEditor(): HTMLElement {
     if (layer && layer.kind !== "text") return;
     const style: TextStyle = layer ? textStyleOf(layer) : { ...nextStyle, text: "" };
     setTool("move");
+    // Opening text editing surfaces Text even though the pointer tool stays
+    // Move (SPEC §6 Layout): the panel follows the active editing surface.
+    // Closing the overlay puts it back wherever the tool actually is.
+    showPanel("text");
+    const panelAfterEdit = (): void => showPanel(TOOL_PANEL[tool]);
     if (layer) {
       current.select(layer.id);
       stage.setEditing(layer.id);
@@ -1689,10 +1836,14 @@ function buildEditor(): HTMLElement {
       {
         commit: (text) => {
           stage?.setEditing(null);
+          panelAfterEdit();
           if (isBlankText(text) || text === style.text) return;
           void run(() => (layer ? restyleLayers([layer.id], { text }) : addText({ ...style, text })));
         },
-        cancel: () => stage?.setEditing(null),
+        cancel: () => {
+          stage?.setEditing(null);
+          panelAfterEdit();
+        },
       },
     );
   }
@@ -1911,12 +2062,15 @@ function buildEditor(): HTMLElement {
     empty.hidden = current !== null;
     workspace.hidden = current === null;
     toolbar.hidden = current === null;
+    // The tools panel is part of the workspace: gone with no session, like it.
+    toolsPanel.hidden = current === null;
     // The status strip describes a session's canvas and view, so it goes with them.
     statusStrip.hidden = current === null;
     openButton.disabled = busy;
     // The canvas tool buttons follow `tool` with or without a session, so
     // after Close no button stays pressed on the hidden top row or in the
-    // parked tools (SPM-8); the bar hides too, as its DOM is EffectControls' own.
+    // tools panel (SPM-8); the panel's effect blocks hide too (no session
+    // leaves their DOM in place).
     for (const [b, t] of [
       [moveToolButton, "move"],
       [rectToolButton, "rect"],
@@ -2126,6 +2280,18 @@ function buildEditor(): HTMLElement {
     // lasso in progress takes Enter, Esc and Backspace (SPM-9) - the most
     // recent mode cancels first - and only then the Editor's own Esc runs.
     if (stage?.handlePickKey(e.key) || stage?.handleLassoKey(e.key, { shift: e.shiftKey, alt: e.altKey })) {
+      e.preventDefault();
+      return;
+    }
+    // The single-key tool shortcuts (SPEC §6 Layout): the table and matcher
+    // are src/editor/model/shortcuts.ts; this caller owns the guards above
+    // (no session, overlay open, busy, a text field has focus). Each tool
+    // activation runs the button's own path, so it surfaces its category;
+    // T is the Text category's switch, not a tool.
+    const shortcut = shortcutOf(e);
+    if (shortcut) {
+      if (shortcut === "text-tab") showPanel("text");
+      else setTool(shortcut);
       e.preventDefault();
       return;
     }

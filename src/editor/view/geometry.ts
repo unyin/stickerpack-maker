@@ -203,7 +203,7 @@ export function sizeToolBlocker(
 ): string | null {
   const target = constraints.side;
   if (tool === "longest" && constraints.square) {
-    return `A ${constraints.mode} must be exactly ${target}×${target}, so use Fit to ${target}×${target}.`;
+    return `A ${constraints.mode} must be exactly ${target}×${target}, so use Fit in ${target}.`;
   }
   if (tool === "free") {
     const problem = resizeSideProblem(entered, freeKind);
