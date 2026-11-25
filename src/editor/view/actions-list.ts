@@ -130,7 +130,7 @@ export function renderActionList(list: HTMLElement, model: ActionListModel): voi
     items.push(item);
   }
   if (model.empty) items.push(el("li", { class: "editor-actions-empty muted" }, "No actions yet."));
-  // Top up to the notepad's row count; the nested steps count as lines too,
+  // Top up to the Actions list's row count; the nested steps count as lines too,
   // since they are what the user sees. The blanks carry no text or listener:
   // the CSS gives them a line box and the same zebra as a real row.
   const lines = model.rows.length + (model.empty ? 1 : 0);
