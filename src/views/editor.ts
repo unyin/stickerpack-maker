@@ -661,8 +661,8 @@ function buildEditor(): HTMLElement {
       boxButton,
       cropButton,
     ),
-    rule(),
     el("span", { class: "editor-spacer" }),
+    rule(),
     el("span", { class: "editor-session-actions", role: "group", "aria-label": "Session actions" }, saveButton, closeButton),
   );
 
