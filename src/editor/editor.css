@@ -375,9 +375,45 @@
   list-style: none;
   margin: 0;
   padding: 0;
+  /* The stack bottom-first (owner, from the test, 2026-11-25): the DOM runs
+     base -> newest (the model's own order) and column-reverse draws the
+     first row at the box's bottom, so rows rise as layers are added — the
+     base never moves. The list is its own scroller so a full stack keeps
+     the SAME bottom edge: the reversed flow starts at its bottom, showing
+     the base, with the newest rows above the fold. */
+  display: flex;
+  flex-direction: column-reverse;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* The layers box: exactly SEVEN rows tall (owner, from the test,
+   2026-11-25), the same cap as the Actions list. Fewer layers leave the
+   area above empty on the box's plain --bg (no stripes here); more scroll
+   inside. The 30px row is fixed rather than font-derived so the cap is
+   exact in the app's Windows UI font: 6px padding + an 18px line box. */
+.editor-layers-box {
+  --editor-layer-rows: 7;
+  --editor-layer-row-h: 30px;
+  /* The cap, not a floor: at the window's 600px minimum height the box gives
+     up rows before the action grid or hint below ever overflow the panel. */
+  flex: 0 1 auto;
+  height: calc(var(--editor-layer-rows) * var(--editor-layer-row-h) + 6px);
+  max-height: calc(var(--editor-layer-rows) * var(--editor-layer-row-h) + 6px);
+  overflow: hidden;
+}
+
+/* Only the box above gives way at the minimum height: the grid's cells keep
+   their measured height and the hint keeps its lines. */
+.editor-layers .editor-layer-actions,
+.editor-layers .editor-hint {
+  flex: none;
 }
 
 .editor-layers-list li {
+  height: var(--editor-layer-row-h);
+  line-height: 18px;
   display: flex;
   gap: 8px;
   align-items: baseline;
@@ -539,6 +575,15 @@
 
 .editor-actions-empty {
   font-style: italic;
+}
+
+/* The blank rows that top the list up to ACTION_LIST_ROWS
+   (src/editor/view/actions-list.ts owns the count): decoration only, so
+   each is aria-hidden and has no listener. Generated content gives the row
+   a real line box, so a blank line is exactly as tall as a real one and the
+   zebra rule above stripes it like any other odd row. */
+.editor-actions-fill::before {
+  content: "\00a0";
 }
 
 /* The Emoji tab's box (SPEC §6 Layout): a FIXED five-row height that never
@@ -710,6 +755,16 @@
 
 .editor-effect-target {
   font-size: 13.5px;
+  /* The target line (On: <layer>) WRAPS inside the 192px panel (owner,
+     from the test, 2026-11-25): a long name breaks anywhere, over as many
+     lines as it needs, and the Apply/Cancel pair below moves down — the
+     name never spills past the panel. min-width: 0 lets the flex item
+     shrink below its min-content width; overflow-wrap: anywhere shrinks
+     that width too, so even one unbroken name breaks. */
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
 }
 
 /* A colour picker and the eyedropper beside it (owner decision 2026-11-23). */

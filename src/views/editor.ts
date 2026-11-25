@@ -899,7 +899,7 @@ function buildEditor(): HTMLElement {
     "Layers, actions and emoji",
   );
   rightTabs.buttons.layers.title =
-    "Layers — The layer stack, top first; click a row to select a layer (Ctrl-click toggles)";
+    "Layers — The layer stack, base at the bottom; click a row to select a layer (Ctrl-click toggles)";
   rightTabs.buttons.actions.title = "Actions — Every undoable action this session, oldest first (read-only for now)";
   rightTabs.buttons.emoji.title = "Emoji — The sticker's Emoji String; 1–20 emoji, empty allowed";
   const rightSection = rightTabs.section;
@@ -916,7 +916,7 @@ function buildEditor(): HTMLElement {
   mergeButton.classList.add("editor-cell-merge");
   const layersSection = rightSection(
     "layers",
-    el("div", { class: "editor-listbox" }, layersList),
+    el("div", { class: "editor-listbox editor-layers-box" }, layersList),
     el(
       "div",
       { class: "editor-layer-actions", role: "group", "aria-label": "Layer actions" },
@@ -2234,8 +2234,13 @@ function buildEditor(): HTMLElement {
     // no or several layers selected, so nothing is appended.
     const size = selectedLayerSize(doc, current.selection);
     layersList.replaceChildren(
-      // Top of the stack first, as layer panels read.
-      ...[...doc.layers].reverse().map((layer) => {
+      // Bottom-first, in the model's own bottom-to-top order: the base image
+      // is the BOTTOM row of the box (nearest the action grid), each newer
+      // layer stacks above it, the newest at the content's top edge. The
+      // list's CSS packs the rows to the box's bottom, so a new layer fills
+      // fresh space ABOVE and the existing rows never move (owner, from the
+      // test, 2026-11-25).
+      ...doc.layers.map((layer) => {
         const item = el(
           "li",
           { class: current.selection.includes(layer.id) ? "selected" : "" },

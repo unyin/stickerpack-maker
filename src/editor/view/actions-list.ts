@@ -13,6 +13,10 @@
 // The SPM-23 lifetime rules do the clearing: a document edit empties the
 // selection trail, so the Select row and its steps vanish with the next
 // refresh; this module only renders what the session holds.
+//
+// The rendered list is always ACTION_LIST_ROWS lines tall: real lines first,
+// blank striped rows filling the rest (owner, from the test, 2026-11-25), so
+// a fresh session reads as lined paper rather than a bare box.
 import { el } from "../../ui";
 import type { ActionTrail } from "../model/history";
 import type { Contribution, PolyContribution, Region } from "../model/region";
@@ -39,6 +43,15 @@ export interface ActionListModel {
 
 /** The session start's label (the trail's null entry, SPEC §6 Layout). */
 export const SESSION_START = "Opened image";
+
+/**
+ * The list's height in rows: real lines are topped up with blank striped
+ * rows to this many, so a fresh session already shows the lined-notepad
+ * look (owner, from the test, 2026-11-25). Seven matches the Layers box's
+ * row cap; with more real lines than this there are no blanks and the box
+ * scrolls as before.
+ */
+export const ACTION_LIST_ROWS = 7;
 
 /** The list's rows for the session's two trails: the document's, then the selection's. */
 export function actionList(trail: ActionTrail, selection: SelectionTrail): ActionListModel {
@@ -93,7 +106,8 @@ function polygonName(contribution: PolyContribution): string {
   return box ? "rectangle region" : "lasso region";
 }
 
-/** Fill the tab's list: one row per label, the present marked, the selection nested under Select. */
+/** Fill the tab's list: one row per label, the present marked, the selection nested under Select,
+ * blank striped rows up to ACTION_LIST_ROWS (decoration: hidden from assistive tech). */
 export function renderActionList(list: HTMLElement, model: ActionListModel): void {
   const items: HTMLElement[] = [];
   let sub: HTMLElement | null = null;
@@ -114,5 +128,12 @@ export function renderActionList(list: HTMLElement, model: ActionListModel): voi
     items.push(item);
   }
   if (model.empty) items.push(el("li", { class: "editor-actions-empty muted" }, "No actions yet."));
+  // Top up to the notepad's row count; the nested steps count as lines too,
+  // since they are what the user sees. The blanks carry no text or listener:
+  // the CSS gives them a line box and the same zebra as a real row.
+  const lines = model.rows.length + (model.empty ? 1 : 0);
+  for (let i = lines; i < ACTION_LIST_ROWS; i++) {
+    items.push(el("li", { class: "editor-actions-fill", "aria-hidden": "true" }));
+  }
   list.replaceChildren(...items);
 }
