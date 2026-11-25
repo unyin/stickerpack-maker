@@ -623,9 +623,10 @@ pass.
     says so; there is no cross-target refusal). The merge runs in the target layer's own
     pixel grid, so a polygon cuts exactly as a plain Rectangle/Lasso does and a wand fill
     applied to its own layer moves the very same pixels (only a fill carried to another
-    layer resamples, softly); the dashed outline shows the merged area, holes included. A
-    composed selection inherits the wand's lifetime — any edit or undo drops it — while a
-    plain unmodified Rectangle/Lasso stays plain geometry in document pixels and survives
+    layer resamples, softly); the dashed outline shows the merged area, holes included,
+    and like a plain selection keeps any part of it past the canvas (SPM-24). A composed
+    selection inherits the wand's lifetime — any edit or undo drops it — while a plain
+    unmodified Rectangle/Lasso stays plain geometry in document pixels and survives
     edits, its whole-pixel Cut/Delete unchanged. The Feather checkbox governs a polygon
     contribution's boundary too (soft when on, hard when off). Three wand flows change with
     the unified rule (owner decisions 2026-11-24): a wand region with another layer

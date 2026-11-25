@@ -7,8 +7,8 @@
 // floating stack of contributions — a wand fill in the grid it was filled
 // in, or a polygon in document pixels — and dies with any change, like the
 // wand's did. No Konva, no DOM.
-import type { Point, Rect, Transform } from "./document";
-import { wandModeFor, type WandMask, type WandMode } from "./wand";
+import { localToDoc, pixelBounds, placedBounds, unionRect, type Point, type Rect, type Transform } from "./document";
+import { traceOutlines, wandModeFor, type WandMask, type WandMode } from "./wand";
 
 /** A rectangle or lasso selection: a closed polygon in document pixels (SPM-9). */
 export interface PolygonRegion {
@@ -46,8 +46,8 @@ export type Contribution = WandContribution | PolyContribution;
 /**
  * A floating selection (SPM-23, owner decision 2026-11-24): a stack of
  * contributions from any of the three tools, merged wherever it is resolved
- * — the target layer's own grid for Cut and Delete, the document's for the
- * dashed line.
+ * — the target layer's own grid for Cut and Delete, a grid covering its own
+ * bounds for the dashed line (SPM-24).
  */
 export interface ComposedRegion {
   readonly kind: "compose";
@@ -119,6 +119,95 @@ export function regionBounds(region: Region): Rect {
     bottom = Math.max(bottom, p.y);
   }
   return { x, y, width: right - x, height: bottom - y };
+}
+
+/**
+ * The most grid pixels the dashed outline's merge may span (SPM-24). The
+ * preview is display-only — Cut and Delete re-merge in the target layer's own
+ * grid — so a selection reaching far past the canvas is coarsened rather than
+ * allocated whole: 4096 x 4096, well under the compose command's own limit.
+ * Accepted residual: on a coarsened grid an add thinner than the scale can miss
+ * every sampled pixel centre, so the merge comes back empty and the selection
+ * drops though Cut would act — reachable only by up-scaled layers.
+ */
+export const PREVIEW_GRID_PIXELS = 4096 * 4096;
+
+/** The grid a floating selection is merged in for its dashed outline. */
+export interface PreviewGrid {
+  readonly width: number;
+  readonly height: number;
+  /** Grid to document: a translation to the box's corner, scaled when coarsened. */
+  readonly transform: Transform;
+}
+
+/**
+ * The grid that covers a stack's contributions wherever they sit (SPM-24,
+ * owner report): the union of their document-space bounds — a wand mask's box
+ * through its layer's transform, a polygon's points — whole pixels, so a
+ * composed selection keeps the part past the canvas, as a plain one does. Over
+ * `PREVIEW_GRID_PIXELS` it takes the smallest integer scale that fits (a grid
+ * pixel then spans `scale` document pixels). Null when the stack covers no area.
+ */
+export function previewGrid(contributions: readonly Contribution[]): PreviewGrid | null {
+  if (contributions.length === 0) return null;
+  const box = pixelBounds(
+    unionRect(
+      contributions.map((contribution): Rect => {
+        if (contribution.kind === "poly") return regionBounds({ kind: "lasso", points: contribution.points });
+        // placedBounds boxes a layer from its local origin; a mask's box starts at (x, y),
+        // so the transform moves its origin there first.
+        const { x, y, width, height } = contribution.mask;
+        const origin = localToDoc(contribution.transform, x, y);
+        return placedBounds(width, height, { ...contribution.transform, x: origin.x, y: origin.y });
+      }),
+    ),
+  );
+  const { width, height } = box;
+  if (!(Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0)) return null;
+  // The smallest integer scale whose grid fits, by binary search between a lower bound and
+  // the 1x1 scale. Each term of the lower bound is valid (a fitting grid has area >=
+  // w*h/s^2, and each side's cell count >= 1, so s >= w/P and s >= h/P). At the upper bound
+  // the grid is 1x1, which fits; the cell count only shrinks as the scale grows, so the
+  // search is valid and takes at most ~53 steps.
+  const fits = (s: number): boolean => Math.ceil(width / s) * Math.ceil(height / s) <= PREVIEW_GRID_PIXELS;
+  let lo = Math.max(
+    1,
+    Math.ceil(Math.sqrt((width * height) / PREVIEW_GRID_PIXELS)),
+    Math.ceil(width / PREVIEW_GRID_PIXELS),
+    Math.ceil(height / PREVIEW_GRID_PIXELS),
+  );
+  let hi = Math.max(lo, Math.ceil(Math.max(width, height)));
+  // Past the safe-integer range the scale cannot be exact (also catches a non-finite bound
+  // from width * height overflowing); no real selection reaches it.
+  if (!Number.isSafeInteger(hi)) return null;
+  while (lo < hi) {
+    const mid = lo + Math.floor((hi - lo) / 2);
+    if (fits(mid)) hi = mid;
+    else lo = mid + 1;
+  }
+  const scale = lo;
+  return {
+    width: Math.ceil(width / scale),
+    height: Math.ceil(height / scale),
+    transform: { x: box.x, y: box.y, scaleX: scale, scaleY: scale, rotation: 0 },
+  };
+}
+
+/**
+ * Merge a floating selection for its dashed outline (SPM-23, SPM-24): the
+ * stack composed over `previewGrid`, traced in document pixels; null when it
+ * covers nothing (a subtract that emptied it). `compose` is the Rust merge.
+ */
+export async function mergeSelection(
+  contributions: readonly Contribution[],
+  compose: (width: number, height: number, transform: Transform, contributions: readonly Contribution[]) => Promise<WandMask>,
+): Promise<ComposedRegion | null> {
+  const grid = previewGrid(contributions);
+  if (!grid) return null;
+  const merged = await compose(grid.width, grid.height, grid.transform, contributions);
+  return merged.width === 0 || merged.height === 0
+    ? null
+    : { kind: "compose", contributions, outlines: traceOutlines(merged, grid.transform) };
 }
 
 /**
