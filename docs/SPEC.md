@@ -284,11 +284,14 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
     40px thumbnail, the Title with the Short Name under it (one line each, ellipsis, both in
     full in the tooltip), the **status badge**, the Draft/Live badge,
     Open in explorer, Delete.
-  - **Search box**: an `<input type="search">` ("Search packs", 240px) in the Pack list header,
+  - **Search box**: an `<input type="search">` ("Search packs", 240px; accessible name, its
+    `aria-label`: "Search packs by Title or Short Name") in the Pack list header,
     just before **New pack…** (tab order: search, then New pack…; no shortcut). It filters as
     you type, in the webview only: a pack shows when its Title or Short Name contains the
     trimmed text, case-insensitively, in the stored order; empty or blank text shows every
-    pack. The header count reads "N of M packs" while filtering ("2 of 5 packs", "0 of 1 pack").
+    pack. The header count reads "N of M packs" whenever the search has text, even when
+    every pack matches ("2 of 5 packs", "9 of 9 packs", "0 of 1 pack"); with no text it is
+    the plain total ("9 packs").
     With no match the list holds one line, "No packs match “text”."; a Library with no packs
     keeps "No packs yet. Create one to start." The webview's own clear button and Esc empty
     the box. **Reordering is off while the box has text**: the grips are hidden (their column
@@ -297,8 +300,9 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
     and across leaving a pack and coming back, so the user returns to the next matching pack.
   - **Opening a pack**: a click anywhere on the row opens it, except on the grip and the row's
     buttons (Open in explorer, Delete), which keep their own behaviour; the click that ends a
-    drag never opens. The row shows a pointer cursor and tints on hover. The title stays the
-    one keyboard-focusable open control.
+    drag never opens. The row shows a pointer cursor and tints on hover, except the row being
+    dragged; the grip's own hover stays visible on a tinted row. The title stays the one
+    keyboard-focusable open control.
   - **The thumbnail cell**: the pack's own thumbnail (tooltip "Thumbnail"); with none, the
     first sticker in a dashed frame ("No thumbnail: Telegram shows the first sticker"), or the
     Missing art when that sticker is Missing ("... which is Missing"); a Missing thumbnail

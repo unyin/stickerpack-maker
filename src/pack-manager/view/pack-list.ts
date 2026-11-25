@@ -16,10 +16,11 @@ import {
 } from "../api";
 import { noPackMatchText, packCountText, packDeleteMessage, thumbnailFormat } from "../model/messages";
 import { statusBadgeOf } from "../model/pack-issues";
-import { filterPacks, reorderAllowed, rowClickOpens, rowThumbnail } from "../model/pack-row";
+import { reorderAllowed, searchView } from "../model/pack-search";
+import { rowClickOpens, rowThumbnail } from "../model/pack-row";
 import { confirmChoice } from "../../dialog";
 import { createPackDialog, statusBadge } from "./dialogs";
-import { cancelRowDrag, rowClickSuppressed, startRowDrag } from "./pack-list-drag";
+import { cancelRowDrag, packRows, rowClickSuppressed, startRowDrag } from "./pack-list-drag";
 import { previewImage, Previews } from "./previews";
 
 export function buildPackList(onOpen: (packId: number) => void): {
@@ -72,12 +73,8 @@ export function buildPackList(onOpen: (packId: number) => void): {
   );
 
   // `input` covers typing and the clear button; `search` covers Esc-to-clear.
-  const refilter = () => {
-    if (!reorderAllowed(search.value)) cancelRowDrag();
-    paint();
-  };
-  search.addEventListener("input", refilter);
-  search.addEventListener("search", refilter);
+  search.addEventListener("input", applyFilter);
+  search.addEventListener("search", applyFilter);
 
   newButton.addEventListener("click", async () => {
     const pack = await createPackDialog();
@@ -201,17 +198,36 @@ export function buildPackList(onOpen: (packId: number) => void): {
   // Reloads can overlap (a drop right after the list was shown): only the latest one paints, failures included.
   let loads = 0;
 
-  /** Draw the loaded packs through the current search (kept across reloads and shows). */
+  /** The Library has no packs: the list's only line. */
+  const emptyItem = el("li", { class: "pm-empty-item muted" }, "No packs yet. Create one to start.");
+  /** The search matches nothing: the list's only line (its text follows the query). */
+  const noMatchItem = el("li", { class: "pm-empty-item muted" });
+
+  /**
+   * Show the current search over the rows already drawn: hide the rows that do
+   * not match, update the count and the list's state. Cheap, so typing never
+   * rebuilds rows or drops the Previews caches.
+   */
+  function applyFilter(): void {
+    const view = searchView(packs, search.value);
+    if (view.filtering) cancelRowDrag();
+    packCount.textContent = packCountText(packs.length, view.filtering ? view.shownIds.size : null);
+    list.classList.toggle("filtering", view.filtering);
+    for (const item of packRows(list)) {
+      item.hidden = !view.shownIds.has(Number(item.dataset.id));
+    }
+    noMatchItem.textContent = noPackMatchText(search.value);
+    noMatchItem.hidden = !view.noMatch;
+  }
+
+  /** Draw the loaded packs from scratch (their data changed), then apply the search (kept across reloads and shows). */
   function paint(): void {
-    const shown = filterPacks(packs, search.value);
-    packCount.textContent = packCountText(packs.length, shown.length);
     cancelRowDrag();
     for (const cache of previews) cache.clear();
     previews = [];
-    list.classList.toggle("filtering", !reorderAllowed(search.value));
-    list.replaceChildren(...shown.map(row));
-    if (packs.length === 0) list.append(el("li", { class: "pm-empty-item muted" }, "No packs yet. Create one to start."));
-    else if (shown.length === 0) list.append(el("li", { class: "pm-empty-item muted" }, noPackMatchText(search.value)));
+    emptyItem.hidden = packs.length > 0;
+    list.replaceChildren(...packs.map(row), emptyItem, noMatchItem);
+    applyFilter();
   }
 
   async function reload(): Promise<void> {

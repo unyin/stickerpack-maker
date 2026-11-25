@@ -142,6 +142,11 @@
   border-radius: 10px;
 }
 
+.pm-pack-row[hidden],
+.pm-empty-item[hidden] {
+  display: none;
+}
+
 .pm-status-cell {
   justify-self: end;
 }

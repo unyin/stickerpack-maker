@@ -13,7 +13,7 @@ export interface RowDragHost {
   drop(packId: number, position: number): void;
 }
 
-function packRows(list: HTMLElement): HTMLElement[] {
+export function packRows(list: HTMLElement): HTMLElement[] {
   return Array.from(list.querySelectorAll<HTMLElement>(":scope > .pm-pack-row[data-id]"));
 }
 
@@ -44,7 +44,8 @@ export function rowGhost(list: HTMLElement, row: HTMLElement): HTMLElement {
  * drag starts on the grip and ends elsewhere in the row, so the browser clicks
  * the row (their common ancestor); the row's click handler asks this to skip
  * that click. An Esc-cancelled drag is still ended by the pointer's release,
- * which clicks too, so the flag outlives the cleanup until that release.
+ * which clicks too, so the flag outlives the cleanup until that release (or,
+ * if the release landed outside the webview, until the next press).
  */
 let clickSuppressed = false;
 
@@ -57,6 +58,37 @@ function settleClick(): void {
   setTimeout(() => (clickSuppressed = false), 0);
 }
 
+/** Removes the armed one-shot release listeners, if any. */
+let disarmRelease: (() => void) | null = null;
+
+/**
+ * After a drag was cancelled before its release (Esc, a reload): wait for the
+ * release and settle then. A pointerdown first means the release never reached
+ * the page (it landed outside the webview), so the flag clears at once and the
+ * press's own click is a real one. Both ends remove all three listeners.
+ */
+function armRelease(): void {
+  disarmRelease?.();
+  const off = () => {
+    window.removeEventListener("pointerup", released, true);
+    window.removeEventListener("pointercancel", released, true);
+    window.removeEventListener("pointerdown", pressed, true);
+    disarmRelease = null;
+  };
+  const released = () => {
+    off();
+    settleClick();
+  };
+  const pressed = () => {
+    off();
+    clickSuppressed = false;
+  };
+  window.addEventListener("pointerup", released, true);
+  window.addEventListener("pointercancel", released, true);
+  window.addEventListener("pointerdown", pressed, true);
+  disarmRelease = off;
+}
+
 /** Cleanup of the drag in progress, if any. */
 let activeDrag: (() => void) | null = null;
 
@@ -67,10 +99,10 @@ export function startRowDrag(e: PointerEvent, row: HTMLElement, packId: number, 
   // A stray earlier drag must not leak its listeners. Clean it up BEFORE this
   // drag takes the pointer capture: a mouse reuses the same pointer id.
   activeDrag?.();
-  clickSuppressed = true;
   const { list } = host;
   const from = packRows(list).indexOf(row);
   if (from === -1) return;
+  clickSuppressed = true;
   const box = row.getBoundingClientRect();
   const grabX = e.clientX - box.left;
   const grabY = e.clientY - box.top;
@@ -91,7 +123,8 @@ export function startRowDrag(e: PointerEvent, row: HTMLElement, packId: number, 
     if (slot < rows.length) rows[slot].classList.add("drop-before");
     else rows[rows.length - 1]?.classList.add("drop-after");
   };
-  const cleanup = () => {
+  // `releasePending`: the pointer's release is still to come (Esc, a reload), so wait for it.
+  const cleanup = (releasePending: boolean) => {
     list.removeEventListener("pointermove", move);
     list.removeEventListener("pointerup", end);
     list.removeEventListener("pointercancel", end);
@@ -99,14 +132,13 @@ export function startRowDrag(e: PointerEvent, row: HTMLElement, packId: number, 
     if (list.hasPointerCapture(e.pointerId)) list.releasePointerCapture(e.pointerId);
     ghost.remove();
     // A drag cancelled before the release (Esc, a reload) still ends in a click.
-    window.addEventListener("pointerup", settleClick, { once: true, capture: true });
-    window.addEventListener("pointercancel", settleClick, { once: true, capture: true });
+    if (releasePending) armRelease();
     document.body.classList.remove("pm-row-dragging");
     for (const r of packRows(list)) r.classList.remove("drop-before", "drop-after", "dragging");
     activeDrag = null;
   };
   const end = (u: PointerEvent) => {
-    cleanup();
+    cleanup(false);
     settleClick();
     const position = u.type === "pointerup" && slot !== null ? dropPosition(from, slot) : null;
     if (position !== null) host.drop(packId, position);
@@ -116,13 +148,13 @@ export function startRowDrag(e: PointerEvent, row: HTMLElement, packId: number, 
     if (k.key !== "Escape") return;
     k.preventDefault();
     k.stopPropagation();
-    cleanup();
+    cleanup(true);
   };
   list.addEventListener("pointermove", move);
   list.addEventListener("pointerup", end);
   list.addEventListener("pointercancel", end);
   window.addEventListener("keydown", escape, true);
-  activeDrag = cleanup;
+  activeDrag = () => cleanup(true);
 }
 
 /** Abandon a drag in progress (the list was left or reloaded mid-drag) without dropping. */

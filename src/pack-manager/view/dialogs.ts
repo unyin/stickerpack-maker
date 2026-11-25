@@ -17,12 +17,12 @@ import {
   type SendReport,
   type StickerView,
 } from "../api";
-import { packsAlphabetical } from "../model/pack-row";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import {
   fileNameOf,
   GO_LIVE_CONFIRMATION,
   matchPacks,
+  packsAlphabetical,
   REVERT_TO_DRAFT_WARNING,
   sendReportText,
   statusLabel,
