@@ -261,7 +261,7 @@ pass.
     conceptually with its brushes (owner decision 2026-11-25), with Cancel download beside it
     while the model downloads.
   - **Effects**: Outline and Glow.
-  - **Text**: Add text, Edit text and the six text style controls — the CMT-366 resolution:
+  - **Text**: Add text, Edit text and the five text style controls — the CMT-366 resolution:
     text-outline styling lives under Text, the Outline EFFECT tool under Effects.
   - Tool **settings live in the panel under their tool**: Warp's strength and radius while
     Warp is active, Outline's or Glow's controls with Apply/Cancel while that effect is active

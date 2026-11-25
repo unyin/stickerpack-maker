@@ -180,7 +180,7 @@ import { FontPicker } from "../editor/view/font-picker";
 import { EffectControls } from "../editor/view/effect-controls";
 import { shortcutLabel, shortcutOf, type ShortcutAction } from "../editor/model/shortcuts";
 import { actionList, renderActionList } from "../editor/view/actions-list";
-import { eyedropperButton } from "../editor/view/eyedropper";
+import { EYEDROPPER_TITLE, eyedropperButton } from "../editor/view/eyedropper";
 import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
 import { WarpPress } from "../editor/view/warp-brush";
 import { moveWarpGesture, startWarpGesture, warpReadout, type WarpGesture } from "../editor/model/warp";
@@ -328,13 +328,18 @@ function buildEditor(): HTMLElement {
   const closeButton = button("Close", () => run(async () => void (await closeSession())), "danger");
   const saveButton = button("Save…", () => run(saveSession), "primary");
   const saveStem = "Save… (Ctrl+S)";
+  /**
+   * A control's title under the §2 contract: the name stem always stays and a
+   * blocker reason replaces the description; `idle` (the enabled title) shows
+   * when there is none.
+   */
+  const blockedTitle = (name: string, reason: string | null, idle: string): string =>
+    reason !== null ? `${name} — ${reason}` : idle;
   /** The Save button's idle title: what saving does in the session's mode. */
   const saveTitle = () =>
     constraints.mode === "thumbnail"
       ? `${saveStem} — Save the canvas as this pack's thumbnail`
       : `${saveStem} — Save the canvas as a sticker in a pack`;
-  /** A disabled Save's title: the stem stays and the blocker takes the description's place (SPEC §2). */
-  const saveBlockedTitle = (reason: string) => `${saveStem} — ${reason}`;
   const upButton = button("Move up", () => moveSelected(+1));
   const downButton = button("Move down", () => moveSelected(-1));
   const mergeButton = button("Merge selected", () => run(mergeSelected));
@@ -531,7 +536,7 @@ function buildEditor(): HTMLElement {
     max: String(BRUSH_SIZE.max),
     step: "1",
     value: String(BRUSH_SIZE.initial),
-    "aria-label": "Brush size in pixels",
+    "aria-label": "Brush size",
   }) as HTMLInputElement;
   brushSizeInput.title = `Brush — The brush size in canvas px (${BRUSH_SIZE.min}–${BRUSH_SIZE.max})`;
   let brushSize: number = BRUSH_SIZE.initial;
@@ -558,7 +563,7 @@ function buildEditor(): HTMLElement {
     max: String(TOLERANCE.max),
     step: "1",
     value: String(TOLERANCE.initial),
-    "aria-label": "Wand tolerance in percent",
+    "aria-label": "Tolerance",
   }) as HTMLInputElement;
   toleranceInput.title = `Tolerance — How far each colour channel may drift from the clicked sample, in percent (${TOLERANCE.min}–${TOLERANCE.max})`;
   toleranceInput.addEventListener("change", () => {
@@ -578,7 +583,7 @@ function buildEditor(): HTMLElement {
   // selection is built from — a wand fill, and since SPM-23 a Rectangle or
   // Lasso polygon composed onto one — from the next one on.
   let feathered = true;
-  const featherInput = el("input", { type: "checkbox", "aria-label": "Selection feathering" }) as HTMLInputElement;
+  const featherInput = el("input", { type: "checkbox", "aria-label": "Feather" }) as HTMLInputElement;
   featherInput.checked = true;
   featherInput.title = "Feather — Soften the selection's edge by half a pixel; uncheck it for hard edges";
   featherInput.addEventListener("change", () => {
@@ -598,17 +603,21 @@ function buildEditor(): HTMLElement {
 
   // Tooltips follow the §2 contract: Name (Shortcut) — one-line description.
   // Sizing and crop have no single-key shortcut, so their names stand alone.
-  undoButton.title = "Undo (Ctrl+Z) — Step back: the selection's own steps first, then the document's changes";
-  redoButton.title = "Redo (Ctrl+Y) — Step forward again: the selection's own steps first, then the document's changes";
+  const undoTitle = "Undo (Ctrl+Z) — Step back: the selection's own steps first, then the document's changes";
+  const redoTitle = "Redo (Ctrl+Y) — Step forward again: the selection's own steps first, then the document's changes";
+  undoButton.title = undoTitle;
+  redoButton.title = redoTitle;
   const sideWord = () => (freeSide === "longest" ? "long" : "short");
   const resizeTitle = () =>
     `Resize — Scale everything on the canvas together so its ${sideWord()} side is the entered size ` +
     `(1–${IMPORT_MAX_SIDE} px); the canvas size stays`;
   resizeButton.title = resizeTitle();
-  sideKind.title = "Long side — The entered size applies to the image's longest side; Short side — its shortest";
+  sideKind.title = "Long side — The entered size applies to the image's longest side (Short side: its shortest)";
   resetViewButton.title = "Reset view — Zoom and centre the canvas in view (changes the view only)";
-  upButton.title = "Move up — Move the selected layer up the stack";
-  downButton.title = "Move down — Move the selected layer down the stack";
+  const upTitle = "Move up — Move the selected layer up the stack";
+  const downTitle = "Move down — Move the selected layer down the stack";
+  upButton.title = upTitle;
+  downButton.title = downTitle;
   boxButton.title = "Guide — Show or hide the crop guide";
   const cropTitle = (size: string) =>
     `Crop to ${size} — Discard everything outside the ${size} box; drag the image to choose what stays. The canvas size stays`;
@@ -862,7 +871,7 @@ function buildEditor(): HTMLElement {
   rightTabs.buttons.layers.title =
     "Layers — The layer stack, top first; click a row to select a layer (Ctrl-click toggles)";
   rightTabs.buttons.actions.title = "Actions — Every undoable action this session, oldest first (read-only for now)";
-  rightTabs.buttons.emoji.title = "Emoji — The sticker's Emoji String — 1–20 emoji, empty allowed";
+  rightTabs.buttons.emoji.title = "Emoji — The sticker's Emoji String; 1–20 emoji, empty allowed";
   const rightSection = rightTabs.section;
 
   // Layers: the list in its bounding box, the actions BELOW the box's bottom
@@ -1920,7 +1929,7 @@ function buildEditor(): HTMLElement {
     function reportProgress(p: DownloadProgress): void {
       downloadNote = downloadProgressText(p);
       say(downloadNote, "note");
-      saveButton.title = saveBlockedTitle(downloadNote);
+      saveButton.title = blockedTitle(saveStem, downloadNote, saveTitle());
     }
     reportProgress({ received: 0, total: status.sizeBytes });
     // Progress reports travel apart from the command's reply: one arriving
@@ -1946,7 +1955,7 @@ function buildEditor(): HTMLElement {
       // The model's inference wait is a generic busy action: Save shows its
       // canvas reason again (or its normal title) until run()'s closing refresh().
       const saveReason = session ? saveBlocker(session.doc, constraints) : null;
-      saveButton.title = saveReason !== null ? saveBlockedTitle(saveReason) : saveTitle();
+      saveButton.title = blockedTitle(saveStem, saveReason, saveTitle());
     }
   }
 
@@ -2291,20 +2300,23 @@ function buildEditor(): HTMLElement {
     // what saving does in this mode. The mode never changes mid-session, so
     // this is stable across refreshes.
     const side = constraints.side;
-    fitButton.textContent = `Fit in ${side}`;
-    fillButton.textContent = `Cover ${side}`;
-    longestButton.textContent = `Long side ${side}`;
+    const fitName = `Fit in ${side}`;
+    const fillName = `Cover ${side}`;
+    const longestName = `Long side ${side}`;
+    fitButton.textContent = fitName;
+    fillButton.textContent = fillName;
+    longestButton.textContent = longestName;
     const sideLabel = freeSide === "longest" ? "Long" : "Short";
     sideInput.setAttribute("aria-label", `${sideLabel} side in pixels`);
     sideInput.title = `${sideLabel} side — The entered size in pixels (1–${IMPORT_MAX_SIDE})`;
     const fitTitle =
-      `Fit in ${side} — Scale everything on the canvas together, as one image, so its longest side is ${side} px; ` +
+      `${fitName} — Scale everything on the canvas together, as one image, so its longest side is ${side} px; ` +
       `the canvas becomes ${side}×${side} with transparent padding`;
     const fillTitle =
-      `Cover ${side} — Scale everything on the canvas together, as one image, so its shortest side is ${side} px; ` +
+      `${fillName} — Scale everything on the canvas together, as one image, so its shortest side is ${side} px; ` +
       `the canvas becomes ${side}×${side} and anything beyond it is kept (drag the image to choose what shows)`;
     const longestTitle =
-      `Long side ${side} — Scale everything on the canvas together so its longest side is ${side} px; ` +
+      `${longestName} — Scale everything on the canvas together so its longest side is ${side} px; ` +
       "the canvas becomes the image (no padding)";
     const single = current.selection.length === 1 ? current.selection[0] : null;
     const index = single ? layerIndex(doc, single) : -1;
@@ -2317,17 +2329,17 @@ function buildEditor(): HTMLElement {
     // side, when the set needs a square canvas (SPEC §6).
     const content = stage ? stage.contentBounds() : null;
     const entered = enteredSide();
-    const sizing: [HTMLButtonElement, SizeTool, string, string][] = [
-      [fitButton, "fit", `Fit in ${side}`, fitTitle],
-      [fillButton, "fill", `Cover ${side}`, fillTitle],
-      [longestButton, "longest", `Long side ${side}`, longestTitle],
-      [resizeButton, "free", "Resize", resizeTitle()],
+    const sizing: { button: HTMLButtonElement; tool: SizeTool; name: string; action: string }[] = [
+      { button: fitButton, tool: "fit", name: fitName, action: fitTitle },
+      { button: fillButton, tool: "fill", name: fillName, action: fillTitle },
+      { button: longestButton, tool: "longest", name: longestName, action: longestTitle },
+      { button: resizeButton, tool: "free", name: "Resize", action: resizeTitle() },
     ];
-    for (const [button, tool, name, action] of sizing) {
+    for (const { button, tool, name, action } of sizing) {
       const reason = sizeToolBlocker(tool, doc, content, entered, constraints, freeSide);
       button.disabled = busy || reason !== null;
       // A disabled control's blocker replaces the description, never the name (SPEC §2).
-      button.title = reason !== null ? `${name} — ${reason}` : action;
+      button.title = blockedTitle(name, reason, action);
     }
     sideInput.disabled = busy;
     sideKind.disabled = busy;
@@ -2350,26 +2362,42 @@ function buildEditor(): HTMLElement {
     saveButton.disabled = busy || saveReason !== null;
     // While the model downloads (the one long busy wait), the disabled Save
     // says the download's progress instead of its idle title (SPEC §2).
-    saveButton.title =
-      saveReason !== null
-        ? saveBlockedTitle(saveReason)
-        : downloadNote !== null
-          ? saveBlockedTitle(downloadNote)
-          : saveTitle();
+    saveButton.title = blockedTitle(saveStem, saveReason ?? downloadNote, saveTitle());
     undoButton.disabled = busy || !current.canUndoAny;
+    undoButton.title = blockedTitle(
+      "Undo (Ctrl+Z)",
+      current.canUndoAny ? null : "Nothing to step back to yet",
+      undoTitle,
+    );
     redoButton.disabled = busy || !current.canRedoAny;
-    upButton.disabled = busy || !single || index === doc.layers.length - 1;
+    redoButton.title = blockedTitle(
+      "Redo (Ctrl+Y)",
+      current.canRedoAny ? null : "Nothing to step forward to yet",
+      redoTitle,
+    );
+    // The stack's ends and the one-layer rule are the two blockers here
+    // (SPEC §2): each disabled arrow says which one is in the way.
+    const atTop = index === doc.layers.length - 1;
+    upButton.disabled = busy || !single || atTop;
+    upButton.title = blockedTitle(
+      "Move up",
+      !single ? "Select one layer to move it" : atTop ? "The layer is already at the top" : null,
+      upTitle,
+    );
     downButton.disabled = busy || !single || index === 0;
+    downButton.title = blockedTitle(
+      "Move down",
+      !single ? "Select one layer to move it" : index === 0 ? "The layer is already at the bottom" : null,
+      downTitle,
+    );
     mergeButton.disabled = busy || blocker !== null;
     mergeButton.title =
       blocker !== null ? `Merge selected — ${blocker}` : "Merge selected — Merge the selected layers into one";
     deleteButton.disabled = busy || deleteReason !== null;
-    deleteButton.title =
-      deleteReason !== null
-        ? `Delete — ${deleteReason}`
-        : current.region
-          ? "Delete — Erase the selection's pixels (Delete key)"
-          : "Delete — Delete the selected layers (Delete key)";
+    const deleteTitle = current.region
+      ? "Delete (Delete key) — Erase the selection's pixels"
+      : "Delete (Delete key) — Remove the selected layers";
+    deleteButton.title = blockedTitle("Delete (Delete key)", deleteReason, deleteTitle);
     const cutReason = cutBlocker(doc, current.selection, current.region);
     cutButton.disabled = busy || cutReason !== null;
     cutButton.title = cutReason !== null ? `Cut (Ctrl+X) — ${cutReason}` : cutTitle;
@@ -2417,6 +2445,10 @@ function buildEditor(): HTMLElement {
       textReason !== null
         ? `Text outline width — ${textReason}`
         : `Text outline width — The outline width of ${target} in px (0 for no outline)`;
+    // The two eyedroppers join the text controls' disable loop, so a disabled
+    // one says the same fonts blocker (SPEC §2).
+    textEyedropper.title = blockedTitle("Eyedropper", textReason, EYEDROPPER_TITLE);
+    outlineEyedropper.title = blockedTitle("Eyedropper", textReason, EYEDROPPER_TITLE);
     // Explain disabled actions only once something is selected.
     layerHint.textContent = layerHintText(doc, current.selection, current.region, {
       merge: blocker,

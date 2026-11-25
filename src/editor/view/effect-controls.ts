@@ -83,19 +83,61 @@ export class EffectControls {
     this.outlineBlock = this.block(
       "Outline settings",
       this.color("Outline colour", "The outline's colour", () => this.outline.color, (c) => (this.outline.color = c)),
-      this.slider("Width", "The outline's width in px", OUTLINE_WIDTH, "px", () => this.outline.width, (v) => (this.outline.width = v)),
+      this.slider({
+        label: "Width",
+        description: "The outline's width in px",
+        range: OUTLINE_WIDTH,
+        unit: "px",
+        get: () => this.outline.width,
+        set: (v) => (this.outline.width = v),
+      }),
     );
     this.glowBlock = this.block(
       "Glow settings",
       this.color("Glow colour", "The glow's colour", () => this.glow.color, (c) => (this.glow.color = c)),
-      this.slider("Radius", "The glow's radius in px", GLOW_RADIUS, "px", () => this.glow.radius, (v) => (this.glow.radius = v)),
-      this.slider("Softness", "How soft the glow's edge is, in percent", GLOW_SOFTNESS, "%", () => this.glow.softness, (v) => (this.glow.softness = v)),
-      this.slider("Opacity", "The glow's opacity, in percent", GLOW_OPACITY, "%", () => this.glow.opacity, (v) => (this.glow.opacity = v)),
+      this.slider({
+        label: "Radius",
+        description: "The glow's radius in px",
+        range: GLOW_RADIUS,
+        unit: "px",
+        get: () => this.glow.radius,
+        set: (v) => (this.glow.radius = v),
+      }),
+      this.slider({
+        label: "Softness",
+        description: "How soft the glow's edge is, in percent",
+        range: GLOW_SOFTNESS,
+        unit: "%",
+        get: () => this.glow.softness,
+        set: (v) => (this.glow.softness = v),
+      }),
+      this.slider({
+        label: "Opacity",
+        description: "The glow's opacity, in percent",
+        range: GLOW_OPACITY,
+        unit: "%",
+        get: () => this.glow.opacity,
+        set: (v) => (this.glow.opacity = v),
+      }),
     );
     this.warpBlock = this.block(
       "Warp settings",
-      this.slider("Strength", "How much the bulge magnifies, in percent", WARP_STRENGTH, "%", () => this.brush.strength, (v) => (this.brush.strength = v)),
-      this.slider("Radius", "The bulge's radius in px", WARP_RADIUS, "px", () => this.brush.radius, (v) => (this.brush.radius = v)),
+      this.slider({
+        label: "Strength",
+        description: "How much the bulge magnifies, in percent",
+        range: WARP_STRENGTH,
+        unit: "%",
+        get: () => this.brush.strength,
+        set: (v) => (this.brush.strength = v),
+      }),
+      this.slider({
+        label: "Radius",
+        description: "The bulge's radius in px",
+        range: WARP_RADIUS,
+        unit: "px",
+        get: () => this.brush.radius,
+        set: (v) => (this.brush.radius = v),
+      }),
       el("span", { class: "muted" }, "Click to bulge; drag to size it (Shift: strength, up = more). Choose the layer in Layers."),
     );
     this.blocks = { outline: this.outlineBlock, glow: this.glowBlock, warp: this.warpBlock };
@@ -217,14 +259,17 @@ export class EffectControls {
    * once (as the text controls do). The panel's width puts the name above
    * the slider row; the controls and their behaviour are the bar's own.
    */
-  private slider(
-    label: string,
-    description: string,
-    range: Range,
-    unit: string,
-    get: () => number,
-    set: (v: number) => void,
-  ): HTMLElement {
+  private slider(options: {
+    /** The Name stem of the §2 tooltip and the visible row name. */
+    label: string;
+    /** The one-line description the title carries (Name — description). */
+    description: string;
+    range: Range;
+    unit: string;
+    get: () => number;
+    set: (v: number) => void;
+  }): HTMLElement {
+    const { label, description, range, unit, get, set } = options;
     const input = el("input", {
       type: "range",
       min: String(range.min),
