@@ -9,7 +9,7 @@
 // thumbnail slot opens; SPM-22 the magic-wand selection; SPM-23 the selection
 // composing across the three selection tools.
 import "../editor/editor.css";
-import { baseName } from "../api";
+import { baseName } from "../shared/path";
 import {
   applyEffect,
   backgroundModelStatus,
@@ -186,7 +186,20 @@ import { EYEDROPPER_STEM, EYEDROPPER_TITLE, eyedropperButton } from "../editor/v
 import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
 import { WarpPress } from "../editor/view/warp-brush";
 import { moveWarpGesture, startWarpGesture, warpReadout, type WarpGesture } from "../editor/model/warp";
-import { confirmChoice } from "../dialog";
+import { confirmChoice, dialogOpen, openDialog } from "../dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import {
+  cantOpenMessage,
+  DROP_BUSY_NOTE,
+  DROP_DIALOG_TITLE,
+  dropDialogBody,
+  dropDialogButtons,
+  dropNote,
+  dropPlan,
+  type DropChoice,
+  type DropOutcome,
+  type DropPlan,
+} from "../editor/model/drop";
 import { el, errorMessage, withMessage } from "../ui";
 
 /** The left tools panel's categories (SPEC §6 Layout): one visible at a time. */
@@ -275,9 +288,9 @@ function buildEditor(): HTMLElement {
   // Live readout of the canvas against the constraint set (SPEC §6).
   const readout = el("span", { class: "editor-readout", "aria-live": "polite" });
 
-  const openButton = button("Open image", () => run(openImage), "primary");
+  const openButton = button("Open image", () => run(async () => { await openImage(); }), "primary");
   // The ellipsis marks the image picker dialog it opens (SPEC §6 Layout, D3).
-  const addButton = button("Add image as layer…", () => run(addImageAsLayer), "primary");
+  const addButton = button("Add image as layer…", () => run(async () => { await addImageAsLayer(); }), "primary");
   addButton.title = "Add image as layer… — Pick an image and place it on top of the canvas at its native pixel size";
   const undoButton = button("Undo", () => {
     clearNote();
@@ -1240,21 +1253,39 @@ function buildEditor(): HTMLElement {
     });
   }
 
-  async function openImage(path?: string, from: StickerOrigin | null = null): Promise<void> {
-    if (session) return; // one session at a time: Close first
+  /** Open an image as a sticker session; false when nothing opened (one already open, or cancelled). */
+  async function openImage(path?: string, from: StickerOrigin | null = null): Promise<boolean> {
+    if (session) return false; // one session at a time: Close first
     const picked = await pickAndImport(path);
-    if (!picked) return;
+    if (!picked) return false;
     startSession(picked, STICKER, from, null);
+    return true;
   }
 
-  async function addImageAsLayer(): Promise<void> {
+  /** Add an image as a layer (the picker's, or the dropped `path`); false when cancelled. */
+  async function addImageAsLayer(path?: string): Promise<boolean> {
     const current = session;
-    if (!current) return;
-    const picked = await pickAndImport();
-    if (!picked) return;
+    if (!current) return false;
+    const picked = await pickAndImport(path);
+    if (!picked) return false;
     const id = nextLayerId(current.doc);
     current.apply("Add image as layer", (doc) => addRasterLayer(doc, picked.image, picked.name, centeredPlacement(doc, picked.image)));
     current.select(id);
+    return true;
+  }
+
+  /**
+   * Close the session, then run `open` (Open instead and the Pack Manager's
+   * hooks share it): both questions go through closeSession, unsaved changes
+   * first, and the gone-origin one for a clean session (owner decision
+   * 2026-11-23). `showEditor` runs either way, so Keep editing shows the
+   * open image. False when the questions kept the session or `open` opened
+   * nothing.
+   */
+  async function closeThenOpen(open: () => Promise<boolean>, showEditor?: () => void): Promise<boolean> {
+    const closed = await closeSession();
+    showEditor?.();
+    return closed && (await open());
   }
 
   /**
@@ -1262,11 +1293,12 @@ function buildEditor(): HTMLElement {
    * at the thumbnail side square and the session saves into `from`'s pack.
    * One session at a time, guaranteed by the hook that calls here.
    */
-  async function openThumbnail(path: string, from: ThumbnailOrigin): Promise<void> {
-    if (session) return; // one session at a time: Close first
+  async function openThumbnail(path: string, from: ThumbnailOrigin): Promise<boolean> {
+    if (session) return false; // one session at a time: Close first
     const picked = await pickAndImport(path);
-    if (!picked) return;
+    if (!picked) return false;
     startSession(picked, THUMBNAIL, null, from);
+    return true;
   }
 
   async function mergeSelected(): Promise<void> {
@@ -2663,23 +2695,75 @@ function buildEditor(): HTMLElement {
     void run(async () => pasteImage(new Uint8Array(await file.arrayBuffer())));
   });
 
+  // Dropping an image file on the Editor (SPM-27). The Editor is built once
+  // and never torn down, so the listener lives as long as the window. It acts
+  // only while the Editor is on screen, so the Pack view's bulk import (its
+  // own listener, the mirror check) never sees an Editor drop.
+  async function handleDrop(plan: DropPlan): Promise<void> {
+    const note = (outcome: DropOutcome, name: string, more: boolean) => {
+      const text = dropNote(outcome, name, more);
+      if (text) say(text, "note");
+    };
+    switch (plan.kind) {
+      case "ignore":
+        return;
+      case "busy":
+        return say(DROP_BUSY_NOTE, "note");
+      case "unsupported":
+        return say(cantOpenMessage(plan.name, plan.more));
+      case "open": {
+        const { path, name, more } = plan;
+        return run(async () => note((await openImage(path)) ? "opened" : "declined", name, more));
+      }
+      case "ask": {
+        const { path, name, more, thumbnail } = plan;
+        return run(async () => {
+          const lines = dropDialogBody(name, thumbnail, thumbnailOrigin?.packTitle ?? "");
+          const body = lines.map((l) => el("p", l.muted ? { class: "muted" } : {}, l.text));
+          const choice = await openDialog<DropChoice>(DROP_DIALOG_TITLE, body, dropDialogButtons(thumbnail), "cancel", { defaultChoice: "cancel" }).result;
+          if (choice === "layer") {
+            note((await addImageAsLayer(path)) ? "added" : "declined", name, more);
+          } else if (choice === "open") {
+            // The same questions as the Pack Manager's hook; Keep editing leaves everything as it was.
+            const opened = await closeThenOpen(() => openImage(path));
+            note(opened ? (thumbnail ? "openedAsSticker" : "opened") : "declined", name, more);
+          } else note("declined", name, more);
+        });
+      }
+    }
+  }
+  /** The drop outline goes on whichever part of the work area is showing. */
+  function setDropTarget(on: boolean): void {
+    empty.classList.remove("drop-target");
+    canvasHost.classList.remove("drop-target");
+    if (on) (session ? canvasHost : empty).classList.add("drop-target");
+  }
+  getCurrentWebview()
+    .onDragDropEvent((event) => {
+      if (!view.isConnected) return;
+      const payload = event.payload;
+      if (payload.type === "over" || payload.type === "enter") setDropTarget(!dialogOpen());
+      else if (payload.type === "leave") setDropTarget(false);
+      else if (payload.type === "drop") {
+        setDropTarget(false);
+        const kind = !session ? "none" : thumbnailOrigin ? "thumbnail" : "sticker";
+        const plan = dropPlan(payload.paths, kind, busy, dialogOpen());
+        void handleDrop(plan);
+      }
+    })
+    .catch(() => {});
+
   void loadFonts();
 
   // Pack Manager hook (SPM-3), see openFileInEditor below.
   openFileHook = (path, showEditor, from) =>
     run(async () => {
-      // Both questions go through closeSession: unsaved changes first, and
-      // the gone-origin one for a clean session (owner decision 2026-11-23).
-      const closed = await closeSession();
-      showEditor(); // either way: Keep editing shows the open image
-      if (closed) await openImage(path, from ?? null);
+      await closeThenOpen(() => openImage(path, from ?? null), showEditor);
     });
   // The thumbnail slot's hook (SPM-12): the same questions, then Thumbnail mode.
   openThumbnailHook = (path, showEditor, from) =>
     run(async () => {
-      const closed = await closeSession();
-      showEditor();
-      if (closed) await openThumbnail(path, from);
+      await closeThenOpen(() => openThumbnail(path, from), showEditor);
     });
   // The dialog then says why Replace is gone, rather than silently dropping it.
   forgetOriginHook = () => {

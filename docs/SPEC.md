@@ -421,6 +421,7 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   before "sticker10"), because Windows hands dropped files over in its own drag order, not
   Explorer's view order (owner decision 2026-11-21); invalid files rejected per-file with an
   "open in editor" option. Imported stickers get no emoji; empty-emoji stickers are flagged.
+  A drop imports only while the Pack view is on screen; on the Editor a drop opens there (§6).
 - Pack-view messages that stay until dismissed (notices such as "Checked the pack folder…"
   and the import summary) have an **X** on the left as well as **Dismiss** on the right
   (owner decision 2026-11-22).
@@ -550,6 +551,32 @@ pass.
   starts one; while a session is open, another image can only be brought in with **Add image
   as layer** (native pixel size, centred on the canvas, on top; may overflow; same 2000×2000
   rule). Starting over means **Close** first, which warns when there are unsaved changes.
+- **Drop an image on the Editor** (owner decisions 2026-11-26, SPM-27). Dropping an image file
+  anywhere on the Editor screen counts; it acts only while the Editor is on screen (the Pack
+  view's bulk import keeps its own screen, and an Editor drop never imports into a pack).
+  While a file is dragged over, the work area gets the Pack view's dashed accent outline,
+  removed on leave and on drop. Only the **first** file in Windows' drop order counts; with
+  several, the message line adds that the rest are ignored.
+  - Not an importable file (not .jpg/.jpeg/.jfif/.png/.webp, a folder too): nothing opens or
+    changes; error line `Can't open “x.gif”: the Editor opens PNG, JPEG and WEBP files.`, plus
+    ` Dropped files after the first are ignored.` with several. Later files are not tried.
+  - Nothing open: the file opens exactly as **Open image** does (the 2000×2000 question
+    included); with several files the note `Opened “a.png”; dropped files after the first are
+    ignored.`
+  - An image already open: the shared dialog (§2) titled **Dropped image**, body `What should
+    happen to “b.png”?`, buttons **Add as layer**, **Open instead**, **Cancel** (primary, the
+    default; Esc and closing = Cancel). **Add as layer** behaves as Add image as layer (one
+    undo step; note `Added “b.png” as a layer.`). **Open instead** goes through the same
+    questions as the Pack Manager's open (unsaved changes, or the gone origin; Keep editing
+    leaves everything as it was), then opens a normal sticker session with no origin. Cancel
+    changes nothing; with several files the note `Dropped files after the first were ignored.`
+  - A thumbnail session open: the same dialog plus a muted second line `Open instead starts a
+    new sticker, not a thumbnail for “<pack title>”.`, and the middle button reads **Open as
+    sticker instead**; Add as layer adds into the thumbnail session; Open as sticker instead
+    opens a sticker session, then the note `Opened “b.png” as a sticker.`
+  - A dialog open: the drop does nothing. The Editor busy: the drop does nothing and the line
+    says `Busy: try the drop again in a moment`.
+  - The notes use the neutral note style; "Can't open" uses the error style.
 
 ### Crop and sizing
 - Togglable **box overlay** at the active constraint set's side (owner decision 2026-11-20):
