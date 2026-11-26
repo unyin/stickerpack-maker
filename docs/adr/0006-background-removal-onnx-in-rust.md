@@ -4,12 +4,11 @@ Status: **Accepted** — owner approval 2026-11-23, after the Windows test of th
 (including the packaging check: the app starts with no onnxruntime.dll, verified on the dev
 run, the release build and the installer) and the single-model spot-check. The owner's
 decisions of 2026-11-22 (CMT-242) are built in: rembg's release as the download host until
-the file is mirrored to the project's own release (done in SPM-19, see the amendment
-below), static ONNX Runtime, ISNet general use
-as the model. The owner decision of 2026-11-23 dropped the second model (ISNet anime)
-after the owner's Windows test judged it unusable: background removal is back to the single
-general model, with no model choice in the UI (colour anime is out of scope; manga will
-be handled by a separate magic-wand tool).
+the file is mirrored to the project's own release (done in SPM-19, see the amendment below),
+static ONNX Runtime, ISNet general use as the model. The owner decision of 2026-11-23
+dropped the second model (ISNet anime) after the owner's Windows test judged it unusable:
+background removal is back to the single general model, with no model choice in the UI
+(colour anime is out of scope; manga will be handled by a separate magic-wand tool).
 
 Background removal (SPEC §6) is one click on an image layer, offline after a one-time model
 download (ADR-0001, SPEC §2), followed by a refine brush that erases or restores alpha by hand.
@@ -59,7 +58,7 @@ runs in the webview.**
     (SPEC §2), naming its size. **Download** fetches it; **Cancel**, the safe
     default, does nothing.
   - The pinned source is rembg's release asset (until a later task mirrors it to the
-    project's own release; only the URL changes):
+    project's own release; only the URL changes - mirrored in SPM-19, amended below):
     `https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx`,
     SHA-256 `60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a`,
     178,648,008 bytes.
@@ -129,7 +128,7 @@ accepted the model on that basis (2026-11-22).
   Running the model holds about its size in memory.
 - **The download host is a third party** (rembg's GitHub release) until a later task mirrors
   the file to the project's own release: the pinned SHA-256 makes a changed file fail
-  safely, but a removed one breaks the first download.
+  safely, but a removed one breaks the first download (mirrored in SPM-19, amended below).
 - **Third-party notices:** ISNet (Apache-2.0) and ONNX
   Runtime (MIT) need crediting wherever
   the app lists its licences.
@@ -144,8 +143,8 @@ The model is now served from the project's own `models` release on `unyin/sticke
 a byte-identical mirror of rembg's release asset: the same SHA-256 and size, and only the URL
 changed in `ModelSpec`. Verified 2026-11-26 by downloading through the public URL (HTTP 200
 after one redirect, size and SHA-256 match) and by the app's own downloader
-(`ml/download.rs`), which completed with its hash check. This supersedes the "download host
-is a third party" consequence above.
+(`ml/download.rs`), which completed with its hash check. This supersedes the Decision's pinned
+source and the "download host is a third party" consequence above.
 
 - **Remaining risk:** the first download now depends on this project's `models` release and
   its tag. Deleting or renaming the tag or the asset breaks it; the pinned SHA-256 still makes
