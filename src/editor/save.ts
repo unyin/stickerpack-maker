@@ -213,7 +213,7 @@ export function savedText(outcome: Saved, packTitle: string, target: SaveTarget)
   const quality = outcome.quality === null ? "" : `, WEBP quality ${outcome.quality}`;
   const size = `${formatBytes(outcome.bytes)}${quality}`;
   if (target.kind === "replace") return `Replaced #${sticker.position} in “${packTitle}”.`;
-  const emoji = sticker.emojiString === "" ? " Give it an Emoji String in the Pack Manager." : "";
+  const emoji = sticker.emojiString === "" ? " Give it an Emoji String in the Emoji tab or the Pack Manager." : "";
   return `Saved as ${sticker.fileName}, sticker #${sticker.position} of “${packTitle}” (${size}).${emoji}`;
 }
 
