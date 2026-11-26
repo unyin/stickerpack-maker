@@ -25,8 +25,7 @@ pub struct ModelSpec {
 /// input, mean 0.5 and std 1 (rembg's `dis_general_use` session).
 pub const ISNET_GENERAL_USE: ModelSpec = ModelSpec {
     file_name: "isnet-general-use.onnx",
-    // The project's own release asset (SPM-19), a byte-identical mirror of
-    // rembg's release asset: same SHA-256 and size, so only the URL moved.
+    // The project's own mirror (SPM-19) of rembg's release asset, byte-identical (ADR-0006).
     url: "https://github.com/unyin/stickerpack-maker/releases/download/models/isnet-general-use.onnx",
     sha256: "60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a",
     size_bytes: 178_648_008,
