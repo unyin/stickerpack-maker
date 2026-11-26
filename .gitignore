@@ -16,3 +16,5 @@ Thumbs.db
 
 # OpenCode session export (archive artifact, not project source)
 telegram-sticker-pack-creator-and-manager.json
+# Owner's design mockups and icon sheets (kept locally, never committed)
+Mockups/
