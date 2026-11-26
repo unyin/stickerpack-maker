@@ -112,6 +112,32 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
 Command map agreed with the owner on 2026-11-19 (SPM-4). One selection→panel paradigm for
 stickers, Missing stickers, and the thumbnail.
 
+### Top bar (owner decisions 2026-11-26, SPM-26)
+Left to right: a **reserved back slot**, the **Editor** and **Pack Manager** tabs, the app
+name **Stickerpack Maker** pushed to the right, and the **Settings** tab in the top-right
+corner. Nothing in the bar moves between states (in a pack, on the Pack list, in the Editor
+or Settings, a long pack Title).
+- **Back slot**: a secondary button **← Pack list** (tooltip "Back to the list of packs"),
+  visible only while the Pack Manager shows a pack and otherwise hidden but still taking its
+  space (visibility, not display). It does what the pack header's old button did, and like it
+  is disabled while the pack view is busy.
+- **Tab icons**: every tab has an icon (18px) and a label with a 6px gap: Editor = scissors,
+  Pack Manager = layers, Settings = cog (drawn in `src/icons.ts`; chosen from a sheet rendered
+  and measured at the real size).
+- **The Pack Manager tab names the open pack on every screen**: "Pack Manager", a "›"
+  separator, then the pack's Title (font-weight 600, capped at 160px with an ellipsis), while
+  a pack is open; plain "Pack Manager" when none is. The name follows the pack's Title as it is
+  edited and disappears when the pack is closed, deleted or left for the list, and when the
+  Library changes. Tooltip: from the Editor or Settings with a pack open, **Back to "<full
+  Title>"**; while the pack is on screen, **Back to the list of packs**; otherwise none.
+- **Tab clicks**: the Pack Manager tab from another screen shows the open pack (and
+  any pending reveal after an Editor save), as before; clicked while the pack is on screen it
+  goes to the Pack list (ignored while the pack view is busy); on the Pack list it reloads
+  the list.
+- **Mouse back button**: while the Pack Manager shows a pack, the mouse's back button returns
+  to the Pack list, the same path as the back button (not while busy or a dialog is open);
+  anywhere else it does nothing (the app has no history).
+
 ### Pack view modes
 - **Normal (default)**: dragging does nothing. Selection: click = select that sticker
   (replaces any selection); Ctrl+click = toggle in/out; Shift+click = range; Esc = clear
@@ -121,6 +147,10 @@ stickers, Missing stickers, and the thumbnail.
   Reorder mode is obvious at a glance: every sticker tile turns a theme-matched green, and a
   faded copy of the dragged sticker follows the cursor (owner decision 2026-11-21).
 - The two modes are mutually exclusive; the toggle is always visible.
+- **The grid takes no keyboard focus** (owner decision 2026-11-26, SPM-26): sticker tiles and
+  the thumbnail slot are not focusable, so no focus ring ever shows on them (the owner saw one
+  after Shift-click and Esc). Selection is by mouse; Esc (clear selection, exit Reorder) and
+  Delete work from anywhere outside a text field.
 - Sticker tiles have one fixed size and show position, preview and at most one warning
   flag: **Missing** takes priority over the emoji-count flag. The Emoji String shows in the
   detail panel, not on the tile (owner decisions 2026-11-21 and 2026-11-22).
@@ -332,7 +362,8 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
     view's Reorder mode: a faded copy of the row follows the cursor, the dragged row fades, a
     4px accent line between rows marks the drop, Esc mid-drag cancels, and releasing stores
     the order and reloads. There is no keyboard route to it.
-- Pack header: **← Pack list** back button; Title always editable; Short Name editable only
+- Pack header: Title always editable (its own "← Pack list" button is gone: the top bar
+  carries it, see **Top bar** below; owner decision 2026-11-26, SPM-26); Short Name editable only
   in Draft, with "🔒 Locked" beside its label (the full reason as its tooltip) so the header
   never changes height (owner decisions 2026-11-22); the Draft/Live badge and its button sit
   right after the Short Name, labelled **Go Live** / **Revert to Draft** like the dialogs they
