@@ -421,6 +421,7 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   before "sticker10"), because Windows hands dropped files over in its own drag order, not
   Explorer's view order (owner decision 2026-11-21); invalid files rejected per-file with an
   "open in editor" option. Imported stickers get no emoji; empty-emoji stickers are flagged.
+  A drop imports only while the Pack view is on screen; on the Editor a drop opens there (§6).
 - Pack-view messages that stay until dismissed (notices such as "Checked the pack folder…"
   and the import summary) have an **X** on the left as well as **Dismiss** on the right
   (owner decision 2026-11-22).

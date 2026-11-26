@@ -1,7 +1,7 @@
 // Dropping an image file on the Editor (SPM-27): the pure decisions and the
 // owner-approved wording; editor.ts only wires them to the DOM.
-import { baseName } from "../../api";
 import { editorCanImport } from "../../shared/import-extensions";
+import { baseName } from "../../shared/path";
 
 /** What the Editor has open when the drop lands. */
 export type DropSession = "none" | "sticker" | "thumbnail";
@@ -31,10 +31,13 @@ export function dropPlan(paths: readonly string[], session: DropSession, busy: b
 
 export const DROP_BUSY_NOTE = "Busy: try the drop again in a moment";
 
-const TAIL = "; dropped files after the first are ignored";
+/** The one phrase for "the other files were not used", in its two tenses. */
+const AFTER_FIRST = "dropped files after the first";
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+const TAIL = `; ${AFTER_FIRST} are ignored`;
 
 export function cantOpenMessage(name: string, more: boolean): string {
-  return `Can't open “${name}”: the Editor opens PNG, JPEG and WEBP files.${more ? " Dropped files after the first are ignored." : ""}`;
+  return `Can't open “${name}”: the Editor opens PNG, JPEG and WEBP files.${more ? ` ${sentence(AFTER_FIRST)} are ignored.` : ""}`;
 }
 export function openedMessage(name: string, more: boolean): string {
   return `Opened “${name}”${more ? TAIL : ""}.`;
@@ -45,9 +48,30 @@ export function addedMessage(name: string, more: boolean): string {
 export function asStickerMessage(name: string, more: boolean): string {
   return `Opened “${name}” as a sticker${more ? TAIL : ""}.`;
 }
-/** The note after Cancel; empty when there was nothing else dropped. */
+/** The note when the chosen action did not happen; empty when there was nothing else dropped. */
 export function cancelledIgnoredMessage(more: boolean): string {
-  return more ? "Dropped files after the first were ignored." : "";
+  return more ? `${sentence(AFTER_FIRST)} were ignored.` : "";
+}
+
+/** How a drop that reached an action ended. */
+export type DropOutcome = "opened" | "openedAsSticker" | "added" | "declined";
+
+/**
+ * The note line after a drop ended ("" for none). A plain single open says
+ * nothing; a declined action (Cancel, Keep editing, a cancelled size
+ * question) ends like Cancel.
+ */
+export function dropNote(outcome: DropOutcome, name: string, more: boolean): string {
+  switch (outcome) {
+    case "opened":
+      return more ? openedMessage(name, more) : "";
+    case "openedAsSticker":
+      return asStickerMessage(name, more);
+    case "added":
+      return addedMessage(name, more);
+    case "declined":
+      return cancelledIgnoredMessage(more);
+  }
 }
 
 export const DROP_DIALOG_TITLE = "Dropped image";

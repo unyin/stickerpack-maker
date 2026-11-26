@@ -6,6 +6,7 @@ import {
   cantOpenMessage,
   dropDialogBody,
   dropDialogButtons,
+  dropNote,
   dropPlan,
   openedMessage,
 } from "../src/editor/model/drop";
@@ -18,6 +19,9 @@ describe("dropPlan", () => {
   });
   test("busy refuses, whatever is open", () => {
     for (const s of ["none", "sticker", "thumbnail"] as const) expect(dropPlan(["C:\\a.png"], s, true, false)).toEqual({ kind: "busy" });
+  });
+  test("busy wins over an unsupported file", () => {
+    expect(dropPlan(["C:\\x.gif"], "none", true, false)).toEqual({ kind: "busy" });
   });
   test("nothing open opens the first file", () => {
     expect(dropPlan(["C:\\x\\a.png"], "none", false, false)).toEqual({ kind: "open", path: "C:\\x\\a.png", name: "a.png", more: false });
@@ -53,6 +57,21 @@ describe("drop messages", () => {
   test("cancel note only with several files", () => {
     expect(cancelledIgnoredMessage(true)).toBe("Dropped files after the first were ignored.");
     expect(cancelledIgnoredMessage(false)).toBe("");
+  });
+});
+
+describe("dropNote", () => {
+  test("a plain single open says nothing; several files say so", () => {
+    expect(dropNote("opened", "a.png", false)).toBe("");
+    expect(dropNote("opened", "a.png", true)).toBe("Opened “a.png”; dropped files after the first are ignored.");
+  });
+  test("a thumbnail open and an added layer always say so", () => {
+    expect(dropNote("openedAsSticker", "b.png", false)).toBe("Opened “b.png” as a sticker.");
+    expect(dropNote("added", "b.png", false)).toBe("Added “b.png” as a layer.");
+  });
+  test("a declined action ends like Cancel", () => {
+    expect(dropNote("declined", "b.png", false)).toBe("");
+    expect(dropNote("declined", "b.png", true)).toBe("Dropped files after the first were ignored.");
   });
 });
 
