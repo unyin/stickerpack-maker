@@ -97,6 +97,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
   let pack: PackViewHandle | null = null;
   let openId: number | null = null;
   let disposed = false;
+  let opening = 0; // the newest openPack call; an older one still awaiting is superseded
 
   function showList(): void {
     pack?.destroy();
@@ -110,6 +111,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
   }
 
   async function openPack(packId: number): Promise<boolean> {
+    const mine = ++opening;
     try {
       let handleRef: PackViewHandle | null = null;
       let latest = { title: "", busy: false }; // the view's reports, including its first, made before it has a handle
@@ -122,8 +124,9 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
         openInEditor: nav.openInEditor,
         openThumbnailInEditor: nav.openThumbnailInEditor,
       });
-      if (disposed) {
-        // The Library changed while this pack was opening: publishing would put the old Library's pack on the rebuilt shell.
+      if (disposed || mine !== opening) {
+        // This open no longer counts: the Library changed (publishing would put the old Library's pack on the rebuilt shell),
+        // or a later click superseded it (the last pack asked for wins).
         handle.destroy();
         return false;
       }
@@ -136,7 +139,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
       root.replaceChildren(handle.element);
       return true;
     } catch (err) {
-      if (disposed) return false; // same reason: a disposed instance must not touch the shell
+      if (disposed || mine !== opening) return false; // same reason: a failure nobody waits for stays silent
       showList();
       list.showError(`Cannot open the pack: ${errorMessage(err)}`);
       return false;

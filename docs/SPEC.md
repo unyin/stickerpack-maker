@@ -329,7 +329,8 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
     buttons (Open in explorer, Delete), which keep their own behaviour; the click that ends a
     drag never opens. The row shows a pointer cursor and tints on hover, except the row being
     dragged; the grip's own hover stays visible on a tinted row. The title stays the one
-    keyboard-focusable open control.
+    keyboard-focusable open control. Opening packs in quick succession shows the last one
+    asked for, whichever finishes loading first; an earlier one that fails shows no error.
   - **The thumbnail cell**: the pack's own thumbnail (tooltip "Thumbnail"); with none, the
     first sticker in a dashed frame ("No thumbnail: Telegram shows the first sticker"), or the
     Missing art when that sticker is Missing ("... which is Missing"); a Missing thumbnail
