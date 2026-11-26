@@ -149,8 +149,8 @@ source and the "download host is a third party" consequence above.
 - **Remaining risk:** the first download now depends on this project's `models` release and
   its tag. Deleting or renaming the tag or the asset breaks it; the pinned SHA-256 still makes
   a changed file fail safely.
-- **Licence notice:** hosting the ISNet weights ourselves is redistribution under
-  Apache-2.0, which asks for the licence notice and the credit for DIS (ISNet) to go with
-  them. The owner's decision (2026-11-26): they live in the app's Settings, Credits, beside
-  ONNX Runtime's (MIT), the two notices the "Third-party notices" consequence above asks
-  for. Whether the release page should carry the notice as well was not decided.
+- **Licence notice:** hosting the ISNet weights ourselves is redistribution under Apache-2.0,
+  which asks for a copy of the licence and the credit for DIS (ISNet) to go with them. The
+  owner's decision (2026-11-26): the credit lives in the app's Settings, Credits, beside ONNX
+  Runtime's (MIT), naming and linking each licence. Open: Credits does not include the licence
+  texts, and neither the app nor the `models` release ships them yet.
