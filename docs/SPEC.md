@@ -1,7 +1,7 @@
 # Stickerpack Maker — v1 Specification
 
 Status: agreed in a grilling session on 2026-11-18. This document is the source of truth for v1 scope.
-Vocabulary: see `GLOSSARY.md`. Durable decisions: see `docs/adr/` (0001 stack, 0002 independent copies, 0003 order-encoded filenames, 0004 crash-safe rename mechanics, 0005 editor hybrid split, 0006 background removal, 0007 library upgrades).
+Vocabulary: see `GLOSSARY.md`. Durable decisions: see `docs/adr/` (0001 stack, 0002 independent copies, 0003 order-encoded filenames, 0004 crash-safe rename mechanics, 0005 editor hybrid split, 0006 background removal, 0007 library upgrades, 0008 effect preview drawn by Rust, 0009 selection as a floating area).
 
 ## 1. Overview
 
@@ -13,7 +13,8 @@ A local-first desktop app for making Telegram sticker packs, with two tools:
 No Telegram network calls in v1. The data model mirrors Telegram's rules so Bot API sync
 (`createNewStickerSet`, `addStickerToSet`, `replaceStickerInSet`, `setStickerPositionInSet`,
 `setStickerEmojiList`, `setStickerSetTitle`, `setStickerSetThumbnail`) is a clean later addition.
-Uploads in v1 are manual via @Stickers, dragging files from the explorer in filename order.
+Uploads in v1 are manual via @Stickers, in filename order, from the Upload list (§5): each file
+dragged straight out of the app or from the explorer.
 
 ## 2. Platform and stack
 
@@ -1008,13 +1009,14 @@ pass.
     a new sticker: a save never writes to another slot. After a replace the note says
     "Replaced #N in “<pack>”", the unsaved-changes flag clears and the Pack Manager shows
     the new picture. After any save the session edits the saved sticker, so the next save
-    offers to replace it, a new sticker included. Thumbnail-mode sessions come with SPM-12.
+    offers to replace it, a new sticker included. Thumbnail-mode sessions came with SPM-12.
   - A save as a new sticker appends it at the pack's end with an order-encoded file name
-    (ADR-0003) and the session's Emoji String — the one typed in the Emoji tab, held staged
-    until that save; with none typed the string is empty and the sticker is flagged in the
-    Pack Manager, like bulk imports (§Layout; the save dialog's hint follows the same
-    value). The Library core checks the file as a sticker once more before it enters the
-    pack.
+    (ADR-0003) and the session's Emoji String — the Emoji tab's value: for a fresh image the
+    one typed there, held staged until that save; for an origin session the origin sticker's
+    string (edited there and written through to it); with none the string is empty and the
+    sticker is flagged in the Pack Manager, like bulk imports (§Layout; the save dialog's hint
+    follows the same value). The Library core checks the file as a sticker once more before it
+    enters the pack.
   - After a save the dialog closes, the unsaved-changes flag clears, the session stays open,
     and a neutral note follows: for a new sticker it names the file, its position, the pack
     and the file size (a replace's note is above). A Pack Manager showing that pack re-reads
@@ -1025,6 +1027,12 @@ pass.
     stays as it is. If the sticker no longer exists (deleted, moved, or saved into the
     Library used before a Library change), the message line says so instead and nothing
     else happens.
+  - After a thumbnail save the note reads "Thumbnail of “<pack>” saved as <file> (<size>).",
+    with ", WEBP quality N" after the size when lossy, and a Pack Manager showing that pack
+    shows the new thumbnail when its tab is shown again. Its **Show in Pack Manager** link
+    works like the sticker's: it opens that pack and selects the thumbnail slot alone (its
+    panel). If the pack no longer exists (deleted since, or it belongs to the Library used
+    before a Library change), the message line says so instead and nothing else happens.
   - PNG is encoded once at the best lossless compression: it has no quality knob. WEBP is
     lossless when that fits the cap, otherwise lossy at the highest quality that fits (alpha
     stays lossless); the quality is found automatically, there is no quality slider.
@@ -1051,8 +1059,8 @@ pass.
   - Thumbnail mode: exactly **100×100 px** and file ≤ **128 KB**, PNG/WEBP.
   - Both halves are checked in Rust on what is actually written: the flattened size, then
     the encoded bytes (KB = 1024 bytes). Saving a thumbnail (Thumbnail mode's target, the
-    pack's thumbnail slot) comes with Thumbnail mode (SPM-12); the Rust checks already
-    cover the thumbnail constraint set.
+    pack's thumbnail slot) came with Thumbnail mode (SPM-12); the Rust checks cover the
+    thumbnail constraint set.
 - The live readout shows how far the canvas is off the constraint set. **Fit in 512** and
   **Cover 512** fix it in one click in both modes; **Long side 512** also does in Sticker mode.
 - In Thumbnail mode **Long side 100** is greyed out (visible but disabled, with the reason in
@@ -1138,7 +1146,6 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 - Bulk emoji-set: rejected as unnecessary — not planned.
 - Editor: every edge of the selection box is grabbable for resizing, not just the corners.
 - Editor: custom canvas resizing (in v1 only Fit in, Cover and Long side change the canvas).
-- Drag and drop an image file to open it in the Editor.
 - Editor: Crop could also drop a layer that crosses the box edge when its part inside the
   box is fully transparent. In v1 such a layer is kept; only layers entirely outside the box
   are discarded (owner, 2026-11-21: may revisit).
@@ -1158,8 +1165,6 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
   selection (owner, 2026-11-21).
 - Editor: layer locking, so a locked layer cannot be selected, moved or edited by accident
   (owner, 2026-11-22).
-- Editor save dialog: an Emoji String field, so a new sticker gets its emoji as it is saved
-  (owner, 2026-11-22; in v1 it is saved without emoji and flagged in the Pack Manager).
 - Settings: Editor defaults (the tool settings a session starts with) configurable in the
   Settings tab. In v1 Editor settings last only until the app closes and always start from
   the defaults (owner, 2026-11-22).
@@ -1221,7 +1226,7 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 - Editor: a "deep fry" tool: colour filters, grain, noise and the like in one go (owner,
   2026-11-22).
 
-## 10. Draft work packages (for review — not yet filed as issues)
+## 10. Draft work packages (filed as SPM-1 to SPM-12)
 
 1. **Scaffold**: Tauri app skeleton (Rust + TS), Windows build, SQLite, first-run library
    chooser, settings (path display, manual re-point, fresh-library creation).
