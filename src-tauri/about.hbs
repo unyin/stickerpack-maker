@@ -1,0 +1,23 @@
+================================================================================
+RUST CRATES
+================================================================================
+
+The Windows build of Stickerpack Maker is compiled from the Rust crates below
+(normal dependencies for x86_64-pc-windows-msvc, including their transitive
+dependencies). Components are grouped by licence text; each distinct text is
+given once, followed by the components it applies to.
+
+{{#each licenses}}
+--------------------------------------------------------------------------------
+{{{name}}}
+
+Used by:
+{{#each used_by}}
+{{#unless (eq crate.name "stickerpack-maker")}}
+  - {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/unless}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}
