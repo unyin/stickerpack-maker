@@ -1,6 +1,6 @@
 [package]
 name = "stickerpack-maker"
-version = "1.0.0"
+version = "1.0.1"
 license = "MIT"
 description = "Local-first desktop app for making Telegram sticker packs"
 edition = "2021"
