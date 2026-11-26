@@ -17,7 +17,6 @@
 }
 
 .pm-input:focus-visible,
-.pm-tile:focus-visible,
 .pm-pack-open:focus-visible {
   outline: 2px solid var(--accent-ink);
   outline-offset: 2px;

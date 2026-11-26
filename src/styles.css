@@ -131,8 +131,20 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+/* The back slot is always laid out (SPM-26): the button only toggles
+   visibility, so nothing in the bar moves between states. */
+.tb-slot {
+  display: inline-flex;
+}
+
+.tb-back.tb-hidden {
+  visibility: hidden;
+}
+
+/* The app name sits right-aligned, left of the Settings tab in the corner. */
 .brand {
   font-weight: 700;
+  margin-left: auto;
 }
 
 .nav {
@@ -148,6 +160,34 @@ body {
   font-size: 14px;
   cursor: pointer;
   color: var(--muted);
+}
+
+/* Every tab: icon, 6px gap, label (SPM-26). */
+.nav-btn:has(> .icon) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nav-btn .icon {
+  width: 18px;
+  height: 18px;
+}
+
+.nav-btn .tab-sep {
+  margin: 0 6px;
+  opacity: 0.8;
+}
+
+/* The open pack's Title in the Pack Manager tab, capped so a long one never moves the bar. */
+.nav-btn .tab-pack {
+  font-weight: 600;
+  display: inline-block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .nav-btn:hover {

@@ -1,21 +1,41 @@
 import type { AppState } from "./api";
+import { icon, type IconName } from "./icons";
 import { clear, el } from "./ui";
 import { forgetEditorOrigin, openFileInEditor, openThumbnailFileInEditor, renderEditor, setEditorNav } from "./views/editor";
 import type { StickerOrigin } from "./shared/sticker-origin";
 import type { ThumbnailOrigin } from "./shared/thumbnail-origin";
-import { forgetPackManager, renderPackManager, revealStickerOnShow, revealThumbnailOnShow } from "./views/pack-manager";
+import {
+  forgetPackManager,
+  setPackManagerListener,
+  packManagerState,
+  renderPackManager,
+  revealStickerOnShow,
+  revealThumbnailOnShow,
+  showPackList,
+} from "./views/pack-manager";
+import { backButtonState, BACK_TO_LIST_TITLE, packTabLabel, tabClickAction, type ViewId } from "./shell-model";
+import type { PackManagerState } from "./pack-manager/model/shell-state";
 import { resetPackMemory } from "./pack-manager/model/pack-memory";
 import { renderSettings } from "./views/settings";
 
-type ViewId = "editor" | "pack-manager" | "settings";
-
-const NAV: Array<{ id: ViewId; label: string }> = [
-  { id: "editor", label: "Editor" },
-  { id: "pack-manager", label: "Pack Manager" },
-  { id: "settings", label: "Settings" },
+const TABS: Array<{ id: ViewId; label: string; icon: IconName }> = [
+  { id: "editor", label: "Editor", icon: "scissors" },
+  { id: "pack-manager", label: "Pack Manager", icon: "layers" },
+  { id: "settings", label: "Settings", icon: "cog" },
 ];
+const PM_TAB = TABS.find((t) => t.id === "pack-manager")!;
 
-/** App shell: top navigation between the two tools plus Settings. */
+/** The tab's children: its icon and label, from its TABS entry (the one source). */
+function tabContent(item: { icon: IconName; label: string }): Array<Node | string> {
+  return [icon(item.icon), item.label];
+}
+
+/**
+ * App shell (SPEC §5 "Top bar"): a reserved back slot, the Editor and Pack
+ * Manager tabs, the app name pushed right, and the Settings tab in the corner.
+ * Nothing in the bar moves between states: the back button only toggles
+ * visibility, and the Pack Manager tab's pack name is width-capped.
+ */
 export function renderShell(
   container: HTMLElement,
   state: AppState,
@@ -25,14 +45,40 @@ export function renderShell(
 
   const nav = el("nav", { class: "nav" });
   const content = el("main", { class: "content" });
+  const tabs = new Map<ViewId, HTMLButtonElement>();
+  const backButton = el("button", { class: "secondary tb-back", type: "button", title: BACK_TO_LIST_TITLE }, "← Pack list") as HTMLButtonElement;
+  let screen: ViewId = "editor";
+  let pm: PackManagerState = packManagerState();
 
-  function show(view: ViewId): void {
-    for (const btn of Array.from(nav.children)) {
-      btn.classList.toggle(
-        "active",
-        (btn as HTMLElement).dataset.view === view,
+  /** Bring the tabs and the back button in line with the screen and the open pack. */
+  let shownTitle: string | null = null; // the Title the Pack Manager tab shows now
+  function refreshChrome(): void {
+    for (const [id, btn] of tabs) btn.classList.toggle("active", id === screen);
+    const tab = packTabLabel(screen, pm.open);
+    const pmTab = tabs.get("pack-manager")!;
+    if (tab.packTitle !== shownTitle) {
+      shownTitle = tab.packTitle;
+      pmTab.replaceChildren(
+        ...tabContent(PM_TAB),
+        ...(tab.packTitle === null
+          ? []
+          : [el("span", { class: "tab-sep", "aria-hidden": "true" }, "›"), el("span", { class: "tab-pack" }, tab.packTitle)]),
       );
     }
+    const tooltip = tab.tooltip ?? "";
+    if (pmTab.title !== tooltip) pmTab.title = tooltip;
+    const back = backButtonState(screen, pm);
+    backButton.classList.toggle("tb-hidden", !back.visible);
+    backButton.disabled = back.disabled;
+  }
+
+  setPackManagerListener((next) => {
+    pm = next;
+    refreshChrome();
+  });
+
+  function show(view: ViewId): void {
+    screen = view;
     clear(content);
     if (view === "editor") content.append(renderEditor());
     else if (view === "pack-manager")
@@ -44,6 +90,8 @@ export function renderShell(
         forgetEditorOrigin(); // nor may a save replace a sticker id of the old one
         onChanged();
       });
+    // Once the screen is built (the Pack Manager's build may have reported a pack just now): sync the chrome.
+    refreshChrome();
   }
 
   // Editor -> Pack Manager: the saved note's links show the sticker or the
@@ -69,21 +117,25 @@ export function renderShell(
     void openThumbnailFileInEditor(path, () => show("editor"), origin);
   }
 
-  for (const item of NAV) {
-    const btn = el(
-      "button",
-      { class: "nav-btn", "data-view": item.id },
-      item.label,
-    );
-    btn.addEventListener("click", () => show(item.id));
-    nav.append(btn);
+  for (const item of TABS) {
+    const btn = el("button", { class: "nav-btn", "data-view": item.id }, ...tabContent(item)) as HTMLButtonElement;
+    btn.addEventListener("click", () => {
+      const action = tabClickAction(item.id, screen, pm);
+      if (action === "list") showPackList();
+      else if (action === "show") show(item.id);
+    });
+    tabs.set(item.id, btn);
+    if (item.id !== "settings") nav.append(btn);
   }
+  backButton.addEventListener("click", showPackList);
 
   const header = el(
     "header",
     { class: "topbar" },
-    el("span", { class: "brand" }, "Stickerpack Maker"),
+    el("span", { class: "tb-slot" }, backButton),
     nav,
+    el("span", { class: "brand" }, "Stickerpack Maker"),
+    tabs.get("settings")!,
   );
 
   container.append(header);

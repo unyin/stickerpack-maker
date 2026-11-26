@@ -28,16 +28,6 @@ export function clear(node: HTMLElement): void {
   node.replaceChildren();
 }
 
-/** Enter or Space on a focusable element activates it, like a click. */
-export function onActivate(node: HTMLElement, activate: (e: KeyboardEvent) => void): void {
-  node.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      activate(e);
-    }
-  });
-}
-
 /** Tauri command errors arrive as strings; normalize anything else. */
 export function errorMessage(err: unknown): string {
   if (typeof err === "string") return err;
