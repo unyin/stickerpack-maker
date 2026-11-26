@@ -186,7 +186,22 @@ import { EYEDROPPER_STEM, EYEDROPPER_TITLE, eyedropperButton } from "../editor/v
 import { EffectPreview, type PreviewRequest } from "../editor/view/effect-preview";
 import { WarpPress } from "../editor/view/warp-brush";
 import { moveWarpGesture, startWarpGesture, warpReadout, type WarpGesture } from "../editor/model/warp";
-import { confirmChoice } from "../dialog";
+import { confirmChoice, dialogOpen, openDialog } from "../dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import {
+  addedMessage,
+  asStickerMessage,
+  cancelledIgnoredMessage,
+  cantOpenMessage,
+  DROP_BUSY_NOTE,
+  DROP_DIALOG_TITLE,
+  dropDialogBody,
+  dropDialogButtons,
+  dropPlan,
+  openedMessage,
+  type DropChoice,
+  type DropPlan,
+} from "../editor/model/drop";
 import { el, errorMessage, withMessage } from "../ui";
 
 /** The left tools panel's categories (SPEC §6 Layout): one visible at a time. */
@@ -277,7 +292,7 @@ function buildEditor(): HTMLElement {
 
   const openButton = button("Open image", () => run(openImage), "primary");
   // The ellipsis marks the image picker dialog it opens (SPEC §6 Layout, D3).
-  const addButton = button("Add image as layer…", () => run(addImageAsLayer), "primary");
+  const addButton = button("Add image as layer…", () => run(async () => void (await addImageAsLayer())), "primary");
   addButton.title = "Add image as layer… — Pick an image and place it on top of the canvas at its native pixel size";
   const undoButton = button("Undo", () => {
     clearNote();
@@ -1247,14 +1262,16 @@ function buildEditor(): HTMLElement {
     startSession(picked, STICKER, from, null);
   }
 
-  async function addImageAsLayer(): Promise<void> {
+  /** Add an image as a layer (the picker's, or the dropped `path`); false when cancelled. */
+  async function addImageAsLayer(path?: string): Promise<boolean> {
     const current = session;
-    if (!current) return;
-    const picked = await pickAndImport();
-    if (!picked) return;
+    if (!current) return false;
+    const picked = await pickAndImport(path);
+    if (!picked) return false;
     const id = nextLayerId(current.doc);
     current.apply("Add image as layer", (doc) => addRasterLayer(doc, picked.image, picked.name, centeredPlacement(doc, picked.image)));
     current.select(id);
+    return true;
   }
 
   /**
@@ -2662,6 +2679,56 @@ function buildEditor(): HTMLElement {
     }
     void run(async () => pasteImage(new Uint8Array(await file.arrayBuffer())));
   });
+
+  // Dropping an image file on the Editor (SPM-27). The Editor is built once
+  // and never torn down, so the listener lives as long as the window. It acts
+  // only while the Editor is on screen, so the Pack view's bulk import (its
+  // own listener, the mirror check) never sees an Editor drop.
+  async function handleDrop(plan: DropPlan): Promise<void> {
+    if (plan.kind === "busy") return say(DROP_BUSY_NOTE, "note");
+    if (plan.kind === "unsupported") return say(cantOpenMessage(plan.name, plan.more));
+    if (plan.kind !== "open" && plan.kind !== "ask") return;
+    const { path, name, more } = plan;
+    if (plan.kind === "open") {
+      await run(async () => {
+        await openImage(path);
+        if (session) say(openedMessage(name, more), "note");
+      });
+      return;
+    }
+    const thumbnail = plan.thumbnail;
+    await run(async () => {
+      const lines = dropDialogBody(name, thumbnail, thumbnailOrigin?.packTitle ?? "");
+      const body = lines.map((l) => el("p", l.muted ? { class: "muted" } : {}, l.text));
+      const choice = await openDialog<DropChoice>(DROP_DIALOG_TITLE, body, dropDialogButtons(thumbnail), "cancel", { defaultChoice: "cancel" }).result;
+      if (choice === "layer") {
+        if (await addImageAsLayer(path)) say(addedMessage(name, more), "note");
+      } else if (choice === "open") {
+        // The same questions as the Pack Manager's hook; Keep editing leaves everything as it was.
+        if (!(await closeSession())) return;
+        await openImage(path);
+        if (session) say(thumbnail ? asStickerMessage(name, more) : openedMessage(name, more), "note");
+      } else {
+        const note = cancelledIgnoredMessage(more);
+        if (note) say(note, "note");
+      }
+    });
+  }
+  getCurrentWebview()
+    .onDragDropEvent((event) => {
+      if (!view.isConnected) return;
+      const payload = event.payload;
+      if (payload.type === "over" || payload.type === "enter") {
+        if (!dialogOpen()) canvasHost.classList.add("drop-target");
+      } else if (payload.type === "leave") canvasHost.classList.remove("drop-target");
+      else if (payload.type === "drop") {
+        canvasHost.classList.remove("drop-target");
+        const kind = !session ? "none" : thumbnailOrigin ? "thumbnail" : "sticker";
+        const plan = dropPlan(payload.paths, kind, busy, dialogOpen());
+        void handleDrop(plan);
+      }
+    })
+    .catch(() => {});
 
   void loadFonts();
 

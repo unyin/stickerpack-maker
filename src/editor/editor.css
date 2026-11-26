@@ -702,6 +702,13 @@
    the text layer is; the Konva stage scales and rotates it via transform. */
 .editor-canvas {
   position: relative;
+  /* A file dragged over the Editor (SPM-27): the Pack view's accent outline. */
+  outline: 2px dashed transparent;
+  outline-offset: 2px;
+}
+
+.editor-canvas.drop-target {
+  outline-color: var(--accent-ink);
 }
 
 .editor-text-edit {
