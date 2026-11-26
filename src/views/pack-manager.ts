@@ -97,9 +97,11 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
   let pack: PackViewHandle | null = null;
   let openId: number | null = null;
   let disposed = false;
-  let opening = 0; // the newest openPack call; an older one still awaiting is superseded
+  // Whatever the user asked for last (another pack, the list, a reveal in the open pack) supersedes an open still loading.
+  let opening = 0;
 
   function showList(): void {
+    opening++;
     pack?.destroy();
     pack = null;
     openId = null;
@@ -148,8 +150,10 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
 
   /** Open pack `packId` unless it is open, then select sticker `stickerId` there (null: the thumbnail slot). */
   async function showSticker(packId: number, stickerId: number | null): Promise<void> {
-    if (openId === packId && pack) pack.reveal(stickerId, false);
-    else if (await openPack(packId)) pack?.reveal(stickerId, true);
+    if (openId === packId && pack) {
+      opening++;
+      pack.reveal(stickerId, false);
+    } else if (await openPack(packId)) pack?.reveal(stickerId, true);
   }
 
   root.replaceChildren(list.element);

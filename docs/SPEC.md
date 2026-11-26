@@ -330,7 +330,9 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
     drag never opens. The row shows a pointer cursor and tints on hover, except the row being
     dragged; the grip's own hover stays visible on a tinted row. The title stays the one
     keyboard-focusable open control. Opening packs in quick succession shows the last one
-    asked for, whichever finishes loading first; an earlier one that fails shows no error.
+    asked for, whichever finishes loading first; an earlier one that fails shows no error. Going
+    back to the list, or revealing a sticker in the pack already open, also cancels a pack still
+    opening.
   - **The thumbnail cell**: the pack's own thumbnail (tooltip "Thumbnail"); with none, the
     first sticker in a dashed frame ("No thumbnail: Telegram shows the first sticker"), or the
     Missing art when that sticker is Missing ("... which is Missing"); a Missing thumbnail
