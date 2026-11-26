@@ -153,6 +153,11 @@ test("readCustomEmojiFont posts the path under the same command name as Rust (SP
   });
 });
 
+test("openLicenceTexts takes no arguments and matches the Rust command (SPM-29)", async () => {
+  await api.openLicenceTexts();
+  expect(calls[calls.length - 1]).toEqual({ cmd: "open_licence_texts", args: undefined });
+});
+
 test("pickEmojiFont is a single-file picker filtered to font containers (SPM-17)", async () => {
   const file = await api.pickEmojiFont();
   expect(file).toBe("F:\\Libraries\\cats\\library.db"); // the dialog mock's return
