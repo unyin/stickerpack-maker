@@ -275,7 +275,17 @@ export function renderSettings(
         el(
           "p",
           { class: "muted" },
-          "The full licence texts ship with the app beside the bundled font files.",
+          "Background removal uses the ISNet model (DIS, by Xuebin Qin and colleagues), licensed under the Apache License 2.0 (https://github.com/xuebinqin/DIS).",
+        ),
+        el(
+          "p",
+          { class: "muted" },
+          "ONNX Runtime by Microsoft, licensed under the MIT License (https://github.com/microsoft/onnxruntime).",
+        ),
+        el(
+          "p",
+          { class: "muted" },
+          "The fonts' full licence texts ship with the app beside the bundled font files.",
         ),
       ),
     ),
