@@ -33,8 +33,12 @@ function sub(title, body) {
 
 // --- ONNX Runtime (statically linked via the `ort` crate, ADR-0006) -----------
 
+// The version lives in vendor/README.md only, next to the texts it describes.
+const onnxVersion = /^ONNX Runtime version: (\d+\.\d+\.\d+)\s*$/m.exec(text(join(vendorDir, "README.md")))?.[1];
+if (!onnxVersion) throw new Error("src-tauri/licenses/vendor/README.md has no 'ONNX Runtime version: X.Y.Z' line");
+
 const onnx = section(
-  "ONNX RUNTIME 1.31.0 (Microsoft, MIT)",
+  `ONNX RUNTIME ${onnxVersion} (Microsoft, MIT)`,
   [
     "Stickerpack Maker links ONNX Runtime statically (through the `ort` crate) for",
     "offline background removal. ONNX Runtime's own licence and third-party",

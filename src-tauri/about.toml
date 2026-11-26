@@ -19,6 +19,9 @@ accepted = [
 targets = ["x86_64-pc-windows-msvc"]
 ignore-dev-dependencies = true
 ignore-build-dependencies = true
+# Skip the app crate itself (`publish = false`): its folder holds the vendored
+# ONNX Runtime licence, which would otherwise form a group with no "Used by" (SPM-29).
+private = { ignore = true }
 
 # libwebp-sys vendors Google's libwebp C sources (compiled in statically for
 # the PNG/WEBP save encoder, SPM-10) but ships no top-level licence file, so

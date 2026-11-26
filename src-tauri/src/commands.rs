@@ -241,7 +241,7 @@ fn notices_path(resource_dir: &Path) -> Result<PathBuf, String> {
         Ok(path)
     } else {
         Err(format!(
-            "The licence texts were not found at {}. Reinstall the app, or run `bun run licenses` in a development checkout.",
+            "cannot find the licence texts at {}: reinstall the app",
             path.display()
         ))
     }

@@ -1,8 +1,15 @@
 # Vendored licence texts (SPM-29)
 
 Committed so `bun run licenses` regenerates `../THIRD-PARTY-NOTICES.txt`
-offline. Replace these when the pinned ONNX Runtime changes (the `ort` crate's
-`ort-sys` build script names the version, `ms@<version>` in its `dist.tsv`).
+offline. Replace these (and update the version line below) when the pinned
+ONNX Runtime changes (the `ort` crate's `ort-sys` build script names the
+version, `ms@<version>` in its `dist.tsv`).
+
+ONNX Runtime version: 1.31.0
+
+`scripts/licenses.mjs` reads the version from the line above for the ONNX
+Runtime heading and fails if it is missing. When refreshing the texts, update
+that line and the provenance table below together.
 
 | File | Source | Version |
 |---|---|---|
