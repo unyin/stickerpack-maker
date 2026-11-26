@@ -128,15 +128,12 @@ or Settings, a long pack Title).
   separator, then the pack's Title (font-weight 600, capped at 160px with an ellipsis), while
   a pack is open; plain "Pack Manager" when none is. The name follows the pack's Title as it is
   edited and disappears when the pack is closed, deleted or left for the list, and when the
-  Library changes. Tooltip: from the Editor or Settings with a pack open, **Back to "<full
-  Title>"**; while the pack is on screen, **Back to the list of packs**; otherwise none.
+  Library changes. Tooltip: from the Editor or Settings with a pack open, **Back to “<full
+  Title>”**; while the pack is on screen, **Back to the list of packs**; otherwise none.
 - **Tab clicks**: the Pack Manager tab from another screen shows the open pack (and
   any pending reveal after an Editor save), as before; clicked while the pack is on screen it
   goes to the Pack list (ignored while the pack view is busy); on the Pack list it reloads
   the list.
-- **Mouse back button**: while the Pack Manager shows a pack, the mouse's back button returns
-  to the Pack list, the same path as the back button (not while busy or a dialog is open);
-  anywhere else it does nothing (the app has no history).
 
 ### Pack view modes
 - **Normal (default)**: dragging does nothing. Selection: click = select that sticker

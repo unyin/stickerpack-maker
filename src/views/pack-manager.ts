@@ -10,7 +10,7 @@ import type { StickerOrigin } from "../shared/sticker-origin";
 import type { ThumbnailOrigin } from "../shared/thumbnail-origin";
 import { buildPackList } from "../pack-manager/view/pack-list";
 import { buildPackView, type PackViewHandle } from "../pack-manager/view/pack-view";
-import { NO_PACK_MANAGER, type PackManagerState } from "../shell-model";
+import { changed, NO_PACK_MANAGER, type PackManagerState } from "../pack-manager/model/shell-state";
 
 export interface PackManagerNav {
   /** Show the Editor with this image open; `origin` when it is a pack's sticker (Edit). */
@@ -30,13 +30,15 @@ let cached: { library: string | null; root: HTMLElement; shown(): void; showList
 let state: PackManagerState = NO_PACK_MANAGER;
 let listener: ((state: PackManagerState) => void) | null = null;
 
+/** Publish on change only: a report that repeats the state is dropped. */
 function publish(next: PackManagerState): void {
+  if (!changed(state, next)) return;
   state = next;
   listener?.(state);
 }
 
-/** The shell's one subscription (it re-renders on a Library change, so a new one replaces the old). */
-export function onPackManagerState(next: ((state: PackManagerState) => void) | null): void {
+/** Sets the one listener; a new one replaces the previous (the shell sets it on each render, so a rebuilt shell never leaves a stale one). */
+export function setPackManagerListener(next: (state: PackManagerState) => void): void {
   listener = next;
 }
 
@@ -45,7 +47,7 @@ export function packManagerState(): PackManagerState {
   return state;
 }
 
-/** The top bar's back button, the Pack Manager tab and the mouse back button: show the Pack list. */
+/** The top bar's back button and the Pack Manager tab: show the Pack list. */
 export function showPackList(): void {
   cached?.showList();
 }
@@ -94,11 +96,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
   const list = buildPackList((id) => void openPack(id));
   let pack: PackViewHandle | null = null;
   let openId: number | null = null;
-
-  /** Tell the shell what is open: the pack's Title and busy state as the pack view last reported them. */
-  function report(title: string, busy: boolean): void {
-    if (openId !== null) publish({ open: { id: openId, title }, busy });
-  }
+  let disposed = false;
 
   function showList(): void {
     pack?.destroy();
@@ -114,23 +112,31 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
   async function openPack(packId: number): Promise<boolean> {
     try {
       let handleRef: PackViewHandle | null = null;
+      let latest = { title: "", busy: false }; // the view's reports, including its first, made before it has a handle
       const handle = await buildPackView(packId, {
         report: (title, busy) => {
-          // Only the pack on screen reports: not one still opening, nor a destroyed one finishing.
-          if (handleRef === pack) report(title, busy);
+          latest = { title, busy };
+          // A report counts only from the handle that is the open pack: never one still opening, a destroyed one, or none open.
+          if (handleRef !== null && handleRef === pack) publish({ open: { id: packId, title }, busy });
         },
         openInEditor: nav.openInEditor,
         openThumbnailInEditor: nav.openThumbnailInEditor,
       });
+      if (disposed) {
+        // The Library changed while this pack was opening: publishing would put the old Library's pack on the rebuilt shell.
+        handle.destroy();
+        return false;
+      }
       pack?.destroy();
       pack = handle;
       handleRef = handle;
       openId = packId;
       packMemory.openPackId = packId; // pack pickers start on it
-      publish({ open: { id: packId, title: handle.title() }, busy: false });
+      publish({ open: { id: packId, title: latest.title }, busy: latest.busy });
       root.replaceChildren(handle.element);
       return true;
     } catch (err) {
+      if (disposed) return false; // same reason: a disposed instance must not touch the shell
       showList();
       list.showError(`Cannot open the pack: ${errorMessage(err)}`);
       return false;
@@ -160,6 +166,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
       }
     },
     dispose: () => {
+      disposed = true;
       pack?.destroy();
       pack = null;
       openId = null;

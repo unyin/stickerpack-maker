@@ -6,15 +6,15 @@ import type { StickerOrigin } from "./shared/sticker-origin";
 import type { ThumbnailOrigin } from "./shared/thumbnail-origin";
 import {
   forgetPackManager,
-  onPackManagerState,
+  setPackManagerListener,
   packManagerState,
   renderPackManager,
   revealStickerOnShow,
   revealThumbnailOnShow,
   showPackList,
 } from "./views/pack-manager";
-import { dialogOpen } from "./dialog";
-import { backButtonState, BACK_TO_LIST_TITLE, mouseBackGoesToList, packTabLabel, tabClickAction, type PackManagerState, type ViewId } from "./shell-model";
+import { backButtonState, BACK_TO_LIST_TITLE, packTabLabel, tabClickAction, type ViewId } from "./shell-model";
+import type { PackManagerState } from "./pack-manager/model/shell-state";
 import { resetPackMemory } from "./pack-manager/model/pack-memory";
 import { renderSettings } from "./views/settings";
 
@@ -23,8 +23,12 @@ const TABS: Array<{ id: ViewId; label: string; icon: IconName }> = [
   { id: "pack-manager", label: "Pack Manager", icon: "layers" },
   { id: "settings", label: "Settings", icon: "cog" },
 ];
+const PM_TAB = TABS.find((t) => t.id === "pack-manager")!;
 
-let removeMouseBack: (() => void) | null = null;
+/** The tab's children: its icon and label, from its TABS entry (the one source). */
+function tabContent(item: { icon: IconName; label: string }): Array<Node | string> {
+  return [icon(item.icon), item.label];
+}
 
 /**
  * App shell (SPEC §5 "Top bar"): a reserved back slot, the Editor and Pack
@@ -47,31 +51,34 @@ export function renderShell(
   let pm: PackManagerState = packManagerState();
 
   /** Bring the tabs and the back button in line with the screen and the open pack. */
+  let shownTitle: string | null = null; // the Title the Pack Manager tab shows now
   function refreshChrome(): void {
     for (const [id, btn] of tabs) btn.classList.toggle("active", id === screen);
     const tab = packTabLabel(screen, pm.open);
     const pmTab = tabs.get("pack-manager")!;
-    pmTab.replaceChildren(
-      icon("layers"),
-      tab.label,
-      ...(tab.packTitle === null
-        ? []
-        : [el("span", { class: "tab-sep", "aria-hidden": "true" }, "›"), el("span", { class: "tab-pack" }, tab.packTitle)]),
-    );
-    pmTab.title = tab.tooltip ?? "";
+    if (tab.packTitle !== shownTitle) {
+      shownTitle = tab.packTitle;
+      pmTab.replaceChildren(
+        ...tabContent(PM_TAB),
+        ...(tab.packTitle === null
+          ? []
+          : [el("span", { class: "tab-sep", "aria-hidden": "true" }, "›"), el("span", { class: "tab-pack" }, tab.packTitle)]),
+      );
+    }
+    const tooltip = tab.tooltip ?? "";
+    if (pmTab.title !== tooltip) pmTab.title = tooltip;
     const back = backButtonState(screen, pm);
     backButton.classList.toggle("tb-hidden", !back.visible);
     backButton.disabled = back.disabled;
   }
 
-  onPackManagerState((next) => {
+  setPackManagerListener((next) => {
     pm = next;
     refreshChrome();
   });
 
   function show(view: ViewId): void {
     screen = view;
-    refreshChrome();
     clear(content);
     if (view === "editor") content.append(renderEditor());
     else if (view === "pack-manager")
@@ -83,7 +90,7 @@ export function renderShell(
         forgetEditorOrigin(); // nor may a save replace a sticker id of the old one
         onChanged();
       });
-    // The Pack Manager's build may have reported a pack just now: sync once more.
+    // Once the screen is built (the Pack Manager's build may have reported a pack just now): sync the chrome.
     refreshChrome();
   }
 
@@ -111,7 +118,7 @@ export function renderShell(
   }
 
   for (const item of TABS) {
-    const btn = el("button", { class: "nav-btn", "data-view": item.id }, icon(item.icon), item.label) as HTMLButtonElement;
+    const btn = el("button", { class: "nav-btn", "data-view": item.id }, ...tabContent(item)) as HTMLButtonElement;
     btn.addEventListener("click", () => {
       const action = tabClickAction(item.id, screen, pm);
       if (action === "list") showPackList();
@@ -121,21 +128,6 @@ export function renderShell(
     if (item.id !== "settings") nav.append(btn);
   }
   backButton.addEventListener("click", showPackList);
-
-  // The mouse's back button (button 3) does what the back button does, only where that button is usable.
-  // The app has no history, so the press is swallowed everywhere: WebView2 must not navigate on it.
-  const onMouseBack = (e: MouseEvent): void => {
-    if (e.button !== 3) return;
-    e.preventDefault();
-    if (e.type === "mouseup" && !dialogOpen() && mouseBackGoesToList(e.button, screen, pm)) showPackList();
-  };
-  removeMouseBack?.(); // the shell is rebuilt on a Library change: one listener pair only
-  window.addEventListener("mousedown", onMouseBack);
-  window.addEventListener("mouseup", onMouseBack);
-  removeMouseBack = () => {
-    window.removeEventListener("mousedown", onMouseBack);
-    window.removeEventListener("mouseup", onMouseBack);
-  };
 
   const header = el(
     "header",

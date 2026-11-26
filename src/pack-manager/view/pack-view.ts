@@ -80,7 +80,7 @@ import { cancelReorderDrag, startReorderDrag, type ReorderDragHost } from "./reo
 export interface PackViewHost {
   /**
    * The pack's Title and whether an action is running, reported after every
-   * render and whenever the busy state flips: the top bar names the pack and
+   * render (the first one included) and whenever the busy state flips: the top bar names the pack and
    * disables its back button while busy (SPM-26).
    */
   report(title: string, busy: boolean): void;
@@ -94,8 +94,6 @@ export interface PackViewHandle {
   element: HTMLElement;
   /** Re-read the pack without a Missing scan (e.g. the Editor saved into it). */
   reload(): void;
-  /** The pack's current Title (the top bar names the pack as it opens). */
-  title(): string;
   /**
    * Show sticker `id` (the Editor's saved-note link), or the thumbnail slot
    * when `id` is null: re-read the pack unless `fresh` (just opened), then
@@ -653,7 +651,6 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   return {
     element: root,
     reload: () => void run(reread),
-    title: () => view.pack.title,
     reveal: (id, fresh) => {
       // run() would skip it silently while another action works: say so instead.
       if (busy) {

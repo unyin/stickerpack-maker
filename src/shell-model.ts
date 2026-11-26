@@ -2,36 +2,22 @@
 // Manager tab says, what clicking it does, and when the back button shows.
 // shell.ts wires them to the DOM.
 
+import type { OpenPack, PackManagerState } from "./pack-manager/model/shell-state";
+
 export type ViewId = "editor" | "pack-manager" | "settings";
-
-/** The pack open in the Pack Manager's pack view (what the shell needs of it). */
-export interface OpenPack {
-  id: number;
-  title: string;
-}
-
-/** What the Pack Manager tells the shell: the open pack (null on the Pack list) and whether it is busy. */
-export interface PackManagerState {
-  open: OpenPack | null;
-  busy: boolean;
-}
-
-export const NO_PACK_MANAGER: PackManagerState = { open: null, busy: false };
 
 export const BACK_TO_LIST_TITLE = "Back to the list of packs";
 
-/** The Pack Manager tab: "Pack Manager", then (a pack open) a separator and the pack's Title; plus its tooltip. */
+/** What varies on the Pack Manager tab (its icon and label come from the shell's TABS): the open pack's Title after a separator, and the tooltip. */
 export interface PackTabLabel {
-  label: string;
   /** The open pack's Title, shown after a "›" separator, or null. */
   packTitle: string | null;
   tooltip: string | null;
 }
 
 export function packTabLabel(screen: ViewId, open: OpenPack | null): PackTabLabel {
-  if (!open) return { label: "Pack Manager", packTitle: null, tooltip: null };
+  if (!open) return { packTitle: null, tooltip: null };
   return {
-    label: "Pack Manager",
     packTitle: open.title,
     tooltip: screen === "pack-manager" ? BACK_TO_LIST_TITLE : `Back to “${open.title}”`,
   };
@@ -49,11 +35,4 @@ export function tabClickAction(target: ViewId, screen: ViewId, state: PackManage
 export function backButtonState(screen: ViewId, state: PackManagerState): { visible: boolean; disabled: boolean } {
   const visible = screen === "pack-manager" && state.open !== null;
   return { visible, disabled: visible && state.busy };
-}
-
-/** The mouse's back button (MouseEvent.button 3) returns to the Pack list, only where the back button is usable. */
-export function mouseBackGoesToList(button: number, screen: ViewId, state: PackManagerState): boolean {
-  if (button !== 3) return false;
-  const back = backButtonState(screen, state);
-  return back.visible && !back.disabled;
 }

@@ -1,20 +1,14 @@
 // The top bar's pure decisions (SPM-26).
 import { expect, test } from "bun:test";
-import {
-  backButtonState,
-  mouseBackGoesToList,
-  NO_PACK_MANAGER,
-  packTabLabel,
-  tabClickAction,
-  type PackManagerState,
-} from "../src/shell-model";
+import { backButtonState, packTabLabel, tabClickAction } from "../src/shell-model";
+import { changed, NO_PACK_MANAGER, type PackManagerState } from "../src/pack-manager/model/shell-state";
 
 const open: PackManagerState = { open: { id: 7, title: "Cat Moods" }, busy: false };
 const busy: PackManagerState = { open: open.open, busy: true };
 
 test("the tab is plain with no pack open, on every screen", () => {
   for (const screen of ["editor", "pack-manager", "settings"] as const) {
-    expect(packTabLabel(screen, null)).toEqual({ label: "Pack Manager", packTitle: null, tooltip: null });
+    expect(packTabLabel(screen, null)).toEqual({ packTitle: null, tooltip: null });
   }
 });
 
@@ -61,11 +55,18 @@ test("the back button shows only while the Pack Manager shows a pack, disabled w
   expect(backButtonState("settings", open).visible).toBe(false);
 });
 
-test("the mouse back button goes to the list only where the back button works", () => {
-  expect(mouseBackGoesToList(3, "pack-manager", open)).toBe(true);
-  expect(mouseBackGoesToList(3, "pack-manager", busy)).toBe(false);
-  expect(mouseBackGoesToList(3, "pack-manager", NO_PACK_MANAGER)).toBe(false);
-  expect(mouseBackGoesToList(3, "editor", open)).toBe(false);
-  expect(mouseBackGoesToList(0, "pack-manager", open)).toBe(false);
-  expect(mouseBackGoesToList(4, "pack-manager", open)).toBe(false);
+test("the back button is not disabled while hidden, even if the pack reports busy", () => {
+  expect(backButtonState("editor", busy)).toEqual({ visible: false, disabled: false });
+  expect(backButtonState("settings", busy)).toEqual({ visible: false, disabled: false });
+  expect(backButtonState("pack-manager", { open: null, busy: true })).toEqual({ visible: false, disabled: false });
+});
+
+test("a published state counts as changed only when the pack, its Title or busy differ", () => {
+  expect(changed(open, { open: { id: 7, title: "Cat Moods" }, busy: false })).toBe(false);
+  expect(changed(NO_PACK_MANAGER, NO_PACK_MANAGER)).toBe(false);
+  expect(changed(open, busy)).toBe(true);
+  expect(changed(open, { open: { id: 7, title: "Cats" }, busy: false })).toBe(true);
+  expect(changed(open, { open: { id: 8, title: "Cat Moods" }, busy: false })).toBe(true);
+  expect(changed(open, NO_PACK_MANAGER)).toBe(true);
+  expect(changed(NO_PACK_MANAGER, open)).toBe(true);
 });
