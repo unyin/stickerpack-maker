@@ -6,6 +6,10 @@ upload order. v1 targets Windows: Tauri v2 (Rust core + TypeScript webview) with
 No Telegram network calls in v1 — uploads are manual via @Stickers. Once installed, the
 app's only network use is the one-time download of the background-removal model.
 
+**Download:** the Windows installer is on the
+[Releases page](https://github.com/unyin/stickerpack-maker/releases) (install notes:
+[Install and uninstall](#install-and-uninstall)).
+
 - Requirements: `docs/SPEC.md` (source of truth)
 - Vocabulary: `GLOSSARY.md`
 - Durable decisions: `docs/adr/` (0001 stack · 0002 independent copies · 0003 order-encoded
