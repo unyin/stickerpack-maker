@@ -154,3 +154,9 @@ source and the "download host is a third party" consequence above.
   owner's decision (2026-11-26): the credit lives in the app's Settings, Credits, beside ONNX
   Runtime's (MIT), naming and linking each licence. Open: Credits does not include the licence
   texts, and neither the app nor the `models` release ships them yet.
+- **SPM-29 note (2026-11-26):** closes the app half of the "Open" point above. The app now ships
+  `THIRD-PARTY-NOTICES.txt` next to the exe (Settings, Credits, "Open licence texts"),
+  which includes ONNX Runtime's own MIT text and its third-party notices (1.31.0, the
+  version `ort-sys` downloads) and the ISNet section with the Apache-2.0 text. The `models`
+  release half stays pending: its `LICENSE-ISNet.txt` asset beside the weights is to be
+  uploaded at the v1 release.

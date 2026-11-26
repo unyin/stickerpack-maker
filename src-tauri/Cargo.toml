@@ -1,8 +1,13 @@
 [package]
 name = "stickerpack-maker"
-version = "0.1.0"
+version = "1.0.0"
+license = "MIT"
 description = "Local-first desktop app for making Telegram sticker packs"
 edition = "2021"
+# Not a published crate: cargo-about (about.toml `private.ignore`) then leaves the
+# app itself out of THIRD-PARTY-NOTICES.txt instead of attributing it the
+# vendored ONNX Runtime licence file in its own folder (SPM-29).
+publish = false
 
 # The library target is shared by the desktop binary (main.rs) and unit tests.
 # `rlib` is required so `cargo test` can link against the app code.

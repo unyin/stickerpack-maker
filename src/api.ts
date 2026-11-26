@@ -71,6 +71,14 @@ export function readCustomEmojiFont(path: string): Promise<ArrayBuffer> {
 }
 
 /**
+ * Opens the bundled THIRD-PARTY-NOTICES.txt in the user's default text app
+ * (SPM-29). The Rust side resolves and opens the file itself.
+ */
+export function openLicenceTexts(): Promise<void> {
+  return invoke<void>("open_licence_texts");
+}
+
+/**
  * File picker for the custom emoji font (SPM-17): real font containers only.
  * Returns the selected file path, or null when the user cancels.
  */

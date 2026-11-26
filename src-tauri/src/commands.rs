@@ -1,7 +1,11 @@
 //! Tauri commands exposed to the webview. The typed TS wrappers live in
 //! `src/api.ts`; command names and camelCase field names must stay in sync.
 
-use std::{fs, path::PathBuf, sync::MutexGuard};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::MutexGuard,
+};
 
 use serde::Serialize;
 use tauri::{Manager, State};
@@ -218,6 +222,40 @@ pub fn read_custom_emoji_font(path: String) -> Result<tauri::ipc::Response, Stri
     }
     let bytes = fs::read(&path).map_err(|e| format!("cannot read {path}: {e}"))?;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+// ---- Licence texts (SPM-29) ----
+
+/// The bundled third-party notices' file name, as `bundle.resources` in
+/// tauri.conf.json places it in the resource directory (the install folder
+/// next to the exe on Windows; target/<profile> in `tauri dev`, where
+/// tauri-build copies it).
+const NOTICES_FILE: &str = "THIRD-PARTY-NOTICES.txt";
+
+/// Where the notices file sits under a resource directory, or why it is not
+/// there. A plain existence check gives the owner a clear message in
+/// Settings instead of the shell's own "file not found" dialog.
+fn notices_path(resource_dir: &Path) -> Result<PathBuf, String> {
+    let path = resource_dir.join(NOTICES_FILE);
+    if path.is_file() {
+        Ok(path)
+    } else {
+        Err(format!(
+            "cannot find the licence texts at {}: reinstall the app",
+            path.display()
+        ))
+    }
+}
+
+/// Settings, Credits, "Open licence texts": opens THIRD-PARTY-NOTICES.txt in
+/// the user's default app for .txt. The core resolves the path and opens it
+/// itself, so the webview gets no opener permission.
+#[tauri::command(async)]
+pub fn open_licence_texts(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = app.path().resource_dir().map_err(|e| format!("cannot find the app's resource folder: {e}"))?;
+    let path = notices_path(&dir)?;
+    tauri_plugin_opener::open_path(&path, None::<&str>)
+        .map_err(|e| format!("cannot open {}: {e}", path.display()))
 }
 
 // ---- The text renderer's emoji chain (SPM-20) ----
@@ -649,6 +687,15 @@ pub fn editor_remove_background(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notices_path_finds_the_file_in_the_resource_dir_and_explains_when_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = notices_path(dir.path()).unwrap_err();
+        assert!(err.contains("THIRD-PARTY-NOTICES.txt"), "{err}");
+        std::fs::write(dir.path().join("THIRD-PARTY-NOTICES.txt"), "x").unwrap();
+        assert_eq!(notices_path(dir.path()).unwrap(), dir.path().join("THIRD-PARTY-NOTICES.txt"));
+    }
 
     #[test]
     fn library_status_serializes_lowercase_for_the_webview() {

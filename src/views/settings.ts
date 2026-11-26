@@ -1,6 +1,7 @@
 import {
   createLibrary,
   LIBRARY_DB_FILE_NAME,
+  openLicenceTexts,
   pickEmojiFont,
   pickFolder,
   pickLibraryDb,
@@ -75,6 +76,16 @@ export function renderSettings(
       onChanged();
     });
   }
+
+  const licencesMessage = el("p", { class: "message", role: "alert" });
+  const licencesButton = el(
+    "button",
+    { class: "secondary", type: "button" },
+    "Open licence texts",
+  );
+  licencesButton.addEventListener("click", () => {
+    void withMessage(licencesMessage, openLicenceTexts);
+  });
 
   const statusText =
     state.libraryStatus === "ready"
@@ -287,6 +298,9 @@ export function renderSettings(
           { class: "muted" },
           "The fonts' full licence texts ship with the app beside the bundled font files.",
         ),
+        // SPM-29: every shipped component's licence text, one file beside the exe.
+        licencesButton,
+        licencesMessage,
       ),
     ),
   );

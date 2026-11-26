@@ -73,6 +73,7 @@ pub fn run() {
             commands::repoint_library,
             commands::set_emoji_style,
             commands::read_custom_emoji_font,
+            commands::open_licence_texts,
             commands::editor_probe_image,
             commands::editor_import_image,
             commands::editor_merge_layers,
