@@ -807,7 +807,8 @@ pass.
   each press is one undo step on release. (Shrinking/pinch is parked for v3.)
 - **Background removal**: one-click offline ONNX auto removal + manual refine brush. The ISNet
   model (Apache-2.0) and ONNX Runtime (MIT) are credited in Settings, Credits (SPM-19, owner
-  decision 2026-11-26). Details (SPM-7, ADR-0006; owner decisions 2026-11-22):
+  decision 2026-11-26), which also has an "Open licence texts" button that opens the
+  bundled THIRD-PARTY-NOTICES.txt in the default text app (SPM-29). Details (SPM-7, ADR-0006; owner decisions 2026-11-22):
   - **Remove background** works on the selected image layer, or the base image when nothing
     is selected (like Outline and glow); with text or several layers selected it is
     disabled, with the reason in its tooltip. It makes the background transparent (the
