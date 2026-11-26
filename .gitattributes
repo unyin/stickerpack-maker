@@ -1,0 +1,13 @@
+# The owner builds on Windows. Pinning LF keeps a CRLF checkout clean in every
+# git, including WSL git, which has no core.autocrlf and compares raw bytes.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary
+*.ttf binary
+*.db binary
+
+# The vendored ONNX Runtime texts ship with CRLF line endings; keep their bytes
+# unconverted. The glob also covers a renamed or added file after a refresh.
+src-tauri/licenses/vendor/onnxruntime-* -text
