@@ -1,5 +1,6 @@
 # Dependencies
-node_modules/
+# No trailing slash: also matches the node_modules symlinks in .worktrees/*
+node_modules
 
 # Frontend build output
 dist/
