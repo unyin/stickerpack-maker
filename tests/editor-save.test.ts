@@ -154,7 +154,7 @@ test("the size messages say how large and what the limit is", () => {
 test("the saved note names the file, the slot, the pack and the size", () => {
   const out = saved("webp") as Extract<SaveOutcome, { kind: "saved" }>;
   const note = savedText(out, "Cats", { kind: "append", packId: 2 });
-  expect(note).toBe("Saved as 004.webp, sticker #4 of “Cats” (2.0 KB, WEBP quality 80). Give it an Emoji String in the Pack Manager.");
+  expect(note).toBe("Saved as 004.webp, sticker #4 of “Cats” (2.0 KB, WEBP quality 80). Give it an Emoji String in the Emoji tab or the Pack Manager.");
   const png = saved("png") as Extract<SaveOutcome, { kind: "saved" }>;
   expect(savedText(png, "Cats", { kind: "append", packId: 2 })).not.toContain("quality");
   const withEmoji = { ...png, sticker: { ...png.sticker, emojiString: "🐱" } };
