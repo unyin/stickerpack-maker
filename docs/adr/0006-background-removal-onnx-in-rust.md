@@ -58,7 +58,7 @@ runs in the webview.**
     (SPEC §2), naming its size. **Download** fetches it; **Cancel**, the safe
     default, does nothing.
   - The pinned source is rembg's release asset (until a later task mirrors it to the
-    project's own release; only the URL changes - mirrored in SPM-19, amended below):
+    project's own release; only the URL changes; mirrored in SPM-19, amended below):
     `https://github.com/danielgatis/rembg/releases/download/v0.0.0/isnet-general-use.onnx`,
     SHA-256 `60920e99c45464f2ba57bee2ad08c919a52bbf852739e96947fbb4358c0d964a`,
     178,648,008 bytes.
