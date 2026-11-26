@@ -160,3 +160,6 @@ source and the "download host is a third party" consequence above.
   version `ort-sys` downloads) and the ISNet section with the Apache-2.0 text. The `models`
   release half stays pending: its `LICENSE-ISNet.txt` asset beside the weights is to be
   uploaded at the v1 release.
+- **SPM-31 note (2026-11-26):** closes the `models` release half. `LICENSE-ISNet.txt` (the
+  Apache-2.0 text, the same as `src-tauri/licenses/vendor/isnet-dis-LICENSE.txt`) is now an
+  asset of the `models` release beside the weights, and the release description lists it.
