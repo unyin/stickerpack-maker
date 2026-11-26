@@ -3,9 +3,8 @@
 // not its view order, and the app cannot see how Explorer is sorted. So both
 // drag-drop and the Add images picker import in natural filename order:
 // "sticker2" before "sticker10", case ignored.
+import { naturalCollator as collator } from "../../shared/natural-collator";
 import { fileNameOf } from "./messages";
-
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 /** `paths` sorted by file name, naturally; ties keep the full path order. */
 export function importOrder(paths: readonly string[]): string[] {

@@ -3,6 +3,7 @@
 // side (serde rename_all = "camelCase").
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { baseName, lastSeparatorIndex } from "./shared/path";
 
 export type LibraryStatus = "unconfigured" | "ready" | "invalid";
 
@@ -115,16 +116,6 @@ export async function pickLibraryDb(
     ],
   });
   return typeof selected === "string" ? selected : null;
-}
-
-/** Index of the last path separator (Windows or POSIX), or -1 if none. */
-function lastSeparatorIndex(filePath: string): number {
-  return Math.max(filePath.lastIndexOf("\\"), filePath.lastIndexOf("/"));
-}
-
-/** Last path segment (Windows or POSIX separators). */
-export function baseName(filePath: string): string {
-  return filePath.slice(lastSeparatorIndex(filePath) + 1);
 }
 
 /**

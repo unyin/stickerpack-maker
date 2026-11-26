@@ -336,8 +336,8 @@ fn place(
 }
 
 /// Roll an interrupted operation forward to its committed state, then sweep
-/// stray pre-commit temps. Idempotent; runs on pack open and manual refresh
-/// BEFORE desync detection, never on app start (SPEC §4, ADR-0004).
+/// stray pre-commit temps. Idempotent; runs on pack open, manual refresh and each
+/// show of the Pack list, BEFORE desync detection, never on app start (SPEC §4, ADR-0004).
 /// Operations call it before staging anything, never between staging and
 /// `apply_plan` — the sweep would delete their staged copies.
 pub fn recover(conn: &Connection, pack_dir: &Path, pack_id: i64) -> Result<(), String> {

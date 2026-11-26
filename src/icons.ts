@@ -19,8 +19,25 @@ const PATHS = {
    * 16px, in Chromium at 100/125/150% scaling, the dot separates from both the
    * stem and the base (centre-column ink dips to <=0.25 on each side). */
   warning: ["M12 4L3 20h18z", "M12 10v2.5", "M12 16v.01"],
+  /** Drag handle: six dots in two columns (the Pack list's row grip, SPM-25),
+   * zero-length round-capped strokes like the warning icon's dot. Drawn for a
+   * 24px icon (one viewBox unit per CSS px), where the 2-unit dots land on whole
+   * pixels at 100%, 150% and 200% scaling; measured in Chromium, grip A of the
+   * owner's mockup choice. */
+  grip: ["M9 6v.01", "M15 6v.01", "M9 12v.01", "M15 12v.01", "M9 18v.01", "M15 18v.01"],
   /** Close: an X. */
   close: ["M6 6l12 12", "M18 6L6 18"],
+  /** Editor tab (SPM-26): scissors - two open rings and two blades crossing. Owner-chosen
+   * from a sheet rendered and measured at the tab's real size (18px, 100%): the
+   * rings stay open and the blades read apart. */
+  scissors: ["M9 6a3 3 0 1 1-6 0a3 3 0 1 1 6 0z", "M9 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0z", "M8.5 8l11.5 11", "M8.5 16L20 5"],
+  /** Settings tab (SPM-26): a cog - eight straight-sided teeth round a hub, drawn as
+   * one polygon (not arcs) so the teeth stay separable at the tab's 18px, where the
+   * measurement showed all eight apart at 100%. */
+  cog: ["M10.31 5.21 L10.72 2.49 L13.28 2.49 L13.69 5.21 L15.61 6.00 L17.82 4.37 L19.63 6.18 L18.00 8.39 L18.79 10.31 L21.51 10.72 L21.51 13.28 L18.79 13.69 L18.00 15.61 L19.63 17.82 L17.82 19.63 L15.61 18.00 L13.69 18.79 L13.28 21.51 L10.72 21.51 L10.31 18.79 L8.39 18.00 L6.18 19.63 L4.37 17.82 L6.00 15.61 L5.21 13.69 L2.49 13.28 L2.49 10.72 L5.21 10.31 L6.00 8.39 L4.37 6.18 L6.18 4.37 L8.39 6.00Z", "M15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z"],
+  /** Pack Manager tab (SPM-26): layers - a diamond over two chevrons, three strokes
+   * that stay separate at the tab's 18px (measured at 100%). */
+  layers: ["M12 3L21 7.5L12 12L3 7.5Z", "M3 12L12 16.5L21 12", "M3 16.5L12 21L21 16.5"],
   /** Eyedropper: the native colour picker's own glyph, traced from the owner's
    * reference screenshot (2026-11-23, CMT-301) via potrace of its cleaned
    * coverage - three subpaths (the outline and the tube's two hollows), drawn

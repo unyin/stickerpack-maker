@@ -2,6 +2,7 @@
 // command names and argument shapes must match src-tauri/src/commands.rs
 // (registered in src-tauri/src/lib.rs::invoke_handler).
 import { expect, mock, test } from "bun:test";
+import { baseName } from "../src/shared/path";
 
 const calls: Array<{ cmd: string; args?: Record<string, unknown> }> = [];
 const fakeState = {
@@ -82,10 +83,10 @@ test("parentFolder derives the Library folder from the db path", () => {
 });
 
 test("baseName returns the last segment for Windows and POSIX paths", () => {
-  expect(api.baseName("F:\\Libraries\\cats\\library.db")).toBe("library.db");
-  expect(api.baseName("/home/user/lib/library.db")).toBe("library.db");
-  expect(api.baseName("library.db")).toBe("library.db");
-  expect(api.baseName("F:\\library.db")).toBe("library.db");
+  expect(baseName("F:\\Libraries\\cats\\library.db")).toBe("library.db");
+  expect(baseName("/home/user/lib/library.db")).toBe("library.db");
+  expect(baseName("library.db")).toBe("library.db");
+  expect(baseName("F:\\library.db")).toBe("library.db");
 });
 
 test("marker name matches the Rust DB_FILE_NAME constant", () => {

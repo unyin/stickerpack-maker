@@ -2,8 +2,8 @@
 // the dialog shows, when its header button is available, its notes, and the
 // width that fits ten emoji per row. Pure, so it is testable without a webview.
 import type { PackStatus, PackView, StickerFormat, StickerView } from "../api";
-import { EMOJI_MAX, EMOJI_MIN, emojiCountWarning } from "./emoji";
-import { MISSING_REASON, PACK_MAX_STICKERS, thumbnailFormat } from "./messages";
+import { EMOJI_MAX, EMOJI_MIN } from "./emoji";
+import { MISSING_REASON, thumbnailFormat } from "./messages";
 
 /** Why the Upload list is unavailable, or null. A thumbnail alone is not a list: the pack must have stickers. */
 export function uploadListBlocker(stickerCount: number): string | null {
@@ -15,20 +15,6 @@ export const UPLOAD_LIST_TITLE = "Upload… — Every sticker in order with its 
 
 /** The enabled tooltip while the pack is ready to go live: the header button is green and says why (owner, 2026-11-25). */
 export const UPLOAD_READY_TITLE = `Upload… — Ready to go live: every sticker has its file and ${EMOJI_MIN}–${EMOJI_MAX} emoji`;
-
-/**
- * Whether the pack is ready to go live (owner decisions 2026-11-25): a Draft
- * with 1 to PACK_MAX_STICKERS stickers, none Missing, every Emoji String of
- * EMOJI_MIN to EMOJI_MAX emoji, and a thumbnail (if set) that is not Missing.
- * No thumbnail does not block. Recomputed on every render, never stored.
- */
-export function readyToGoLive(view: PackView): boolean {
-  const { pack, stickers } = view;
-  if (pack.status !== "draft") return false;
-  if (stickers.length < 1 || stickers.length > PACK_MAX_STICKERS) return false;
-  if (pack.thumbnail && (view.thumbnailMissing || view.thumbnailFile === null)) return false;
-  return stickers.every((s) => !s.missing && emojiCountWarning(s.emojiString) === null);
-}
 
 /** A Draft pack's reminder (owner-approved wording, 2026-11-25); null for a Live pack. */
 export function draftNote(status: PackStatus): string | null {

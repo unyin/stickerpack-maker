@@ -704,6 +704,19 @@
   position: relative;
 }
 
+/* A file dragged over the Editor (SPM-27): the Pack view's accent outline, on
+   the canvas, or on the empty-state area while no image is open. */
+.editor-canvas,
+.editor-empty {
+  outline: 2px dashed transparent;
+  outline-offset: 2px;
+}
+
+.editor-canvas.drop-target,
+.editor-empty.drop-target {
+  outline-color: var(--accent-ink);
+}
+
 .editor-text-edit {
   position: absolute;
   z-index: 1;

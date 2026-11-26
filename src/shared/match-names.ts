@@ -1,6 +1,11 @@
 // Type-to-search for the app's comboboxes (src/combobox.ts): pure, so it is
 // testable without a webview.
 
+/** A search text as the matchers compare it: trimmed, lower-cased. */
+export function normaliseQuery(text: string): string {
+  return text.trim().toLowerCase();
+}
+
 /**
  * Names matching `query`, case-insensitive: those starting with it first,
  * then those containing it, each group in list order; an empty query keeps
@@ -12,7 +17,7 @@ export function matchNames<T>(
   name: (item: T) => string,
   alsoContains: (item: T) => string = () => "",
 ): readonly T[] {
-  const q = query.trim().toLowerCase();
+  const q = normaliseQuery(query);
   if (q === "") return items;
   const starts: T[] = [];
   const contains: T[] = [];

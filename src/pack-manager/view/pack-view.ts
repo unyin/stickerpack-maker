@@ -9,7 +9,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { editorCanImport, IMPORT_EXTENSIONS } from "../../shared/import-extensions";
 import { explorerLabel, icon } from "../../icons";
-import { el, errorMessage, onActivate, withMessage } from "../../ui";
+import { el, errorMessage, withMessage } from "../../ui";
 import {
   checkStickerFile,
   deleteStickers,
@@ -54,7 +54,8 @@ import {
   type SelectionState,
 } from "../model/selection";
 import { emojiCountWarning, emojiWarning } from "../model/emoji";
-import { readyToGoLive, UPLOAD_LIST_TITLE, UPLOAD_READY_TITLE, uploadListBlocker } from "../model/upload-list";
+import { packFactsOfView, readyToGoLive } from "../model/pack-issues";
+import { UPLOAD_LIST_TITLE, UPLOAD_READY_TITLE, uploadListBlocker } from "../model/upload-list";
 import { importOrder } from "../model/import-order";
 import { rustTrim, shortNameProblem, titleProblem } from "../model/names";
 import { dialogOpen, openDialog } from "../../dialog";
@@ -77,8 +78,12 @@ import { previewImage, Previews } from "./previews";
 import { cancelReorderDrag, startReorderDrag, type ReorderDragHost } from "./reorder-drag";
 
 export interface PackViewHost {
-  /** Back to the pack list. */
-  back(): void;
+  /**
+   * The pack's Title and whether an action is running, reported after every
+   * render (the first one included) and whenever the busy state flips: the top bar names the pack and
+   * disables its back button while busy (SPM-26).
+   */
+  report(title: string, busy: boolean): void;
   /** Show the Editor with this image open; `origin` when it is this pack's sticker (Edit). */
   openInEditor(path: string, origin?: StickerOrigin): void;
   /** Show the Editor's Thumbnail mode with this image open (the pack's thumbnail session). */
@@ -129,7 +134,6 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   const statusButton = el("button", { class: "secondary pm-header-btn", type: "button" }) as HTMLButtonElement;
   // Right of the status button (owner, 2026-11-25); works in Draft and Live.
   const uploadButton = el("button", { class: "secondary pm-header-btn", type: "button" }, "Upload…") as HTMLButtonElement;
-  const backButton = el("button", { class: "secondary", type: "button", title: "Back to the list of packs" }, "← Pack list") as HTMLButtonElement;
   const reorderButton = el("button", { class: "secondary pm-toggle", type: "button", "aria-pressed": "false" }, "Reorder") as HTMLButtonElement;
   const refreshButton = el("button", { class: "secondary", type: "button", title: "Check the pack folder for files changed outside the app" }, icon("refresh"), "Refresh") as HTMLButtonElement;
   const addButton = el("button", { class: "secondary", type: "button", title: "Add sticker files at the end of the pack (or drop them onto the pack)" }, "Add images…") as HTMLButtonElement;
@@ -151,7 +155,6 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
   const header = el(
     "div",
     { class: "pm-header" },
-    backButton,
     el("label", { class: "pm-header-field" }, el("span", { class: "field-label" }, "Title"), titleInput),
     el("label", { class: "pm-header-field pm-short-field" }, el("span", { class: "pm-field-head" }, el("span", { class: "field-label" }, "Short Name"), shortNote), shortInput),
     el("div", { class: "pm-header-status" }, badgeHost, statusButton, uploadButton),
@@ -165,6 +168,7 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     if (busy) return;
     busy = true;
     root.classList.add("busy");
+    host.report(view.pack.title, true);
     try {
       await withMessage(message, action);
     } finally {
@@ -248,7 +252,6 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     if (mode === "reorder") setMode("normal");
     void openUploadList(view, previews, { saveEmoji: persistEmoji });
   });
-  backButton.addEventListener("click", () => host.back());
   revealButton.addEventListener("click", () => void run(() => revealPack(packId)));
 
   // ---- Toolbar ----
@@ -442,7 +445,6 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       {
         class: ["pm-tile", isSelected ? "selected" : "", sticker.missing ? "missing" : ""].join(" ").trim(),
         "data-id": String(sticker.id),
-        tabindex: "0",
         "aria-selected": String(isSelected),
         "aria-label": `Sticker ${sticker.position}${sticker.missing ? ", Missing" : ""}`,
       },
@@ -451,11 +453,6 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       el("span", { class: "pm-flags" }, ...flags),
     );
     item.addEventListener("click", (e) => {
-      if (!selectionActive(mode)) return;
-      selection = clickSticker(selection, order(), sticker.id, modifiersOf(e));
-      render();
-    });
-    onActivate(item, (e) => {
       if (!selectionActive(mode)) return;
       selection = clickSticker(selection, order(), sticker.id, modifiersOf(e));
       render();
@@ -475,7 +472,6 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       "li",
       {
         class: ["pm-tile", "pm-thumb-slot", selection.thumbnail ? "selected" : "", view.thumbnailMissing ? "missing" : ""].join(" ").trim(),
-        tabindex: "0",
         "aria-selected": String(selection.thumbnail),
         "aria-label": "Thumbnail",
       },
@@ -489,7 +485,6 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
       render();
     };
     item.addEventListener("click", choose);
-    onActivate(item, choose);
     return item;
   }
 
@@ -625,26 +620,23 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
     stickerCount.title = countWarning ?? "";
     countReasons.textContent = countWarning ? `. ${countWarning}` : "";
     root.classList.toggle("reorder", reorder);
-    for (const b of [refreshButton, addButton, revealButton, statusButton, backButton]) b.disabled = busy;
+    for (const b of [refreshButton, addButton, revealButton, statusButton]) b.disabled = busy;
     const uploadBlocker = uploadListBlocker(view.stickers.length);
     uploadButton.disabled = busy || uploadBlocker !== null;
     // The success tone (green fill, border and text; no size change) only while enabled and ready to go live.
-    const ready = !uploadButton.disabled && readyToGoLive(view);
+    const ready = !uploadButton.disabled && readyToGoLive(packFactsOfView(view));
     uploadButton.classList.toggle("tone-success", ready);
     uploadButton.title = uploadBlocker ?? (ready ? UPLOAD_READY_TITLE : UPLOAD_LIST_TITLE);
     titleInput.disabled = busy;
     if (busy) shortInput.disabled = true;
 
-    // Keep focus on the tile the user was on across re-renders.
-    const focusedId = (document.activeElement as HTMLElement | null)?.closest?.(".pm-tile")?.getAttribute("data-id");
-    const thumbFocused = (document.activeElement as HTMLElement | null)?.classList?.contains("pm-thumb-slot");
+    // The grid takes no keyboard focus (SPM-26): tiles are not focusable, so there is nothing to restore.
     grid.replaceChildren(...view.stickers.map(tile), thumbnailTile());
-    if (focusedId) grid.querySelector<HTMLElement>(`.pm-tile[data-id="${focusedId}"]`)?.focus();
-    else if (thumbFocused) grid.querySelector<HTMLElement>(".pm-thumb-slot")?.focus();
     renderBanners();
     // Rebuilding the panel would drop a half-typed Emoji String: keep it while editing.
     const editing = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement;
     if (!panel.contains(document.activeElement) || !editing) renderPanel();
+    host.report(pack.title, busy);
   }
 
   /** Re-read the pack (no Missing scan); the Editor may have replaced a file, whose cached preview is stale. */
@@ -682,7 +674,6 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
             ? grid.querySelector<HTMLElement>(".pm-thumb-slot")
             : grid.querySelector<HTMLElement>(`.pm-tile[data-id="${id}"]`);
         tile?.scrollIntoView({ block: "nearest" });
-        tile?.focus({ preventScroll: true });
       });
     },
     destroy() {

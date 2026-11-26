@@ -17,7 +17,6 @@
 }
 
 .pm-input:focus-visible,
-.pm-tile:focus-visible,
 .pm-pack-open:focus-visible {
   outline: 2px solid var(--accent-ink);
   outline-offset: 2px;
@@ -89,6 +88,21 @@
   gap: 12px;
 }
 
+.pm-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pm-search {
+  width: 240px;
+}
+
+/* Reordering is off while the search has text: the grip's column stays so nothing shifts. */
+.pm-pack-list.filtering .pm-grip {
+  visibility: hidden;
+}
+
 .pm-list-title {
   display: flex;
   align-items: baseline;
@@ -101,30 +115,171 @@
   color: var(--muted);
 }
 
+/* One grid for the whole list; every row is a subgrid of it, so each column
+   lines up across rows however wide a row's status badge is. Columns: grip,
+   thumbnail, title (takes the rest), status badge, Draft/Live, Open in
+   explorer, Delete. */
 .pm-pack-list {
   list-style: none;
   padding: 0;
   margin: 12px 0 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto auto auto;
+  row-gap: 8px;
 }
 
 .pm-pack-row {
+  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 14px;
-  padding: 10px 14px;
+  column-gap: 14px;
+  padding: 8px 14px 8px 4px;
+  position: relative;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
+}
+
+.pm-pack-row[hidden],
+.pm-empty-item[hidden] {
+  display: none;
+}
+
+.pm-status-cell {
+  justify-self: end;
+}
+
+/* The drag handle at the row's left edge: a 24px icon (one viewBox unit per
+   CSS pixel, so the 2-unit dots land on whole pixels) in a 32px-wide handle
+   that fills the row's height. */
+.pm-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 32px;
+  margin: -8px 0;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+  border-radius: 8px;
+}
+
+.pm-grip:hover {
+  color: var(--text);
+  background: var(--panel); /* the row's own hover tint is --bg */
+}
+
+.pm-grip .icon {
+  width: 24px;
+  height: 24px;
+}
+
+body.pm-row-dragging,
+body.pm-row-dragging * {
+  cursor: grabbing !important;
+}
+
+.pm-row-thumb {
+  width: 40px;
+  height: 40px;
+  flex: none;
+  display: flex;
+}
+
+.pm-row-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.pm-row-thumb .pm-missing-art,
+.pm-row-thumb .pm-thumb-empty {
+  width: 100%;
+  height: 100%;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
+/* The first sticker standing in for a missing thumbnail: a dashed frame, the
+   same cue the Pack view's thumbnail slot uses. --muted, not --border: the
+   border token is 1.32:1 against the row, too faint to read as a frame. */
+.pm-row-thumb.fallback {
+  border: 1px dashed var(--muted);
+  border-radius: 6px;
+  padding: 2px;
+  box-sizing: border-box;
+}
+
+/* The pack's issues (warn tone) and "Ready to upload" (the soft success tone,
+   not the solid Live fill). */
+.pm-badge-issue {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  border-color: var(--warn-border);
+}
+
+.pm-badge-ready {
+  background: var(--success-bg);
+  color: var(--success-text);
+  border-color: var(--success-border);
+}
+
+/* Drag to reorder: the dragged row fades, a faded copy follows the cursor,
+   and a 4px accent line in the gap between rows marks the drop (the Pack
+   view's .pm-tile.drop-before, turned horizontal). The line sits in the
+   middle of the 8px row gap (offsets below). */
+.pm-pack-row.dragging {
+  opacity: 0.45;
+}
+
+/* The whole row opens the pack (pack-list.ts), so the pointer says so and the
+   row tints on hover (not while it is the dragged row). */
+.pm-pack-row {
+  cursor: pointer;
+}
+
+.pm-pack-row:hover:not(.dragging) {
+  background: var(--bg);
+}
+
+.pm-row-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 10;
+  pointer-events: none;
+  opacity: 0.6;
+  margin: 0;
+}
+
+.pm-pack-row.drop-before::before,
+.pm-pack-row.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent-ink);
+}
+
+/* Offsets are from the row's padding box: 1px border + half the 8px gap (4px)
+   + half the line (2px) puts the line's centre in the gap. */
+.pm-pack-row.drop-before::before {
+  top: -7px;
+}
+
+.pm-pack-row.drop-after::after {
+  bottom: -7px;
 }
 
 .pm-pack-open {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  max-width: 100%;
   gap: 2px;
   background: none;
   border: none;
@@ -139,7 +294,16 @@
   font-weight: 600;
 }
 
+/* One line each; the full text is in the button's title. */
+.pm-pack-open > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .pm-empty-item {
+  grid-column: 1 / -1;
   padding: 16px;
   list-style: none;
 }

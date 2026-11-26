@@ -102,14 +102,38 @@ Uploads in v1 are manual via @Stickers, dragging files from the explorer in file
   match pack order. Renames must be crash-safe (two-phase to avoid collisions); DB and
   filenames must never disagree after an operation.
 - The library is app-managed: renaming files outside the app desyncs it.
-- **Desync checks run only when a pack is opened, plus a manual refresh. Never on app start.**
-  Absent files mark the sticker **Missing**.
+- **Desync checks run when a pack is opened, on a manual refresh, and each time the Pack list
+  is shown (SPM-25). Never on app start** (the app opens in the Editor). Each check first
+  recovers the pack's own interrupted work (ADR-0004), then marks absent files **Missing**.
 - "Open in explorer" opens the pack folder **with the sticker's file selected**.
 
 ## 5. Pack Manager
 
 Command map agreed with the owner on 2026-11-19 (SPM-4). One selection→panel paradigm for
 stickers, Missing stickers, and the thumbnail.
+
+### Top bar (owner decisions 2026-11-26, SPM-26)
+Left to right: a **reserved back slot**, the **Editor** and **Pack Manager** tabs, the app
+name **Stickerpack Maker** pushed to the right, and the **Settings** tab in the top-right
+corner. Nothing in the bar moves between states (in a pack, on the Pack list, in the Editor
+or Settings, a long pack Title).
+- **Back slot**: a secondary button **← Pack list** (tooltip "Back to the list of packs"),
+  visible only while the Pack Manager shows a pack and otherwise hidden but still taking its
+  space (visibility, not display). It does what the pack header's old button did, and like it
+  is disabled while the pack view is busy.
+- **Tab icons**: every tab has an icon (18px) and a label with a 6px gap: Editor = scissors,
+  Pack Manager = layers, Settings = cog (drawn in `src/icons.ts`; chosen from a sheet rendered
+  and measured at the real size).
+- **The Pack Manager tab names the open pack on every screen**: "Pack Manager", a "›"
+  separator, then the pack's Title (font-weight 600, capped at 160px with an ellipsis), while
+  a pack is open; plain "Pack Manager" when none is. The name follows the pack's Title as it is
+  edited and disappears when the pack is closed, deleted or left for the list, and when the
+  Library changes. Tooltip: from the Editor or Settings with a pack open, **Back to “<full
+  Title>”**; while the pack is on screen, **Back to the list of packs**; otherwise none.
+- **Tab clicks**: the Pack Manager tab from another screen shows the open pack (and
+  any pending reveal after an Editor save), as before; clicked while the pack is on screen it
+  goes to the Pack list (ignored while the pack view is busy); on the Pack list it reloads
+  the list.
 
 ### Pack view modes
 - **Normal (default)**: dragging does nothing. Selection: click = select that sticker
@@ -120,6 +144,10 @@ stickers, Missing stickers, and the thumbnail.
   Reorder mode is obvious at a glance: every sticker tile turns a theme-matched green, and a
   faded copy of the dragged sticker follows the cursor (owner decision 2026-11-21).
 - The two modes are mutually exclusive; the toggle is always visible.
+- **The grid takes no keyboard focus** (owner decision 2026-11-26, SPM-26): sticker tiles and
+  the thumbnail slot are not focusable, so no focus ring ever shows on them (the owner saw one
+  after Shift-click and Esc). Selection is by mouse; Esc (clear selection, exit Reorder) and
+  Delete work from anywhere outside a text field.
 - Sticker tiles have one fixed size and show position, preview and at most one warning
   flag: **Missing** takes priority over the emoji-count flag. The Emoji String shows in the
   detail panel, not on the tile (owner decisions 2026-11-21 and 2026-11-22).
@@ -270,10 +298,72 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
 ### Pack-level
 - **UI conventions**: the app-wide dialog and dismissible-message rules are in §2.
 - Create pack (Title → auto Short Name, editable while Draft; new packs are Draft).
-- Pack list: shows how many packs the Library holds, but no per-pack sticker counts (each
-  pack's view shows its own); each pack has **Open in explorer**, which opens the pack's
-  folder (owner decisions 2026-11-21).
-- Pack header: **← Pack list** back button; Title always editable; Short Name editable only
+- Pack list: shows how many packs the Library holds; each pack has **Open in explorer**, which
+  opens the pack's folder (owner decisions 2026-11-21). From SPM-25 (owner decisions
+  2026-11-25) each row also carries the pack's state, and the list is reorderable:
+  - **Every show of the list is a full open check.** Each pack gets exactly what opening it
+    gets (recovery, then the presence check, remembered like an open's), so the badges are
+    true; the cost was measured on a 50 x 120-sticker Library (about 50 ms release, 120 ms
+    debug). A pack whose check fails does not break the list: its row reads **Check failed**
+    (the error as its tooltip); its counts and emoji come from the database and its
+    thumbnail shows the None placeholder (see below).
+  - **The row**, in columns that line up across rows (one grid, each row a subgrid): grip, a
+    40px thumbnail, the Title with the Short Name under it (one line each, ellipsis, both in
+    full in the tooltip), the **status badge**, the Draft/Live badge,
+    Open in explorer, Delete.
+  - **Search box**: an `<input type="search">` ("Search packs", 240px; accessible name, its
+    `aria-label`: "Search packs by Title or Short Name") in the Pack list header,
+    just before **New pack…** (tab order: search, then New pack…; no shortcut). It filters as
+    you type, in the webview only: a pack shows when its Title or Short Name contains the
+    trimmed text, case-insensitively, in the stored order; empty or blank text shows every
+    pack. The header count reads "N of M packs" whenever the search has text, even when
+    every pack matches ("2 of 5 packs", "9 of 9 packs", "0 of 1 pack"); with no text it is
+    the plain total ("9 packs").
+    With no match the list holds one line, "No packs match “text”."; a Library with no packs
+    keeps "No packs yet. Create one to start." The webview's own clear button and Esc empty
+    the box. **Reordering is off while the box has text**: the grips are hidden (their column
+    stays, so nothing shifts) and a press on one starts no drag; clicking a row still opens its
+    pack. The filter is kept across reloads of the list (after a delete or reorder, an error)
+    and across leaving a pack and coming back, so the user returns to the next matching pack.
+  - **Opening a pack**: a click anywhere on the row opens it, except on the grip and the row's
+    buttons (Open in explorer, Delete), which keep their own behaviour; the click that ends a
+    drag never opens. The row shows a pointer cursor and tints on hover, except the row being
+    dragged; the grip's own hover stays visible on a tinted row. The title stays the one
+    keyboard-focusable open control. Opening packs in quick succession shows the last one
+    asked for, whichever finishes loading first; an earlier one that fails shows no error. Going
+    back to the list, or revealing a sticker in the pack already open, also cancels a pack still
+    opening.
+  - **The thumbnail cell**: the pack's own thumbnail (tooltip "Thumbnail"); with none, the
+    first sticker in a dashed frame ("No thumbnail: Telegram shows the first sticker"), or the
+    Missing art when that sticker is Missing ("... which is Missing"); a Missing thumbnail
+    file shows the Missing art ("The thumbnail file is Missing"); with no thumbnail and no
+    stickers, a neutral "None" ("No thumbnail and no stickers yet"). A pack whose check failed
+    shows the same "None" ("The pack could not be checked"): its files were never verified.
+  - **The status badge** comes from ONE issue rule (`model/pack-issues.ts`) that the Pack
+    view's green **Upload…** shares (ready = a Draft with no issues). Issues, most severe
+    first: N Missing stickers ("1 sticker is Missing" / "N stickers are Missing"); Thumbnail
+    Missing ("The thumbnail file is Missing"); over the limit, "N / 120" ("N stickers:
+    Telegram allows at most 120"); emoji issues, "1 emoji issue" / "N emoji issues" ("1
+    sticker's Emoji String is outside 1–20" / "N stickers' Emoji Strings are outside 1–20");
+    Empty ("No stickers yet"). With several, ONE badge: the most severe label plus " +N" (N =
+    the others), and the tooltip lists every line. Issues show on Live packs too. A Draft with
+    none reads **Ready to upload** (soft success tone; "Every check passes: ready for
+    @Stickers"); a Live pack with none shows no status badge. Issues are warn-toned.
+  - **Stored display order.** The list's order is stored in the Library (migration 0003) and
+    is display only: it never renames a folder or a sticker file. **New packs go at the
+    top.** Existing packs of an older Library are backfilled newest first, so the list reads
+    newest first from the upgrade on. Deleting a pack closes the gap.
+    The pack pickers (Send to pack, the Editor's save target) list packs alphabetically by
+    Title (case-insensitive, natural number order: "Pack 2" before "Pack 10"), not in the
+    stored order.
+  - **Drag to reorder**, from the row's **grip** only (six dots, a 32px-wide handle at the
+    row's left edge, tooltip "Drag to reorder"). No
+    Reorder mode or toggle. Pointer-only, like the Upload list's drag handle and the Pack
+    view's Reorder mode: a faded copy of the row follows the cursor, the dragged row fades, a
+    4px accent line between rows marks the drop, Esc mid-drag cancels, and releasing stores
+    the order and reloads. There is no keyboard route to it.
+- Pack header: Title always editable (its own "← Pack list" button is gone: the top bar
+  carries it, see **Top bar** below; owner decision 2026-11-26, SPM-26); Short Name editable only
   in Draft, with "🔒 Locked" beside its label (the full reason as its tooltip) so the header
   never changes height (owner decisions 2026-11-22); the Draft/Live badge and its button sit
   right after the Short Name, labelled **Go Live** / **Revert to Draft** like the dialogs they
@@ -331,10 +421,11 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   before "sticker10"), because Windows hands dropped files over in its own drag order, not
   Explorer's view order (owner decision 2026-11-21); invalid files rejected per-file with an
   "open in editor" option. Imported stickers get no emoji; empty-emoji stickers are flagged.
+  A drop imports only while the Pack view is on screen; on the Editor a drop opens there (§6).
 - Pack-view messages that stay until dismissed (notices such as "Checked the pack folder…"
   and the import summary) have an **X** on the left as well as **Dismiss** on the right
   (owner decision 2026-11-22).
-- Desync checks on pack open + manual refresh only, never on app start (§4).
+- Desync checks on pack open, manual refresh and each show of the Pack list, never on app start (§4).
 - 120-sticker warning (the sticker count's warn state, above); pack deletion semantics per §3.
 
 ## 6. Editor
@@ -460,6 +551,32 @@ pass.
   starts one; while a session is open, another image can only be brought in with **Add image
   as layer** (native pixel size, centred on the canvas, on top; may overflow; same 2000×2000
   rule). Starting over means **Close** first, which warns when there are unsaved changes.
+- **Drop an image on the Editor** (owner decisions 2026-11-26, SPM-27). Dropping an image file
+  anywhere on the Editor screen counts; it acts only while the Editor is on screen (the Pack
+  view's bulk import keeps its own screen, and an Editor drop never imports into a pack).
+  While a file is dragged over, the work area gets the Pack view's dashed accent outline,
+  removed on leave and on drop. Only the **first** file in Windows' drop order counts; with
+  several, the message line adds that the rest are ignored.
+  - Not an importable file (not .jpg/.jpeg/.jfif/.png/.webp, a folder too): nothing opens or
+    changes; error line `Can't open “x.gif”: the Editor opens PNG, JPEG and WEBP files.`, plus
+    ` Dropped files after the first are ignored.` with several. Later files are not tried.
+  - Nothing open: the file opens exactly as **Open image** does (the 2000×2000 question
+    included); with several files the note `Opened “a.png”; dropped files after the first are
+    ignored.`
+  - An image already open: the shared dialog (§2) titled **Dropped image**, body `What should
+    happen to “b.png”?`, buttons **Add as layer**, **Open instead**, **Cancel** (primary, the
+    default; Esc and closing = Cancel). **Add as layer** behaves as Add image as layer (one
+    undo step; note `Added “b.png” as a layer.`). **Open instead** goes through the same
+    questions as the Pack Manager's open (unsaved changes, or the gone origin; Keep editing
+    leaves everything as it was), then opens a normal sticker session with no origin. Cancel
+    changes nothing; with several files the note `Dropped files after the first were ignored.`
+  - A thumbnail session open: the same dialog plus a muted second line `Open instead starts a
+    new sticker, not a thumbnail for “<pack title>”.`, and the middle button reads **Open as
+    sticker instead**; Add as layer adds into the thumbnail session; Open as sticker instead
+    opens a sticker session, then the note `Opened “b.png” as a sticker.`
+  - A dialog open: the drop does nothing. The Editor busy: the drop does nothing and the line
+    says `Busy: try the drop again in a moment`.
+  - The notes use the neutral note style; "Can't open" uses the error style.
 
 ### Crop and sizing
 - Togglable **box overlay** at the active constraint set's side (owner decision 2026-11-20):
@@ -1083,7 +1200,11 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
   (CMT-419). Stop the server when the visual work ends.
 
 ### v3 parking lot
-- Drag and drop an image file onto an open session to add it as a layer (owner, 2026-11-20).
+- The mouse back button navigates back, at least from the Pack view to the Pack list (owner,
+  2026-11-26; built once in SPM-26 and removed before it shipped - commit 28f8118 has the
+  working version). Open questions: which screens it acts on (also back to the Pack view from
+  the Editor or Settings?), what it does while a dialog is open, WebView2's own history
+  navigation on that button, and whether the forward button does anything.
 - Pack Manager: in Reorder mode the sticker images wiggle (as on phone home screens),
   instead of or as well as the green tint (owner, 2026-11-21: animations are a bigger job).
 - Editor, warp: hold Alt to pinch (shrink) instead of bulge (owner, 2026-11-22).
@@ -1103,7 +1224,7 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 1. **Scaffold**: Tauri app skeleton (Rust + TS), Windows build, SQLite, first-run library
    chooser, settings (path display, manual re-point, fresh-library creation).
 2. **Library core (Rust)**: schema (packs/stickers/thumbnail/emoji/status), order-encoded
-   filenames, crash-safe renames, desync detection (pack-open + manual refresh), Missing state.
+   filenames, crash-safe renames, desync detection (pack open, manual refresh and each show of the Pack list), Missing state.
 3. **Pack Manager UI**: pack list/create, Draft/Live toggle + short-name lock, pack view
    (Normal/Reorder modes, detail + aggregate panels, thumbnail slot), emoji edit/copy,
    explorer reveal, delete semantics, 120 warning, bulk import with validation.

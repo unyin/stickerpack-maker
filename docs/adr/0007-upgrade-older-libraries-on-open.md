@@ -25,3 +25,4 @@ A Library's database schema grows with the app: migration 0001 (SPM-1) created o
 - Every migration must be safe to run on a Library that has real data (no destructive rewrites without their own decision), because users' Libraries upgrade silently.
 - The upgrade happens on the first command that opens the Library after an update, inside the Library lock, so no other operation sees a half-upgraded schema.
 - Regression test: `open_upgrades_an_older_library_to_the_current_schema` (src-tauri/src/library/mod.rs) builds a bootstrap-only Library, opens it, then lists and creates packs.
+- Migration 0003 (SPM-25) is the first to change an existing table with data in it: it adds `packs.sort_order` and backfills it newest-first from the pack ids, so every pack of an upgraded Library has a place in the Pack list's stored order. It changes no file or folder.
