@@ -10,6 +10,7 @@ import type { StickerOrigin } from "../shared/sticker-origin";
 import type { ThumbnailOrigin } from "../shared/thumbnail-origin";
 import { buildPackList } from "../pack-manager/view/pack-list";
 import { buildPackView, type PackViewHandle } from "../pack-manager/view/pack-view";
+import { NO_PACK_MANAGER, type PackManagerState } from "../shell-model";
 
 export interface PackManagerNav {
   /** Show the Editor with this image open; `origin` when it is a pack's sticker (Edit). */
@@ -18,7 +19,36 @@ export interface PackManagerNav {
   openThumbnailInEditor(path: string, origin: ThumbnailOrigin): void;
 }
 
-let cached: { library: string | null; root: HTMLElement; shown(): void; dispose(): void } | null = null;
+let cached: { library: string | null; root: HTMLElement; shown(): void; showList(): void; dispose(): void } | null = null;
+
+/**
+ * Which pack is open and whether it is busy, for the top bar (SPM-26): the
+ * Pack Manager reports every change here and the shell listens, so the shell
+ * never reaches into the Pack Manager's internals. `forgetPackManager` reports
+ * "no pack" like closing the pack does.
+ */
+let state: PackManagerState = NO_PACK_MANAGER;
+let listener: ((state: PackManagerState) => void) | null = null;
+
+function publish(next: PackManagerState): void {
+  state = next;
+  listener?.(state);
+}
+
+/** The shell's one subscription (it re-renders on a Library change, so a new one replaces the old). */
+export function onPackManagerState(next: ((state: PackManagerState) => void) | null): void {
+  listener = next;
+}
+
+/** The current state, for a subscriber that starts after the Pack Manager did. */
+export function packManagerState(): PackManagerState {
+  return state;
+}
+
+/** The top bar's back button, the Pack Manager tab and the mouse back button: show the Pack list. */
+export function showPackList(): void {
+  cached?.showList();
+}
 
 /**
  * What the Pack Manager shows the next time it is shown (the Editor's
@@ -65,11 +95,17 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
   let pack: PackViewHandle | null = null;
   let openId: number | null = null;
 
+  /** Tell the shell what is open: the pack's Title and busy state as the pack view last reported them. */
+  function report(title: string, busy: boolean): void {
+    if (openId !== null) publish({ open: { id: openId, title }, busy });
+  }
+
   function showList(): void {
     pack?.destroy();
     pack = null;
     openId = null;
     packMemory.openPackId = null;
+    publish(NO_PACK_MANAGER);
     root.replaceChildren(list.element);
     list.clearMessage(); // each show starts clear; openPack's showError comes after
     void list.reload();
@@ -77,15 +113,21 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
 
   async function openPack(packId: number): Promise<boolean> {
     try {
+      let handleRef: PackViewHandle | null = null;
       const handle = await buildPackView(packId, {
-        back: showList,
+        report: (title, busy) => {
+          // Only the pack on screen reports: not one still opening, nor a destroyed one finishing.
+          if (handleRef === pack) report(title, busy);
+        },
         openInEditor: nav.openInEditor,
         openThumbnailInEditor: nav.openThumbnailInEditor,
       });
       pack?.destroy();
       pack = handle;
+      handleRef = handle;
       openId = packId;
       packMemory.openPackId = packId; // pack pickers start on it
+      publish({ open: { id: packId, title: handle.title() }, busy: false });
       root.replaceChildren(handle.element);
       return true;
     } catch (err) {
@@ -105,6 +147,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
   return {
     library,
     root,
+    showList,
     shown: () => {
       const reveal = pendingReveal;
       pendingReveal = null;
@@ -121,6 +164,7 @@ function build(library: string | null, nav: PackManagerNav): NonNullable<typeof 
       pack = null;
       openId = null;
       packMemory.openPackId = null;
+      publish(NO_PACK_MANAGER);
     },
   };
 }
