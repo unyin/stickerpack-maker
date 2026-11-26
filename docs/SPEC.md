@@ -1200,7 +1200,11 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
   (CMT-419). Stop the server when the visual work ends.
 
 ### v3 parking lot
-- Drag and drop an image file onto an open session to add it as a layer (owner, 2026-11-20).
+- The mouse back button navigates back, at least from the Pack view to the Pack list (owner,
+  2026-11-26; built once in SPM-26 and removed before it shipped - commit 28f8118 has the
+  working version). Open questions: which screens it acts on (also back to the Pack view from
+  the Editor or Settings?), what it does while a dialog is open, WebView2's own history
+  navigation on that button, and whether the forward button does anything.
 - Pack Manager: in Reorder mode the sticker images wiggle (as on phone home screens),
   instead of or as well as the green tint (owner, 2026-11-21: animations are a bigger job).
 - Editor, warp: hold Alt to pinch (shrink) instead of bulge (owner, 2026-11-22).
