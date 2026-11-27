@@ -1,6 +1,7 @@
 # Triage: Pack Manager interactions
 
 Type: grilling
+Status: claimed
 
 ## Question
 
