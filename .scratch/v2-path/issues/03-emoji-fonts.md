@@ -16,4 +16,6 @@ Owner answers so far (2026-11-27):
 - SPEC §6's "woff2 decoding and bitmap blitting are parked for v2" is triaged in this ticket too.
 - woff2 fonts on the canvas: v3.
 - SVG-in-OpenType fonts on the canvas: rejected (COLR builds of the same artwork cover it; not worth an SVG renderer).
-- Open: .ttc verdict and bitmap (sbix/CBDT) canvas painting, waiting on a research agent (does WebView2 render sbix web fonts; does Apple's font use AAT morx rather than GSUB for ZWJ/flags/skin tones). Known locally: ttf-parser 0.25 already parses TTC members and exposes sbix/CBDT glyphs as PNG; the image crate decodes PNG.
+- Research (WebView2/OTS, 2026-11-27): raw Apple Color Emoji cannot work as shipped: its ligatures (skin tones, flags, ZWJ, keycaps) live in AAT morx, which OTS drops and the Rust renderer does not apply; newer builds store EMJC glyphs nobody here decodes. OTS passes CBDT/CBLC and sbix; Windows renders them via Skia Fontations. Blink refuses web fonts over 128 MB (our guard allows 256 MiB).
+- Size cap: the library's copy guard refuses fonts over WebView2's 128 MB limit with a clear message, part of the library task, v2 (owner).
+- Open: .ttc verdict (Q6) and bitmap canvas painting (Q7, depends on Q6). The owner tried a converted build, Desktop/AppleColorEmoji-Windows.ttf (256,391,076 bytes, over the 128 MB limit), and it was rejected; an analysis agent is finding why and how to fix it.
