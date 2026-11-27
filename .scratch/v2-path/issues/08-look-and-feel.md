@@ -1,6 +1,7 @@
 # Triage: Look and feel
 
 Type: grilling
+Status: claimed
 Blocked by: 05
 
 ## Question
