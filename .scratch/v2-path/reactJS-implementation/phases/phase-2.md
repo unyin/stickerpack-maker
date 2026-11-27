@@ -10,20 +10,23 @@ Session plans: [../sessions/S02-shell-mount-registry.md](../sessions/S02-shell-m
 **Goal.** The top bar (tabs, back button, banner), the shell chrome, and Settings render
 as React; Pack Manager and Editor remain `el()` views mounted into the shell's content
 container through the shared registry. `dialog.ts`, `combobox.ts`, `theme.ts`,
-`shell-model.ts`, `ui.ts`, `main.ts` and all five CSS files are untouched or
-near-untouched.
+`shell-model.ts`, `ui.ts` and all five CSS files are untouched; `main.ts` gains only
+two `unmountShell()` calls (S02 step 1).
 
 **Definition of done.**
 - `src/shell.tsx` renders header/banner/content with today's exact class names
   (`.topbar`, `.tb-slot`, `.nav`, `.nav-btn`, `.brand`, `.tb-back`/`.tb-hidden`,
   `.banner`, `.tab-sep`, `.tab-pack`, `.content`); `renderShell(container, state,
-  onChanged)` keeps its signature so `main.ts` needs no change.
+  onChanged)` keeps its signature, so main.ts's call is unchanged (its only edit is
+  S02's two `unmountShell()` boot-path calls).
 - `src/views/settings.tsx` renders the four cards identically; library re-point and
   create-fresh still fire the re-boot.
-- `bun run build` + `bun test` pass; one Windows check covering all three screens, tab
-  clicks, back button, library re-point re-boot, Settings dialogs, emoji-style change
-  without re-boot; `git diff --stat` zero bytes in dialog.ts, combobox.ts, theme.ts,
-  shell-model.ts, ui.ts, main.ts, views/editor.ts, views/pack-manager.ts, all .css.
+- `bun run build` + `bun test` pass; S02 passes its own Windows check before merging
+  (plan.md › Session protocol), and S03's phase-gate Windows check covers all three
+  screens, tab clicks, back button, library re-point re-boot, Settings dialogs,
+  emoji-style change without re-boot; `git diff --stat` zero bytes in dialog.ts,
+  combobox.ts, theme.ts, shell-model.ts, ui.ts, views/editor.ts, views/pack-manager.ts,
+  all .css.
 
 **Preconditions.** Phase 1 landed (deps, plugin, jsx key, mountView helper, first-run
 pilot Windows-checked). None of it exists today in the tree (verified).
@@ -44,8 +47,9 @@ implementation, no wrapper.**
 - A React re-implementation would still have to re-export the same imperative
   signatures for un-migrated callers: re-implementation risk with zero removed code.
 - Deferred seam (for Phase 3, binding): when dialog *bodies* need React content, the
-  bridge pattern (createRoot into a detached div, unmount when the result settles) is
-  the mechanism — a type widening, not a rewrite.
+  bridge pattern (plan.md binding contract #2: createRoot on the dialog's own
+  `.app-dialog-body` element, rendered in `flushSync`, unmount when the result
+  settles) is the mechanism — a type widening, not a rewrite.
 
 **Combobox (`src/combobox.ts`, 266 LOC): untouched imperative island through the whole
 adoption.**
@@ -77,16 +81,18 @@ unmounted before the next on re-boot — React 19 warns on a dirty container) re
 top bar, the banner, and `<main className="content" ref={contentRef}/>` — an empty
 ref-leaf with no JSX children, ever (React must never own mounted el() views' DOM).
 
-1. **Exactly one view at a time**: on switch, unmount every tracked React root, then
+1. **Exactly one view at a time**: on switch, unmount every tracked React root (from
+   the navigation handler, before the screen state changes — never in an effect
+   cleanup; binding contract #1's `unmountViews()`), then
    `container.replaceChildren()`, then mount the next — so `dialogOpen()` polls and
    `document.activeElement` checks never see two views.
 2. Un-migrated views are plain DOM mounts the registry tracks as "not a root, dies
    with replaceChildren".
 3. Navigation across the boundary is a module-level seam mirroring
-   `setPackManagerListener`: `setNavigator((view: ViewId) => ...)` registered in a
-   mount effect; un-migrated code (setEditorNav callbacks, openFileInEditor closures,
+   `setPackManagerListener`: `setNavigator((view: ViewId) => ...)` registered in an
+   effect (registration only — it mounts no view); un-migrated code (setEditorNav callbacks, openFileInEditor closures,
    showPackList) calls it; cleanup restores a no-op only if still ours.
-4. PM state for the chrome via `useSyncExternalStore(packManagerState, subscribe)` —
+4. PM state for the chrome via `useSyncExternalStore(subscribe, packManagerState)` —
    a thin adapter over `setPackManagerListener`; `shell-model.ts` (`packTabLabel`,
    `tabClickAction`, `backButtonState`) reused verbatim as the render math.
 5. **The re-boot callback stops at the boundary**: Settings receives `onLibraryChanged`
@@ -104,16 +110,20 @@ doc comment; no behavior change yet.
 **A2. Shell chrome in React.** `src/shell.ts` → `src/shell.tsx` (only importer is
 main.ts, extensionless import survives); `src/react/Icon.tsx`; the one-word icons.ts
 edit. `refreshChrome` becomes render output driven by the PM store adapter; `show()`
-becomes the mount effect keyed on `screen` state — and it must be a `useLayoutEffect`
-(a passive effect would paint an empty content area for a frame on every tab
-switch/boot). It must also re-run the effect body for the *current* screen: today
+stays the one navigation handler, outside React, never an effect (binding contract #1):
+`unmountViews(); flushSync(() => setScreen(next)); mountScreen(next)` (`mountScreen`
+a closure built in `renderShell`'s scope, passed to `Shell` as a prop — S02 step 4); at
+boot `mountShell()` renders inside `flushSync`, then `mountScreen(initialScreen(state))`
+mounts the initial view the same way — so no frame paints an empty content area, and every view root is created outside
+any React commit. It must also re-run the mount for the *current* screen: today
 clicking the PM tab while on the pack list re-runs `show("pack-manager")` →
 `list.reload()` (`tabClickAction` returns `"show"`, shell-model.ts:31;
 views/pack-manager.ts:76-83,106-115, header :2-4) — React's state-identity no-op
 would silently drop that re-read. `setEditorNav` wired via the
-navigator. NOT: shell-model.ts, theme.ts, main.ts, CSS, banner wording, view modules.
+navigator. NOT: shell-model.ts, theme.ts, main.ts (beyond the two `unmountShell()`
+calls), CSS, banner wording, view modules.
 Exit: build passes; `document.querySelector('.topbar').outerHTML` before/after
-byte-equal; all three screens reachable; PM tab "› {Title}" follows renames live; back
+byte-equal (fresh-boot state); all three screens reachable; PM tab "› {Title}" follows renames live; back
 button visibility/disabled per `backButtonState` incl. busy; PM-tab click on an open
 pack goes to the list; broken-library boot lands on Settings with the banner; re-boot
 unmounts cleanly (no dirty-container warning).
@@ -137,9 +147,10 @@ texts" still routes errors to its message line.
 
 **B1. Contract-preservation sweep and hardening.** Fixes wherever A2/A3 review finds
 drift. Checks: (1) the two Phase-2 tooltip sites — back button static
-`title={BACK_TO_LIST_TITLE}` and the PM tab `title={tab.tooltip ?? ""}` (today sets the
-empty string, not attribute removal — JSX must be `?? ""`, not `title={tab.tooltip}`
-which removes the attribute on null); (2) `dialogOpen()` still true while a
+`title={BACK_TO_LIST_TITLE}` and the PM tab `title={tab.tooltip || undefined}` (today
+the tab has no `title` on first render; the attribute is omitted while empty — S02
+step 4, which records the open-then-close `title=""` difference as an accepted,
+invisible deviation); (2) `dialogOpen()` still true while a
 Settings-spawned confirm is open; (3) stale navigation: open the create-fresh confirm,
 cancel, immediately switch tabs — no dead-shell navigation; (4) banner + Settings focus
 after re-boot lands where it does today; (5) the 148 tooltip sites: the 67 `title:`
@@ -151,7 +162,7 @@ replaces description" has no paired sites in Phase 2, so the spot-check reduces 
 two sites.
 
 **B2. Review-cycle to convergence + Windows check.** Review per AGENTS.md on the delta
-since the Phase 1 owner test. Windows checklist: the three screens and tab clicks
+since S02's owner test, plus the S02 diff as the hardening subject. Windows checklist: the three screens and tab clicks
 (incl. busy-pack tab refusal and back-button disabled), the long-pack-title tab cap
 (160px ellipsis), broken-library banner boot, library re-point and create-fresh incl.
 the confirm dialog, theme switch (native title bar follows), emoji style switching
@@ -163,7 +174,8 @@ button, DPI-scaled hover of both tooltips.
 1. `createRoot` on a dirty container / double shell during re-boot → module-level root
    handle + unmount-first; exit criterion checks for the dev warning.
 2. React clobbering el() DOM in the content leaf → the leaf has zero children by
-   construction; `mountView()` is the only writer; B1 review checks the JSX.
+   construction; the registry (`src/react/mount.ts`) is the only writer; B1 review
+   checks the JSX.
 3. Stale `setPackManagerListener`/`setEditorNav` slots after unmount → adapters restore
    a no-op only when still registered (the same replace-semantics the existing code
    documents).

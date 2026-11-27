@@ -24,7 +24,7 @@ the boot path is inside `boot()`: the React mount call replaces the direct
 the first-run view runs as a React component mounted into the existing `#app` shell; a
 root-tracking `mountView()` helper in shell.ts (or src/react/) enforces "React roots
 never outlive their view" for both view switches and re-boots; the licence notices
-include react/react-dom; the converted view passes a Windows check.
+include react, react-dom and scheduler; the converted view passes a Windows check.
 
 **Preconditions.** Phase 0 decisions landed (framework ADR, ticket 08 verdict,
 sequencing). Nothing else: this phase touches no code any later phase rewrites except
@@ -37,14 +37,15 @@ shell.ts, and it touches shell.ts additively.
 - tsconfig.json: add `"jsx": "react-jsx"` — the only compilerOptions change.
 - vite.config.ts: `plugins: [react()]`.
 - `bun run licenses` regenerates src-tauri/licenses/THIRD-PARTY-NOTICES.txt (npm section
-  auto-collects the runtime dependency closure; react/react-dom ship MIT LICENSE files).
+  auto-collects the runtime dependency closure recursively — react, react-dom and
+  react-dom's dependency scheduler, all shipping MIT LICENSE files).
   Risk: if the closure surprises, the fix is one `BORROWED_LICENSE_FILES` line.
 - Deliberately NOT: no Tailwind, no shadcn, no eslint/prettier/react-testing-library, no
   test changes, no main.ts or index.html edit, no React component yet.
 - Exit criteria: `bun install` clean; `bun run build` passes on the unchanged source
-  tree; `bun run test` passes (25 files); `git status` shows only package.json,
+  tree; `bun test` passes (25 files); `git status` shows only package.json,
   bun.lock, tsconfig.json, vite.config.ts, THIRD-PARTY-NOTICES.txt; the notices diff is
-  exactly two new MIT entries; `git diff --stat` empty for all five CSS files.
+  exactly three new MIT entries (react, react-dom, scheduler); `git diff --stat` empty for all five CSS files.
 
 ### WP2: mountView() helper + boot wiring
 

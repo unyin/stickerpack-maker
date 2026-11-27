@@ -5,7 +5,7 @@ render() def :597 + 10 call sites; dialogs.ts 531; pack-list.ts 253; panels.ts 2
 upload-list.ts 217; emoji-field.ts 86; previews.ts 72; pack-list-drag.ts 163;
 reorder-drag.ts 91; views/pack-manager.ts 184 — 2,517 view LOC total; the analysis's
 2,333 was a counting-method difference, not a scope change). Main-session spot-checks
-confirmed render() :597 and the drain :644–648.
+confirmed render() :597 and the drain :644–646 (inside `reread()` :643–648).
 Session plans: [../sessions/S04-pack-list.md](../sessions/S04-pack-list.md),
 [../sessions/S05-dialogs-upload-panels.md](../sessions/S05-dialogs-upload-panels.md),
 [../sessions/S06-pack-view-controller.md](../sessions/S06-pack-view-controller.md)
@@ -22,13 +22,14 @@ systems stay vanilla behind refs. Done when:
 - `bun run build` + `bun test` pass, `git diff` empty under `src/pack-manager/model/`,
   `src/editor/`, `src/shared/` and all `*.css`.
 - The Editor's drain contract is exact: `editor.ts:1539` (`markStickerFileChanged`) and
-  `:1501` (`markThumbnailChanged`) flow into pack-view's `reread()` (:644–648: drain
+  `:1501` (`markThumbnailChanged`) flow into pack-view's `reread()` (:643–648: drain
   *before* `loadPackView`, per-id `previews.forget`, thumbnail only when
   `takeChangedThumbnails().includes(packId)`) — ported verbatim, never called from a
   second site.
 - The Editor's save dialog still works: save-dialog.ts:14 imports `packPicker` — that
-  export keeps its `PackPicker` shape (returns `elements: HTMLElement[]`) until Phase 4
-  (via the bridge, binding contract #2 of the master plan).
+  export keeps its `PackPicker` shape (returns `elements: HTMLElement[]`) through the whole adoption
+  (it stays el() through Phase 3: save-dialog.ts:102 owns its dialog and has no settle
+  point to unmount a bridge root; binding contract #2 of the master plan).
 - `setPackManagerListener` / `packManagerState` / `revealStickerOnShow` /
   `revealThumbnailOnShow` / `showPackList` keep their exported contracts (shell.ts is
   the only external caller — verified).
@@ -66,21 +67,26 @@ Keep `pack-list-drag.ts` and `reorder-drag.ts` byte-identical, wired from JSX vi
 **Files**: pack-list.ts (253), pack-list-drag.ts (wiring only), previews.ts (72), the
 dialogs subset `newPackFields`/`createPackDialog`/`statusBadge`/`reservedLabel`
 (dialogs.ts ~:37-152: statusBadge :37, reservedLabel :50, newPackFields :60,
-createPackDialog :113-152), a surgical slice of `views/pack-manager.ts`, plus a ~15-LOC
-temporary bridge helper (`createRoot` into a detached div → `{element, unmount}`) for
-leaves with dual el()/React consumers (binding contract #2's mechanism).
+createPackDialog :113-152), a surgical slice of `views/pack-manager.ts`, plus the bridge
+helper of binding contract #2 (dialog bodies: empty `openDialog` body, root on
+`.app-dialog-body`, `flushSync`; in-view: root on the real host element in place).
+el() helpers with remaining el() consumers keep their el() versions beside the React
+twins (S04's session file names who deletes each).
 
-**Builds**: React `PackList` owning list state (packs, search, message/loadFailed,
-notice, per-row previews); an imperative handle (`useImperativeHandle`) exposing
-`reload()/showError()/clearMessage()` so the not-yet-redesigned controller keeps
-driving it; rows as JSX keyed `data-id`; the `loads` counter and message-precedence
+**Builds**: a controller-owned `PackListStore` (`useSyncExternalStore`) holding the
+list state (packs, search, message/loadFailed, notice, per-row previews) with
+`reload()/showError()/clearMessage()` as store commands the not-yet-redesigned
+controller keeps calling, and a React `PackList` rendering from it (no component
+state for anything the owner sees, so S06 lifts nothing); rows as JSX keyed per paint (`${paints}:${id}`, as in S04); the `loads` counter and message-precedence
 rule (`say(text, fromLoad)`) ported verbatim; `Previews` kept verbatim,
-`previewImage` becomes a `PreviewImage` component (state fills `src` when the cached
-promise resolves, `unreadable` class on null).
+`previewImage` becomes a `PreviewImage` component (`src` from the cached promise —
+read synchronously at render once settled, so a remount never paints blank tiles;
+`unreadable` class on null).
 
 **NOT**: touch openPack/showSticker/pendingReveal in the controller; convert the drag
-module; convert `statusBadge`'s el() body for the el() pack header (bridged for the
-React row until 3.3); any CSS/class changes.
+module; delete el() `statusBadge`/`previewImage`/`newPackFields` (the React row uses
+plain-JSX twins; the el() pack header and `packPicker` keep the el() versions); any
+CSS/class changes.
 
 **Exit criteria**: build/tests green, CSS diff empty; the `<ul class="pm-pack-list">`
 node never remounts (the subgrid ghost reads `getComputedStyle(list).
@@ -96,17 +102,18 @@ panels.ts (234).
 
 **Builds**: dialog bodies as React via the bridge (the async orchestrators stay plain
 async functions — their natural shape). upload-list.ts: one component for the dialog
-content; `makeDragHandle` stays imperative via ref; `fitWidth` becomes an effect
-(rAF + `document.fonts.ready`), same measured-from-live-layout math. emoji-field.ts:
+content; `makeDragHandle` stays imperative, attached via ref to the rendered cell;
+`fitWidth` stays in the orchestrator after the bridge render (`fit()` then
+`document.fonts.ready`, no rAF), same measured-from-live-layout math. emoji-field.ts:
 `measureEmojiGlyph` kept verbatim; `bindEmojiSave` semantics become component/hook;
 `copyFlash`'s 1200 ms timer becomes state + effect cleanup. panels.ts: near-mechanical
 JSX (pure `(state, actions)` already); the emoji box keeps `fit()` on rAF +
 fonts.ready and grow-not-scroll `fitHeight`; `EMOJI_BOX_GLYPH_WIDTHS` untouched.
-Panels mount into the still-el() pack view through the bridge; the existing renderPanel
-guard keeps protecting the bridged textarea.
+Panels mount into the still-el() pack view through an in-place root on the panel slot;
+the existing renderPanel guard keeps protecting the bridged textarea.
 
-**NOT**: convert pack-view's own markup; change `packPicker`'s exported shape
-(save-dialog.ts:102 consumes it — the bridge serves the Editor until Phase 4); touch
+**NOT**: convert pack-view's own markup; convert `packPicker` or change its exported
+shape (save-dialog.ts:102 consumes it — it stays el() through the whole adoption; its port is a post-adoption follow-up); touch
 Combobox internals; alter `initialFocus`/`defaultPackId` rules (pack-memory.ts,
 verbatim).
 
@@ -121,28 +128,38 @@ preserved.
 ## S06 (3.3) — Pack view + controller (~900 LOC touched)
 
 **Files**: pack-view.ts (686), views/pack-manager.ts (184), reorder-drag.ts (wiring
-only), bridge call-site removal (the packPicker-for-Editor bridge stays until Phase 4).
+only), removal of the in-view bridges (PackList, panels — plain JSX children once the
+pack view is React); the dialog bridges stay (contract #2), and `packPicker` stays el()
+through the whole adoption (post-adoption follow-up, recorded by S12).
 
 **Builds**:
 - **`PackViewStore`**: external store holding `{view, mode, selection, busy, notice,
   rejected, message}` with `subscribe()`/`getSnapshot()`, mirroring the EditorSession
   pattern. Every direct DOM write in today's closure is audited into a store field or
-  a derived render (~40-45 write sites, measured 38 of the four core patterns —
-  textContent/classList/disabled/title — the audit list is a review-cycle artifact). Action bodies port verbatim: `run()`'s busy-gate,
+  a derived render (42 lines: 28 of the four core write patterns —
+  textContent/classList/disabled/title — plus 14 replaceChildren/setAttribute/.value/
+  .hidden sites; S06's step 1 gives the greps; the audit list is a review-cycle
+  artifact). Action bodies port verbatim: `run()`'s busy-gate,
   `setView`/`pruneSelection`, `importPaths`, `persistEmoji`, `reread()`'s drain,
   `reveal()`'s REVEAL_BUSY/REVEAL_GONE paths, the drop-event and document-keydown
   effects with their cleanups.
-- **React PackView tree**: header (Title/Short as uncontrolled inputs + focused-guard
-  sync effect), toolbar (disabled/title/tone-class derivations), notices
+- **React PackView tree**: header (Title/Short as uncontrolled inputs + an
+  every-commit focused-guard sync effect, plus the commit handler's unconditional
+  revert to the stored value — S06 step 4), toolbar (disabled/title/tone-class derivations), notices
   (single-banner rule), grid (stable `<ol>` node, tiles keyed by sticker id, thumbnail
   slot last), panel keyed by `panelFor(selection)` + selected id — stable keys replace
   the `document.activeElement` panel guard by construction.
 - **Reveal scroll**: `render(); tile?.scrollIntoView({block:"nearest"})` becomes a
-  `useLayoutEffect` keyed on a `revealSeq` counter, querying the same selectors —
-  commit-before-paint.
+  one-shot pending reveal (`{ id }` in the store, cleared once consumed) applied by a
+  `useLayoutEffect` after the grid `scrollTop` restore, querying the same selectors —
+  commit-before-paint. (Revised from a `revealSeq`-keyed effect, which would scroll
+  again after a tab-switch remount; S06 step 5 holds the detail.)
 - **Controller**: the singleton survives headless — `opening` race counter, `disposed`,
-  `pendingReveal`, the handle-guard and publish-on-change contract verbatim; root
-  swaps become mountView() root management; `Previews` ownership moves to the store so
+  `pendingReveal`, the handle-guard and publish-on-change contract verbatim; the Pack
+  Manager becomes one React view that S02's `mountScreen` (src/shell.tsx) mounts with
+  `mountView()`, then runs the controller's `shown()` from the navigation handler,
+  outside React (never a mount effect); list ↔ pack switching is store state inside
+  that view, never a `mountView()` swap (S06 step 6); `Previews` ownership moves to the store so
   blob URLs survive root unmounts exactly as long as today; grid `scrollTop` saved on
   unmount and restored in a layout effect (four lines; without it mountView's
   unmount-on-switch regresses today's cached-DOM scroll preservation).
@@ -155,21 +172,26 @@ code, or any model file.
 store-extraction out the way Phase 4's S07 does. Reasons: pack-view has no imperative
 islands (no Konva, no gesture state; its drag modules are ref-wrapped), and its
 write-site surface is ~44 versus the editor's 24 closure vars plus race guards — the
-split buys much less here. Named overrun fallback: if S06 round-1 review finds the
-mixed session overrunning, split into a store-extraction-only session followed by the
-tree/controller swap, consuming the phase's S04+S05 compression discount first.
+split buys much less here, and S04's `PackListStore` leaves the list side only a root
+to drop. Named overrun fallback, decided once at the end of S06's step 1 (the
+write-site audit): if the audit finds more than 6 write sites beyond the counted 42,
+or the store + tree port is judged too large for one session, split into a
+store-extraction-only session followed by the tree/controller swap, consuming the
+phase's S04+S05 compression discount first.
 
-**Exit criteria**: build/tests green, CSS diff empty; no remaining bridge call sites
-except packPicker (grep-verifiable); focus preserved while typing Title/Short through
+**Exit criteria**: build/tests green, CSS diff empty; no in-view bridge left
+(`bridgeInPlace` gone, grep-verifiable; dialog bridges remain); focus preserved while
+typing Title / Short Name through
 a background `reload()`; focus + half-typed Emoji String preserved through a
 `persistEmoji` render; drain exact (edit a sticker in the Editor → save → saved-note
 link → preview shows the new image once, no stale blob); reveal selects and scrolls;
 busy-gating (double-click Add runs one import); tab-switch-and-back keeps the open
 pack, its scroll, and re-reads without a Missing scan (`reload()`, not `openPack()`,
-SPEC §4); pack-list state (search text, message, scroll) survives open-pack-and-back,
-as today's cached-DOM re-attach does (views/pack-manager.ts:110,133,141) — satisfied
-either by keeping the list root mounted/hidden or by lifting that state into the
-controller; Settings re-point disposes everything (controller `dispose()` →
+SPEC §4); pack-list state (search text, filtered rows, loaded packs, notice) survives
+tab-switch-and-back and open-pack-and-back, as today's cached-DOM re-attach does
+(views/pack-manager.ts:110,141,159), from S04's `PackListStore`; the message lines
+still start clear on each show; the open pack's `.pm-panel` scroll survives a tab
+switch; Settings re-point disposes everything (controller `dispose()` →
 `publish(NO_PACK_MANAGER)`).
 
 ## Risks
@@ -198,8 +220,8 @@ controller; Settings re-point disposes everything (controller `dispose()` →
 
 - **After S04**: type in Search (rows hide/show, thumbnails must not flash, drag
   cancels if filtering mid-drag); drag a row by the grip to first/last and drop; Esc
-  mid-drag; click the row right after a drag (must open the pack, not swallow the
-  click); create a pack typing Title fast (auto Short Name keeps up); delete a Draft
+  mid-drag; drop a row, then click it (the release click is suppressed, the next
+  click opens the pack); create a pack typing Title fast (auto Short Name keeps up); delete a Draft
   and a Live pack; rapid PM tab switches during load.
 - **After S05**: open Upload… — width fits ten emoji per row with the custom emoji
   font, first enabled open-button focused; edit an emoji box (Enter ends, spaces
@@ -207,7 +229,7 @@ controller; Settings re-point disposes everything (controller `dispose()` →
   after ~1.2 s; drag a preview out to Explorer/Telegram (OS drag, threshold
   respected); Send to pack: combobox filter, inline New pack…, Move checkbox, initial
   focus on the pack field; sticker/thumbnail delete confirms with previews; the
-  Editor's save dialog (packPicker through the bridge).
+  Editor's save dialog (the el() packPicker).
 - **After S06**: the three focus tests (type in Title while Refresh lands; type an
   Emoji String and save it; panel never rebuilds under the cursor); reorder mode:
   ghost follows cursor, drop markers, Esc, "Moved sticker #x to #y" notice; reveal

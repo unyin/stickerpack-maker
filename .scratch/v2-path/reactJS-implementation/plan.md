@@ -29,9 +29,10 @@ pinning is OpenCode-only and that budget is exhausted this month.)
 - **Pure model code reused verbatim**: all `*/model/*` files, `save.ts`, `shell-model.ts`,
   the api wrappers, `geometry.ts`.
 - **Session** = one focused agent session (build + review-cycle included; owner test time
-  excluded). Every session runs review-cycle to convergence before any owner testing
-  (AGENTS.md), lands as a PR with a regular merge commit (`gh pr merge --merge`), and the
-  surfaces it converts get their Windows check before they count as done.
+  excluded). Every session follows the **Session protocol** below: review-cycle to
+  convergence before any owner testing (AGENTS.md), a PR merged with a regular merge
+  commit (`gh pr merge <N> --merge`) only after the surfaces it converts pass their
+  Windows check.
 - **UI audience rule** (AGENTS.md): existing aria/role attributes stay as-is; nothing new
   added. **Icons rule**: no icon change ships unviewed — this plan changes no icons.
 
@@ -45,12 +46,51 @@ pinning is OpenCode-only and that budget is exhausted this month.)
 | 3 | Pack Manager | S04–S06 (3) | [phase-3.md](phases/phase-3.md) |
 | 4 | Editor | S07–S12 (5–6) | [phase-4.md](phases/phase-4.md) |
 
-**Total: 11–12 sessions, two named compression levers** (3.1+3.2 merge if both converge
-clean; 4.6 absorbs into 4.5 if 4.1–4.5 land clean) → realistic floor ~10. This sits above
+**Total: 11–12 sessions, two named compression levers** (3.1+3.2 merge if S04 lands
+clean, decided at S05's start; 4.6 absorbs into 4.5 if S07–S10 land clean, decided at
+S11's start; "land clean" as defined under Session protocol) → realistic floor ~10. This sits above
 the analysis's 8–10 headline for a stated reason: the sessionization isolates the Editor
 state bridge as its own zero-behavior-change session (S07) rather than mixing it with
 React work, and budgets consolidation/review sessions per slice instead of assuming them.
 Per-session plans: [sessions/](sessions/).
+
+## Session protocol (every session)
+
+Each session file's landing step points here; this is the one copy.
+
+1. **Start**: from the main checkout, set the session's Trekker task `in_progress`
+   (trekker only ever from the main checkout, never inside a worktree;
+   docs/agents/issue-tracker.md). Create a feature branch (or worktree) off `main`
+   named `react/sNN-<slug>`.
+2. **Build**: sub-agents do the coding (AGENTS.md). Model pins by harness: under
+   OpenCode, AGENTS.md's pins; under Claude Code, the build on Sonnet at default effort.
+   Set model and effort explicitly on every spawn.
+3. **Verify**: `bun run build` (tsc + vite), `bun test`, and the session's CSS
+   byte-identity check (`git diff --stat <session base> -- 'src/**/*.css'` empty).
+   **`<session base>`** = `git merge-base main HEAD` on the session branch. Every
+   diff-based check in these files is limited to the code pathspec
+   `-- src index.html tests src-tauri package.json bun.lock vite.config.ts tsconfig.json`,
+   so tracker commits (`.trekker/`) and Wayfinder files (`.scratch/`) pushed to `main`
+   never show up in it.
+4. **Review**: run the `review-cycle` skill to convergence over the session's diff
+   (reviewers: OpenCode per AGENTS.md; Claude Code on Opus at medium effort, fixer on
+   Sonnet at medium effort). Review always comes before any owner test.
+5. **PR**: push the branch, open the PR (`gh pr create`, body per the `pr` skill).
+6. **Owner Windows check** on the PR's build, against the session file's checklist. A
+   fix found there goes back through a review-cycle round before re-test.
+7. **Merge**: only after the checklist passes, `gh pr merge <N> --merge` (never squash
+   or rebase). Then, from the main checkout, a summary comment on the Trekker task and
+   `completed`.
+
+**Anchor base.** Every `file:line` anchor in these files was measured against the tree
+at commit `11bacb6` (pre-S01). Earlier sessions move code, so a later session reads an
+anchor as `git show 11bacb6:<file>` and finds today's location by its symbol, never by
+the bare line number.
+
+**Clean landing** (used by the compression levers): a session landed clean when its
+review-cycle converged in at most two rounds with no blocker or major finding, its
+Windows checklist passed first time, and it used none of its own overrun fallbacks
+(nothing slipped to the next session).
 
 ## Binding cross-phase contracts
 
@@ -59,7 +99,14 @@ These decisions bind all sessions; relitigating one mid-phase is plan drift.
 1. **Incremental mounting.** Phase 1 builds a `mountView()` root-tracking helper in
    `src/react/`; Phase 2 extends it into a heterogeneous registry (React roots + el()
    DOM mounts, exactly one view mounted at a time, unmount-before-clear-before-mount
-   order, shell root tracked separately and unmounted on re-boot). Phase 3/4 mount
+   order, shell root tracked separately and unmounted on re-boot: two named functions,
+   `unmountViews()` for the content views and `unmountShell()` for the shell root, and
+   never `root.unmount()` from inside a React render or commit. Views mount and unmount
+   only from the navigation handler, outside React, never from an effect:
+   `unmountViews(); flushSync(() => setScreen(next)); mount<View>(contentLeaf)`; the
+   first view mounts the same way right after `mountShell()`'s `flushSync` render, so no
+   frame paints an empty content area and every view's own roots — including
+   in-place bridges like the PackList — are created outside any React commit). Phase 3/4 mount
    through it. Navigation across the React/el() boundary is a module-level navigator
    seam mirroring `setPackManagerListener`. Per-boot shell remount is the ADOPTED
    design (it reproduces today's scorched-earth boot semantics: fresh DOM per
@@ -68,8 +115,15 @@ These decisions bind all sessions; relitigating one mid-phase is plan drift.
 2. **Dialog and Combobox stay imperative islands** (Phase 2's firm decision, recorded for
    ADR-0010 candidacy). `dialog.ts` (93) and `combobox.ts` (266) are untouched through the
    whole adoption. React content inside a dialog body happens only via the bridge
-   pattern (Phase 3): `createRoot` into a detached div, the resulting element passed as
-   the body node, the bridge root unmounted when the dialog's result settles. The
+   pattern (Phase 3): call `openDialog(title, [], buttons, …)` with an empty body, then
+   `createRoot` **on the dialog's own `.app-dialog-body` element** (found through
+   `handle.dialog`) and render inside `flushSync`, so the body's children exist before
+   the orchestrator's next line (focus, width fit, `scrollTop`) and the DOM stays
+   node-for-node today's (no wrapper element). The bridge root is unmounted when the
+   dialog's `result` settles. Never move React-rendered nodes out of their root's
+   container: React 19 delegates events at the container, so a moved node's handlers
+   never fire. The same rule holds for every non-dialog bridge (a React subtree inside a
+   still-el() view): the root's container is the real host element in place. The
    FontPicker (Phase 4) is an imperative embed by default; a swap to a React combobox is
    an optional post-adoption follow-up, not an exit criterion.
 3. **No `<StrictMode>`** anywhere during the adoption (double-invoked effects would churn
@@ -84,7 +138,38 @@ These decisions bind all sessions; relitigating one mid-phase is plan drift.
    mutation+notify); during S08–S11 the un-ported `refresh()` sections are driven
    from a single `EditorApp` `useLayoutEffect` keyed on `controller.version`,
    shrinking as panels port, deleted in S12. No component may write DOM that React
-   owns. Mutable-snapshot pattern: version bump + notify; commands live outside React
+   owns. Mutable-snapshot pattern: version bump + notify, **one notify per command**
+   (a command that sets several fields notifies once, at its end). A *command* is a
+   public controller method entered from a view event, a keyboard shortcut or an async
+   continuation; commands called from inside another command do not notify on their
+   own (a depth counter batches them). **The depth bracket covers synchronous code
+   only**: it is never held across an `await`, so every async continuation (a
+   download progress tick, editAsync's commit, a `.then`, a tab click during a long
+   action) is its own outermost command and notifies; only an action's synchronous
+   prefix nests. The pre-notify step runs inside the bracket, before the decrement,
+   on every path including the session forwarder's (the forwarder raises the depth
+   around it), so its nested `setTool` never adds a notify. Every command that writes
+   a rendered field notifies, even when today's code skipped the `refresh()` because
+   nothing else changed. The one named exception is `run()`: its own notifies are
+   exactly two, at its start (busy on) and in its `finally` (busy off), the `finally`
+   being its own bracket; notifies from async continuations during the run are
+   theirs, not `run()`'s. Normalisations today's `refresh()` performs by calling a
+   command (the effect-basis discard, `setTool("move")`) run in the controller's
+   pre-notify step, inside the same command, never from a render or an effect.
+   **Lifecycle exception:** `attachStage()` / `detachStage()` are not commands but
+   the stage's registration with the controller, and the only *notifying* controller
+   calls made synchronously from an effect body (CanvasPanel's stage effect and its
+   cleanup). Besides them, an effect body may make only silent registrations (the
+   text-overlay register/unregister) and silent consumes of a pending value (e.g.
+   ToolsPanel clearing `toleranceValue` once applied); none of these notifies. One
+   more call is allowed there, through the stage: `stage.onViewChange` calls its
+   listener at once on registration (stage.ts:444–447), so `controller.setZoom` runs
+   synchronously inside the stage effect; it notifies the zoom view channel
+   (`subscribeView`) only, never bumps `version`, and is not a command.
+   `attachStage()` bumps the version and notifies, so anything rendered from the
+   stage (crop box, size blockers) catches up on every session start and remount.
+   Handlers an effect registers (keydown, drag-drop, `onViewChange`) are event
+   paths and may call commands. Commands live outside React
    (event-driven, never effect-driven), so no effect cleanup can cancel what today
    always finishes.
 5. **Imperative islands stay vanilla**: `stage.ts` (1,286; useRef + useEffect keyed on
@@ -109,7 +194,7 @@ forget-trio in the Settings re-point callback; `editor.ts` refresh() at :2323, h
 layer at :2812+ (setEditorNav :2827), `markStickerFileChanged` :1539 /
 `markThumbnailChanged` :1501, 88 `el(` sites; `dialogOpen()` at dialog.ts:91;
 save-dialog.ts's `packPicker` import :14 / use :102; pack-view `render()` at :597 with
-the takeChangedStickers drain at :644–648, 50 `el(` sites.
+the takeChangedStickers drain at :644–646 (inside `reread()` :643–648), 50 `el(` sites.
 
 Two cross-phase conflicts found and resolved (recorded in Binding contracts #2 and the
 FontPicker ruling): Phase 3's JSX dialog bodies vs Phase 2's untouched `dialog.ts`
