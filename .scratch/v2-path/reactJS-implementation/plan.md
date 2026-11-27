@@ -1,11 +1,16 @@
 # React adoption — implementation plan
 
-Status: planning artifact (2026-11-27), pre-verdict. This plan executes only after the
-Phase 0 decisions land: the framework ADR (React 19, adoption-only), ticket 08's
-look-and-feel verdict, and the sequencing call vs tickets 01/02 (see
-[react-adoption-analysis.md](../research/react-adoption-analysis.md), "The one decision
-this forces before any of it counts"). It feeds ticket 08/09; the Trekker epics/tasks of
-ticket 10 would be created from it.
+Status: planning artifact (2026-11-27), pre-verdict at drafting time — since then ticket
+08's verdict landed (2026-11-27): **React adoption goes to v2, first**, built on this
+plan ("starts once that plan is confirmed and this map is done"), followed by the shadcn
+pass that folds in the tone styles. What remains of Phase 0: the owner's confirmation of
+this plan, the sequencing is decided (React first; the v2 UX items build on shadcn
+components, never on `el()`; Rust/model-only parts may run alongside the port), and
+ADR-0010 "React + shadcn/ui view layer" is written in ticket 10. See
+[ticket 08](../issues/08-look-and-feel.md), the
+[effort analysis](../research/react-adoption-analysis.md), and the map's Decisions.
+This plan feeds ticket 09/10; the Trekker epics/tasks of ticket 10 would be created
+from it.
 
 Methodology: four planning subagents drafted the phases (one per phase, verified against
 the tree); the main session verified their claims by direct measurement and assembled this

@@ -131,3 +131,10 @@ never priced this; it is the biggest swing factor on the real cost.
 - Preflight strategy and the fate of the existing 2,759-line CSS.
 - Bundle acceptance (~2x shipped JS, 127 -> ~250 kB gzip).
 - Sequencing vs tickets 01/02 (above).
+
+Follow-up (2026-11-27): the implementation plan built on this analysis lives at
+[../reactJS-implementation/](../reactJS-implementation/plan.md) — master plan, four
+phases, twelve per-session plans, all clean-reviewed. Ticket 08's verdict adopted React
+adoption as v2's first item (~11-12 sessions from that plan), resolving the sequencing
+and bundle questions above; the remaining open questions move to the shadcn pass and
+ADR-0010.

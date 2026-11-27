@@ -19,6 +19,16 @@ make explicitly: **sequencing** - tickets 01/02's greenlit UX work builds on `el
 and would be re-ported after a conversion, so a React/shadcn verdict interacts with when
 those land.
 
+Post-verdict pointer (2026-11-27): the full React-adoption plan set this answer's first
+bullet cites lives at [reactJS-implementation/](../reactJS-implementation/plan.md) —
+[plan.md](../reactJS-implementation/plan.md) (master, 6 binding contracts), four phase
+files, and twelve reviewed per-session plans
+[sessions/S01–S12](../reactJS-implementation/sessions/), all measured against the tree
+and through a clean review cycle (one blocker fixed; verdict CLEAR, commit 42526b4). The
+11–12 session figure and every cost in this answer trace to it; its binding contract #2
+(Dialog/Combobox imperative) holds for the port's duration only, as this answer's shadcn
+bullet states.
+
 ## Answer
 
 Owner verdicts (2026-11-27): **all three items go to v2, plus React adoption as their prerequisite**. Built on [Research: what adopting shadcn/ui would take](05-shadcn-fit.md) and its [React-adoption addendum](../research/react-adoption-analysis.md). Look-and-feel cost about 18-21 sessions (rough), on top of tickets 01/02/03/07's ~15-18: v2 is now about 35 sessions, for [Group the v2 survivors into tasks and epics](09-group-v2-survivors.md) to weigh.
