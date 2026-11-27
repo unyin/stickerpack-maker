@@ -20,6 +20,7 @@ A v2 plan: every entry of SPEC §9's v2 parking lot (UX), and every §8 future s
 
 - [Triage: Pack Manager interactions](issues/01-pack-manager-interactions.md): v2: double-click to Edit, reusable right-click menu, hold-to-reorder (~500ms, adjustable in Settings) with group drag, emoji picker; v3: trash/recovery (via a staging area).
 - [Triage: Editor tools and layers](issues/02-editor-tools-and-layers.md): v2: ratio-keeping edge handles, custom canvas resize (centre), Crop drops all-transparent crossing layers, text-to-image, whole-pixel moves/resizes/Rectangle selections, layer locking, mirror (both axes), crop layer to content, full Editor defaults in Settings + reset, Editor right-click menu; v3: grid snapping.
+- [Triage: Emoji fonts](issues/03-emoji-fonts.md): v2: emoji font library (with a 128 MB guard matching WebView2's limit), bitmap (CBDT/sbix) emoji painting on the canvas; v3: woff2 on the canvas, auto-slim at import; rejected: .ttc support, SVG-in-OpenType. Also triages SPEC §6's parked woff2/bitmap item.
 - [Research: what adopting shadcn/ui would take](issues/05-shadcn-fit.md): real shadcn means React + Tailwind (~13-16 sessions, ~2x JS, a framework ADR); Basecoat ~6-8; shadcn's look in plain CSS ~3-5, folds into tone styles; shadcn default contrast fails the 3:1 rule, keep the app's colours.
 - [Research: image clipboard in Tauri 2 on Windows](issues/06-image-clipboard.md): feasible with transparency; do it in Rust with arboard (PNG + CF_DIBV5), keep the webview paste event for Ctrl+V; needs a Windows paste-target hand test.
 
