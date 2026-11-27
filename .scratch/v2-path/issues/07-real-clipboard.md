@@ -1,6 +1,7 @@
 # Triage: real clipboard Cut/Copy
 
 Type: grilling
+Status: claimed
 Blocked by: 06
 
 ## Question
