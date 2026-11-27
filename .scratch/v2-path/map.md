@@ -18,6 +18,8 @@ A v2 plan: every entry of SPEC §9's v2 parking lot (UX), and every §8 future s
 
 ## Decisions so far
 
+- [Research: image clipboard in Tauri 2 on Windows](issues/06-image-clipboard.md): feasible with transparency; do it in Rust with arboard (PNG + CF_DIBV5), keep the webview paste event for Ctrl+V; needs a Windows paste-target hand test.
+
 ## Not yet specified
 
 - Triage may surface v2 items that need a design decision before they can be written as implementation tasks (e.g. how a right-click menu or trash area should look). Whether those become extra decision tickets here or are left to the implementation tasks gets settled once the survivors are known.
