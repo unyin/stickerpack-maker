@@ -18,6 +18,7 @@ A v2 plan: every entry of SPEC §9's v2 parking lot (UX), and every §8 future s
 
 ## Decisions so far
 
+- [Research: what adopting shadcn/ui would take](issues/05-shadcn-fit.md): real shadcn means React + Tailwind (~13-16 sessions, ~2x JS, a framework ADR); Basecoat ~6-8; shadcn's look in plain CSS ~3-5, folds into tone styles; shadcn default contrast fails the 3:1 rule, keep the app's colours.
 - [Research: image clipboard in Tauri 2 on Windows](issues/06-image-clipboard.md): feasible with transparency; do it in Rust with arboard (PNG + CF_DIBV5), keep the webview paste event for Ctrl+V; needs a Windows paste-target hand test.
 
 ## Not yet specified
