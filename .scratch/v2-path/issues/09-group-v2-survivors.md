@@ -6,3 +6,7 @@ Blocked by: 01, 02, 03, 04, 07, 08
 ## Question
 
 Given every v2 verdict, how do the survivors bundle into implementation tasks (things that make sense to do at the same time) and those tasks into v2 epics? Check the whole hangs together; push odd ones out to v3; pull in any obviously related v3-lot item by name. Settle the ordering/dependencies between tasks.
+
+## Context note (2026-11-27)
+
+[Triage: Look and feel](08-look-and-feel.md) fixes the coarse order: React adoption -> shadcn pass -> the v2 UX items (built on shadcn components) -> icon pass last. This ticket picks which Rust/model-only parts may run alongside the React port, and weighs the ~35-session total.

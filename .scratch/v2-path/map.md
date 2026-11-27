@@ -26,6 +26,7 @@ A v2 plan: every entry of SPEC §9's v2 parking lot (UX), and every §8 future s
 - [Research: what adopting shadcn/ui would take](issues/05-shadcn-fit.md): real shadcn means React + Tailwind (~13-16 sessions, ~2x JS, a framework ADR); Basecoat ~6-8; shadcn's look in plain CSS ~3-5, folds into tone styles; shadcn default contrast fails the 3:1 rule, keep the app's colours.
 - [Research: image clipboard in Tauri 2 on Windows](issues/06-image-clipboard.md): feasible with transparency; do it in Rust with arboard (PNG + CF_DIBV5), keep the webview paste event for Ctrl+V; needs a Windows paste-target hand test.
 - [React-adoption addendum](research/react-adoption-analysis.md) (sharpens ticket 05, feeds ticket 08): React alone ~8-10 sessions, shadcn/Tailwind on top ~5-6; models and CSS survive untouched; Konva stays vanilla; the sequencing call vs tickets 01/02 is part of ticket 08's verdict.
+- [Triage: Look and feel](issues/08-look-and-feel.md): v2, in order: React adoption (the reactJS-implementation plan), then a real shadcn/ui pass with tone styles folded in (replaces Dialog/Combobox/tooltips; app colours kept), then the UX items on shadcn components, then the icon pass last (lucide-react); ADR-0010 written in ticket 10.
 
 ## Not yet specified
 
