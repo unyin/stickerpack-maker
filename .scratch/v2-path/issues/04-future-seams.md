@@ -1,6 +1,7 @@
 # Triage: §8 future seams
 
 Type: grilling
+Status: claimed
 
 ## Question
 
