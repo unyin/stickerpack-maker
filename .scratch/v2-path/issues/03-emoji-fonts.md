@@ -1,7 +1,6 @@
 # Triage: Emoji fonts
 
 Type: grilling
-Status: claimed
 
 ## Question
 
