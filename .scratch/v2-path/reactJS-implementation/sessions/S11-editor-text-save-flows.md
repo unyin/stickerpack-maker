@@ -21,6 +21,14 @@ Editor both on and off screen, and the SaveDialog port decision is recorded.
 - Binding contract #2 (dialog islands) and the Phase 3 bridge pattern
   (`createRoot` into a detached div, element passed as the dialog body, bridge
   root unmounted when the result settles) are available.
+- **Contingency from S10:** if S10 slipped EmojiPanel, it lands here as
+  step 0 by explicit hand-off (per S10's fallback wording) — before the
+  text-controls work; S10's plan item 4 is its spec.
+- **Start-of-session check** (the plan's named compression lever, per S12's
+  rule): if S07–S11 all landed without review findings, the S12
+  consolidation work (final el() deletion + audit) may be absorbed into
+  this session's tail — decide at session start; S12's audit is the
+  absorption checklist and any failed item un-cancels S12.
 
 ## Files touched
 
@@ -38,6 +46,10 @@ The pack picker (Phase 3 surface) is not touched.
 
 ## Work plan
 
+0. **(Contingent step 0)** If S10 handed off EmojiPanel, port it first —
+   S10's Work plan item 4 is the spec, and its commit path
+   (`controller.commitEmoji()` → `SessionEmoji`) is unchanged by the move.
+   If S10 landed it, this step is empty.
 1. **Text tool controls in ToolsPanel:** font-size / color / outline inputs,
    ported line-by-line from the el() text section in git history. The
    busy/text-reason disable loop (the comment block at :478) keeps its exact
@@ -98,6 +110,9 @@ The pack picker (Phase 3 surface) is not touched.
 - Porting the FontPicker or eyedropper internals (embeds only).
 - Making the dialog layer React (binding contract #2 — `dialog.ts` untouched).
 - CSS files (byte-identical), icons, new aria/role attributes.
+- No `<StrictMode>` on the editor root (binding contract #3): this session's
+  text-control effects, the SaveDialog bridge root, and its focus flows must
+  not be double-invoked; the fence holds here as in S08–S10.
 
 ## Exit criteria
 

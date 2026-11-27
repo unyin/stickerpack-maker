@@ -77,7 +77,10 @@ rule preserved, actions render identically for the same history, and
    guard).
 - `reveal.ts`, `actionList()`, `revealCurrentAction()` internals.
 - The text tool controls and save flows (S11), EffectControls/FontPicker
-   (S09 embeds), CSS files (byte-identical), icons, new aria/role attributes.
+   (S09 embeds), CSS files (byte-identical), icons.
+- No `<StrictMode>` anywhere (binding contract #3 — double-invoked effects
+  would churn the Konva stage and double-run the tab-show reveals).
+- No new aria/role attributes; existing ones stay as-is (UI-audience rule).
 
 ## Exit criteria
 
@@ -131,5 +134,7 @@ rule preserved, actions render identically for the same history, and
 - Fallback if the session overruns: EmojiPanel can slip to S11 (its commit
   flow is adjacent to S11's SessionEmoji/save work) — Layers + Actions must
   land, since S11's libraryGeneration symptoms assume the emoji box exists
-  only as a consumer, not as a port. If EmojiPanel slips, S11 absorbs it
-  first, before its own text-controls work.
+  only as a consumer, not as a port. If EmojiPanel slips, it slips to
+  **S11's step 0 by explicit hand-off** (S11's Preconditions name the
+  contingency; it lands before S11's own text-controls work) — never a
+  silent absorption.

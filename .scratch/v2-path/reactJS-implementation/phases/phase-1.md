@@ -5,10 +5,10 @@ session (see [../plan.md](../plan.md) verification record). Session plan:
 [../sessions/S01-scaffolding-first-run.md](../sessions/S01-scaffolding-first-run.md)
 
 **Verdict: one session, not 0.5 + 0.5.** The scaffolding is ~30 minutes of mechanical
-config; the pilot is 101 lines (`src/views/first-run.ts`) with no imperative islands, no
+config; the pilot is 100 lines (`src/views/first-run.ts`) with no imperative islands, no
 Konva, no drag systems, no focus-preservation logic and no test coverage to keep green
-(`renderFirstRun` is referenced only by `src/main.ts`, `src/api.ts` and itself — none of
-the 25 test files touch it). The one genuinely non-trivial design bit (the default-path
+(`renderFirstRun` is referenced only by `src/main.ts` (:7 import, :24 call) and itself
+(first-run.ts:9) — none of the 25 test files touch it). The one genuinely non-trivial design bit (the default-path
 race) is contained. Splitting would double the review-cycle and Windows-check overhead
 for the same total diff. One session with a natural mid-session checkpoint (end of WP2).
 
@@ -94,7 +94,7 @@ shell.ts, and it touches shell.ts additively.
 
 - Review-cycle per AGENTS.md (both axes to convergence) before any owner testing. The
   review must cover: config diffs (tsconfig gains `jsx` only, vite.config gains the
-  plugin only, no strictness loss, only the six named deps); root lifecycle across the
+  plugin only, no strictness loss, only the five named deps); root lifecycle across the
   three transitions (first-run → shell re-boot, boot error path, `show()` switches);
   pilot fidelity line-by-line against the deleted first-run.ts (race guard, disabled
   gating, withMessage-parity, identical class names, no new attributes); invariants

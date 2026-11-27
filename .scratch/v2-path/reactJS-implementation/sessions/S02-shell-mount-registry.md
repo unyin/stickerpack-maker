@@ -11,8 +11,8 @@ Corrections to the phase file:
   shell sites; settings.ts has zero `title` attributes — verified).
 - Phase 1 does not fix the filename of the `mountView()` module (phase-1.md says
   "shell.ts (or src/react/)"); the master plan's binding contract #1 pins it to
-  `src/react/`. This plan refers to it as "the S01 mountView module" — read the
-  S01 diff for the exact filename before extending it.
+  `src/react/`, and S01's Files-touched table pins the exact name:
+  `src/react/mount.ts` — this plan uses it.
 
 ## Goal
 Deliver the phase's mixed boundary: `src/shell.ts` becomes `src/shell.tsx`
@@ -30,20 +30,25 @@ file on the do-not-touch list is byte-identical.
   look-and-feel verdict, sequencing call (master plan hard constraints).
 - S01 (Phase 1) landed and its Windows check passed: react/react-dom deps,
   `jsx: react-jsx`, plugin-react, `src/views/first-run.tsx` pilot, and the
-  `mountView()` root-tracking helper + `unmountViews()` in `src/react/` (exact
-  filename per the S01 diff).
+  `mountView()` root-tracking helper + `unmountViews()` in `src/react/mount.ts`.
+- Contingency (S01's overrun fallback): if S01 landed WP1+WP2 only, the
+  first-run pilot (S01's WP3) lands here as step 0, before A1, with S01's
+  fidelity bar and race-guard shape intact; the pilot's review rides this
+  session's review cycle and its Windows check joins the phase's single owner
+  check in S03. The bullet above then holds by this explicit hand-off, not
+  silently — first-run never ships half-converted.
 - Nothing of Phase 2 exists in the tree today (verified at ca0b993: no
   `src/react/`; `src/shell.ts` 156 lines and `src/views/settings.ts` 306 lines,
   both el()-built).
 - Only `src/main.ts` imports `renderShell` (main.ts:5, extensionless — survives
-  the `.tsx` rename); only `src/shell.ts` calls `renderSettings` (shell.ts:97);
+  the `.tsx` rename); only `src/shell.ts` calls `renderSettings` (shell.ts:87);
   no test file imports shell or settings (tests/shell-model.test.ts touches
   only the pure `shell-model.ts`, which is untouched).
 
 ## Files touched
 | Path | Status |
 |---|---|
-| `src/react/<S01 mountView module>` (the file S01 created for `mountView`/`unmountViews`) | exists after S01 — verify exact name in the S01 diff; modified (registry extension) |
+| `src/react/mount.ts` (the S01 `mountView`/`unmountViews` module) | exists after S01 — modified (registry extension) |
 | `src/react/navigation.ts` | new (~20 LOC) |
 | `src/react/Icon.tsx` | new |
 | `src/shell.ts` → `src/shell.tsx` | rename + rewrite (old file deleted, not dead code) |
@@ -58,7 +63,8 @@ Verified untouched (byte-identical at exit): `src/dialog.ts` (93), `src/combobox
 `tests/**`.
 
 ## Work plan
-1. **A1 — extend the registry** in the S01 mountView module. S01's shape: a
+1. **A1 — extend the registry** in `src/react/mount.ts` (the S01 mountView
+   module). S01's shape: a
    module-level `Map<string, Root>`, `mountView(container, id, element)`
    (re-render into an existing root on re-boot, else unmount and drop every
    tracked root, then createRoot + render) and `unmountViews()`. Phase 2
@@ -85,7 +91,7 @@ Verified untouched (byte-identical at exit): `src/dialog.ts` (93), `src/combobox
    shell-model.ts untouched).
 3. **A2 — icons.** One-word edit in `src/icons.ts:8`: `export const PATHS`.
    New `src/react/Icon.tsx` emitting byte-identical markup to `icon()`
-   (icons.ts:59-68): `<svg class="icon icon-{name}" viewBox="0 0 24 24"
+   (icons.ts:57-68): `<svg class="icon icon-{name}" viewBox="0 0 24 24"
    aria-hidden="true" focusable="false">` with one `<path d>` per PATHS entry.
    JSX attribute order must match `icon()`'s set order (class, viewBox,
    aria-hidden, focusable) so the emitted `outerHTML` compares equal.
@@ -98,14 +104,14 @@ Verified untouched (byte-identical at exit): `src/dialog.ts` (93), `src/combobox
    is tracked (re-boot), `container.replaceChildren()`, createRoot, render
    `<Shell/>`; the shell root is tracked separately from view roots.
    `<Shell state onChanged>` renders:
-   - `<header className="topbar">` with children in today's order (shell.ts:127-134):
+   - `<header className="topbar">` with children in today's order (shell.ts:132-139):
      `<span className="tb-slot">` (back button), `<nav className="nav">`
      (Editor + Pack Manager tabs), `<span className="brand">Stickerpack
      Maker</span>`, and the Settings tab button appended directly to the header
      (not inside `nav`). Move the TABS table and PM_TAB into shell.tsx
-     unchanged (shell.ts:23-27).
+     unchanged (shell.ts:21-26).
    - The banner exactly when `state.libraryStatus === "invalid"`
-     (shell.ts:135-146): `<div className="banner" role="alert">` with
+     (shell.ts:142-152): `<div className="banner" role="alert">` with
      `<strong>Library problem. </strong>`, then `state.libraryError ?? "The
      configured Library is not usable."`, then the literal `" Open Settings to
      re-point at an intact Library or create a fresh one."` (leading space is
@@ -120,7 +126,7 @@ Verified untouched (byte-identical at exit): `src/dialog.ts` (93), `src/combobox
      visible while the shell is already on pack-manager), so it stays a direct
      call, not a `navigate` call.
    - Tab buttons: `className="nav-btn" data-view={id}`, children
-     `<Icon name={...}/>` + label. Click handler (shell.ts:123-126): `const
+     `<Icon name={...}/>` + label. Click handler (shell.ts:122-126): `const
      action = tabClickAction(item.id, screen, pm)`; `"list"` → `showPackList()`,
      `"show"` → `show(item.id)`, `"none"` → nothing (busy-pack refusal).
    - The PM tab renders `<Icon layers/> Pack Manager` plus, when
@@ -128,7 +134,7 @@ Verified untouched (byte-identical at exit): `src/dialog.ts` (93), `src/combobox
      `<span className="tab-sep" aria-hidden="true">›</span>` and
      `<span className="tab-pack">{tab.packTitle}</span>`. The tooltip is
      `title={tab.tooltip ?? ""}` — the `?? ""` is load-bearing: today's code
-     sets the empty string, not attribute removal (shell.ts:77-78); JSX
+     sets the empty string, not attribute removal (shell.ts:68-69); JSX
      `title={tab.tooltip}` would remove the attribute on null.
    - PM state via `useSyncExternalStore(subscribe, packManagerState)` — a thin
      adapter over `setPackManagerListener` living inside shell.tsx. The
@@ -140,22 +146,31 @@ Verified untouched (byte-identical at exit): `src/dialog.ts` (93), `src/combobox
      valid snapshot. `refreshChrome` and its `shownTitle`/`pmTab.title` guards
      die — the render is the refresh. Publishes fired mid-mount by
      `renderPackManager` land as listener callbacks → re-render, replacing
-     today's trailing `refreshChrome()` call in `show()` (shell.ts:104).
+     today's trailing `refreshChrome()` call in `show()` (shell.ts:94).
    - `show(view)` becomes `setScreen(view)` (useState, initial value
      `state.libraryStatus === "invalid" ? "settings" : "editor"`) plus a mount
-     effect keyed on `screen`: teardown runs `unmountViews()`; the body clears
-     `contentRef` and mounts through the registry — editor:
+     effect keyed on `screen` — pinned to `useLayoutEffect`, not `useEffect`
+     (a passive effect paints one empty-content frame per tab switch; the
+     layout effect mounts before paint): teardown runs `unmountViews()`; the
+     body clears `contentRef` and mounts through the registry — editor:
      `mountDomView(content, renderEditor())`; pack-manager: `mountDomView(content,
      renderPackManager(state.libraryPath, { openInEditor, openThumbnailInEditor }))`;
      settings: `mountView(content, <SettingsView state={state}
      onLibraryChanged={...}/>)`. `renderSettings` keeps its signature
      (settings.tsx) as the registry-mount wrapper the effect calls.
+     Same-screen re-show must survive the port: today clicking the PM tab
+     while the shell is on the pack list re-runs `show` — `tabClickAction`
+     returns `"show"` for it (shell-model.ts:31) and `show("pack-manager")`
+     re-runs `renderPackManager`, re-reading the pack list. The React
+     `show()` must therefore re-run the mount-effect body for the current
+     screen too (e.g. a same-screen click bumps a counter in the effect's
+     deps), not state-no-op on `setScreen(currentScreen)`.
    - The re-boot callback stops at the boundary (phase §"mixed boundary" item 5):
      `onLibraryChanged = () => { forgetPackManager(); resetPackMemory();
      forgetEditorOrigin(); onChanged(); }` — exactly today's trio + `onChanged`
-     (shell.ts:97-101). No keyed `<Shell>` this phase; Phase 2 deliberately
+     (shell.ts:88-90). No keyed `<Shell>` this phase; Phase 2 deliberately
      keeps full root unmount/remount per boot.
-   - `setEditorNav` wired via the navigator (shell.ts:105-113): register in a
+   - `setEditorNav` wired via the navigator (shell.ts:99-108): register in a
      mount effect `setNavigator(show)` (cleanup unregisters — no-op only if
      still ours), then call `setEditorNav({ showSticker: (packId, stickerId) =>
      { revealStickerOnShow(packId, stickerId); navigate("pack-manager"); },
@@ -181,26 +196,26 @@ Verified untouched (byte-identical at exit): `src/dialog.ts` (93), `src/combobox
    un-migrated views.
 6. **A3 — `src/views/settings.tsx`.** Four cards as components in today's order
    (Library path, Appearance, Emoji font, Credits) with identical classes
-   (settings.ts:206-306): `view`, `card`, `field-label`, `path`, `muted`,
+   (settings.ts:188-306): `view`, `card`, `field-label`, `path`, `muted`,
    `actions`, `secondary`, `message` + `role="alert"`, `theme-select`,
    `emoji-style-select`, `code.path`. Keep existing aria exactly (`aria-label:
    "Emoji font"` on the select); add nothing (UI-audience rule).
-   - Library card: `statusText` logic verbatim (settings.ts:74-78); `repoint`
+   - Library card: `statusText` logic verbatim (settings.ts:90-95); `repoint`
      and `createFresh` flows verbatim via `useMessage`. `createFresh`'s
      `confirmChoice` call stays the imperative island call — dialog.ts is
      untouched and appends to `document.body`, outside every React root.
    - Appearance card: theme.ts reused verbatim, no store. Select `onChange` →
      `setThemePreference(parseThemePreference(value))`; the selected option is
      component-local state seeded from `getThemePreference()`. React note: the
-     options' `selected:` attrs (settings.ts:222-226) must become a controlled
+     options' `selected:` attrs (settings.ts:242) must become a controlled
      `value={...}` on the `<select>` (React warns on `selected` in options).
    - Emoji card as derived state replacing the imperative `refreshEmojiCard()`
-     loop (settings.ts:177-204):
+     loop (settings.ts:171-186):
      - A version-bump snapshot state; `refreshEmojiCard()` becomes `bump()` and
        the card derives select value, problem line, custom-path row and repick
        visibility from `getEmojiStylePreference()` / `emojiStyleProblem()` /
        `getCustomEmojiFontPath()` at render time.
-     - The SPM-17 review-round-3 rule preserved exactly (settings.ts:169-176):
+     - The SPM-17 review-round-3 rule preserved exactly (settings.ts:150-156):
        the bump runs in the `finally` of the onchange flow, on success AND
        failure, so a failed choice cannot strand the select (onchange only
        fires on a change, so a stale select cannot be rechosen).
@@ -208,7 +223,7 @@ Verified untouched (byte-identical at exit): `src/dialog.ts` (93), `src/combobox
        re-syncs on the bump; options from `EMOJI_STYLE_CHOICES`, labels
        verbatim.
      - The custom branch's remembered-custom-font recovery kept line-for-line
-       (settings.ts:139-157): remembered path → `chooseEmojiStyle("custom")`
+       (settings.ts:131-147): remembered path → `chooseEmojiStyle("custom")`
        without a picker; on throw → `pickEmojiFont()` for a replacement,
        cancelled → rethrow the load error; no remembered path → picker,
        cancelled → return. The repick button ("Choose another file…",
@@ -218,12 +233,21 @@ Verified untouched (byte-identical at exit): `src/dialog.ts` (93), `src/combobox
      - `styleProblem`: problem text or hidden; `styleMessage` and the Library
        message: one `useMessage` each.
    - Credits card: all five `<p className="muted">` texts verbatim
-     (settings.ts:253-275); "Open licence texts" button routes
+     (settings.ts:275-304); "Open licence texts" button routes
      `openLicenceTexts` errors to its own `useMessage` line
      (settings.ts:80-87).
 7. Run `bun run build` and `bun test`; then the S02 exit checks below. Old
    `shell.ts` and `settings.ts` are deleted in the rename, not left as dead
    code.
+8. **Review-cycle per AGENTS.md** on this session's own diff, both axes to
+   convergence (coverage list below), before any owner testing — S02 does not
+   defer its review to S03. The implementer sub-agent applies fixes; the
+   "Deliberately out of scope" lists are the review's scope fence. S03's B2
+   review is then a delta review of this session's diff plus S03's own fixes.
+9. **Land** the session as a PR merged with `gh pr merge <N> --merge` at
+   session end (AGENTS.md merge rule; plan.md session definition). The
+   phase's single owner Windows check stays in S03 (B2) — S02 lands on green
+   build + tests + a converged review, not on owner sign-off.
 
 ## Deliberately out of scope
 - `dialog.ts` and `combobox.ts`: untouched imperative islands (firm phase
@@ -252,6 +276,11 @@ Verified untouched (byte-identical at exit): `src/dialog.ts` (93), `src/combobox
   follows pack renames live; back button visibility/disabled per
   `backButtonState` including busy; PM-tab click on an open pack goes to the
   list; busy-pack tab click does nothing.
+- A same-screen PM tab click while the pack list is showing still re-reads the
+  pack list (today's `show` re-run via `tabClickAction` `"show"`): the React
+  `show()` re-runs the mount-effect body for the current screen, not a state
+  no-op; the mount effect is a `useLayoutEffect`, so no empty-content frame
+  flashes on a screen switch.
 - Broken-library boot lands on Settings with the banner; library re-point →
   re-boot unmounts cleanly — no dirty-container dev warning (grep the dev
   console output for "createRoot" / container warnings).
@@ -263,6 +292,10 @@ Verified untouched (byte-identical at exit): `src/dialog.ts` (93), `src/combobox
   texts" routes errors to its message line.
 - `grep -rn "StrictMode" src` empty; old shell.ts and settings.ts gone; no JSX
   children inside the `<main className="content">` leaf (code review).
+- Review-cycle both axes converged on this session's own diff (AGENTS.md)
+  before landing; the session lands as a PR merged with
+  `gh pr merge <N> --merge`; the phase's single owner Windows check stays in
+  S03 (B2) — it is not run to land this session.
 
 ## Review-cycle coverage
 The review-cycle (per AGENTS.md, to convergence before any owner testing) must

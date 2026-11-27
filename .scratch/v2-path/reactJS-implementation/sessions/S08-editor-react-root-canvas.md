@@ -20,16 +20,18 @@ same order and guards as today.
   islands, **no `<StrictMode>`** (binding contract #3).
 - `src/views/editor.ts` still contains the el() build for toolbar/panels — it
   stays this session and is consumed via the ref-embed helper.
+- `ImperativeNode` already exists at `src/react/ImperativeNode.tsx` (created
+  in S04) — this session imports it; no helper is created here.
 
 ## Files touched
 
 | Path | Status |
 |---|---|
 | `src/views/editor.ts` | modified — mount switches to `mountView("editor", …)`; the canvas-host/listener/overlay code of `buildEditor()` deleted |
-| `src/shell.ts` | modified — editor branch of `show()` at :83, one line |
+| `src/shell.tsx` (S02's conversion of shell.ts) | modified — the editor branch of `show()` (today `content.append(renderEditor())` at shell.ts:83), one line |
 | `src/views/editor/EditorApp.tsx` | new |
 | `src/views/editor/CanvasPanel.tsx` | new |
-| `src/views/editor/ImperativeNode.tsx` | new (~15 lines) |
+| `src/react/ImperativeNode.tsx` (from S04) | **untouched** — imported for the toolbar/panel embeds |
 | `src/editor/app/editor-controller.ts` (from S07) | modified — add `viewTransform` cache + `mounted` flag |
 | `src/editor/view/stage.ts` (1,286 LOC) | modified — one small addition only: a way to snapshot/restore pan/zoom into a rebuilt stage |
 
@@ -46,11 +48,15 @@ beyond the stage addition.
    gesture code touched.
 2. **Controller additions:** a `viewTransform` field (written by CanvasPanel
    before `stage.destroy()`, read on rebuild) and a `mounted` flag (the
-   keyboard ladder's first guard). Both are ordinary version-bumped fields.
-3. **`ImperativeNode.tsx`:** ~15-line ref-embed helper — given a function
+   keydown ladder's second guard — the standalone no-session/not-mounted
+   return after the Ctrl+S `preventDefault`). Both are ordinary
+   version-bumped fields.
+3. **`ImperativeNode` (from S04, `src/react/ImperativeNode.tsx`):** the
+   ~15-line ref-embed helper — given a function
    returning an `HTMLElement` (or the element itself), renders a host div and
    appends the node on mount / removes it on unmount, never re-diffing its
-   children. This is how the not-yet-ported toolbar/panels (from the
+   children. S08 imports it; no new file is created. This is how the
+   not-yet-ported toolbar/panels (from the
    remaining el() build in `src/views/editor.ts`) stay on screen inside the
    React tree this session.
 4. **`EditorApp.tsx`:** subscribes via
@@ -58,6 +64,23 @@ beyond the stage addition.
    (mutable-snapshot pattern, binding contract #4) and renders the message
    row, the empty state, and the workspace skeleton — with the
    still-imperative toolbar/panels embedded through `ImperativeNode`.
+   - The message row renders **from controller state** (S07's
+     `{ text, tone, links }` fields). No code path may write DOM React owns:
+     the `say()`/`withMessage` two-writers violation is already gone — S07
+     moved the message to controller state — and EditorApp's render is the
+     single writer.
+   - EditorApp derives the empty state and the workspace's visibility from
+     **session presence** (`controller.session === null`), not from any
+     imperative flag.
+   - **The interim refresh driver:** a single EditorApp `useLayoutEffect`
+     keyed on `controller.version` calls the surviving sections of the old
+     `refresh()` — everything not yet ported (toolbar, tools panel, right
+     panel) must keep updating between controller notifies, because
+     `ImperativeNode` never re-diffs its embedded nodes. Each port session
+     (S09/S10/S11) removes its own section from this driver; S12 deletes the
+     remainder. Without the driver the embedded imperative panels freeze
+     between notifies and the owner checklist (tool switching, busy states)
+     cannot pass.
    **Tree order matters:** CanvasPanel is placed first among the workspace
    children so the canvas redraws before the panels measure (refresh()
    dissolution ordering rule).
@@ -74,12 +97,14 @@ beyond the stage addition.
    cancel a gesture.
 6. **Keyboard ladder as a mount effect:** the document-level
    keydown/keyup/paste listeners (src/views/editor.ts:2597–2735) become mount
-   effects with the guard ladder copied as a unit, in this exact order:
-   `mounted` check → Ctrl+S `preventDefault` (`if (view.isConnected &&
-   isSaveShortcut(e)) e.preventDefault()` — never reaches the webview's save
-   page, even while busy) → Alt suppression → `textOverlay.isOpen` →
-   busy/downloadNote → isTextTarget → pick/lasso keys → `shortcutOf` →
-   undo/redo/save/cut/Esc-cascade/Delete. Any reordering shows up as Alt-menu
+   effects with the keydown guard ladder copied as a unit, in this exact order:
+   Ctrl+S `preventDefault` first (`if (view.isConnected && isSaveShortcut(e))
+   e.preventDefault()` — never reaches the webview's save page, even while
+   busy) → the standalone mounted/no-session return (`if (!current ||
+   !view.isConnected) return`, via the `mounted` flag) → Alt suppression →
+   `textOverlay.isOpen` → busy/downloadNote → isTextTarget → pick/lasso
+   keys → `shortcutOf` → undo/redo/save/cut/Esc-cascade/Delete. Any
+   reordering shows up as Alt-menu
    or shortcut regression on Windows (risk #6) — do not "improve" the ladder.
    The save-refusal guard `saveRefusal(stage?.strokeInProgress() ?? false,
    current.doc, constraints)` (:2649) keeps its exact reason text.
@@ -91,8 +116,9 @@ beyond the stage addition.
    cleanup **commits via the overlay's own settle path rather than dropping
    it** — a mid-typing tab switch commits the text, never eats it.
 9. **Mount switch:** `renderEditor()` in `src/views/editor.ts` becomes the
-   `mountView("editor", …)` entry creating the React root; `src/shell.ts`
-   :83's editor branch (`content.append(renderEditor())`) changes one line
+   `mountView("editor", …)` entry creating the React root; `src/shell.tsx`'s
+   editor branch of `show()` (S02's conversion; the
+   `content.append(renderEditor())` line, today shell.ts:83) changes one line
    to mount through the registry (unmount-before-clear-before-mount order per
    binding contract #1). The toolbar/panel el() build code still present is
    what `ImperativeNode` embeds; the canvas-host/listener/overlay portion of
@@ -118,6 +144,15 @@ beyond the stage addition.
 - Ctrl+S/V/X, Alt suppression, the Esc cascade and `strokeInProgress()`
   save-refusal behave exactly as before.
 - A mid-typing tab switch commits the text overlay, never eats it.
+- The message row renders from controller state only: grep proves no code
+  path writes message DOM that EditorApp owns (the `say()`/`withMessage`
+  two-writers violation died in S07).
+- The embedded imperative toolbar/panels keep updating between controller
+  notifies — tool switching and busy/disabled states change without a
+  remount (the EditorApp version-keyed `useLayoutEffect` driver) — and the
+  empty state / workspace visibility derive from session presence.
+- Grep: no `StrictMode` import anywhere in `src/` — the fence from S01
+  still holds (double-mount would build and destroy the stage twice).
 - Grep: the stage effect's dependency array is exactly session identity; no
   other effect owns a gesture or `editAsync` lifetime.
 - Review-cycle converged; PR lands via `gh pr merge --merge`.
@@ -126,8 +161,10 @@ beyond the stage addition.
 
 ## Review-cycle coverage
 
-- The 12-step keyboard ladder moved as a unit with identical order and guard
-  expressions (line-by-line against git history).
+- The keydown guard ladder moved as a unit with identical order and guard
+  expressions (line-by-line against git history; the Ctrl+S
+  `preventDefault` fires before the mounted/no-session return, exactly as at
+  :2599–2601).
 - The stage effect: deps exactly `[session identity]`; cleanup does
   transform-save-then-destroy and nothing else; no effect can cancel a
   pending `editAsync` or in-flight wand fill.
@@ -135,7 +172,7 @@ beyond the stage addition.
   go through `controller.stage` (grep for `stage)` captures).
 - The ref-embed helper never re-parents or re-diffs the embedded nodes
   (re-render must not rebuild the el() panels).
-- shell.ts change is the one editor-branch line; `renderEditor()`'s export
+- shell.tsx change is the one editor-branch line; `renderEditor()`'s export
   signature unchanged.
 
 ## Owner / Windows checklist

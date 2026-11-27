@@ -31,6 +31,9 @@ controller in `views/pack-manager.ts` still drives it through
 - Library re-point invalidation reaches `forgetPackManager()` (shell.ts:88) alongside
   `resetPackMemory()`/`forgetEditorOrigin()` — Phase 3 precondition 2, landed in Phase 2.
 - No parallel el()-based UX work (tickets 01/02) on these files.
+- Compression lever (plan.md): if S04 and S05 both converge in one review
+  round, S05 absorbs S04's leftovers and Phase 3 finishes in two sessions —
+  decide at S05's start, not mid-session.
 
 ## Files touched
 
@@ -42,6 +45,7 @@ controller in `views/pack-manager.ts` still drives it through
 | `src/pack-manager/view/pack-list-drag.ts` (163 LOC) | NOT edited — wiring moves into JSX in `pack-list.tsx` |
 | `src/views/pack-manager.ts` (184 LOC) | surgical slice only: the `buildPackList(...)` call becomes a React mount through the bridge; `openPack`/`showSticker`/`pendingReveal`/`showList`/`dispose` untouched |
 | `src/react/bridge.ts` | new (~15 LOC, the temporary bridge helper of binding contract #2) |
+| `src/react/ImperativeNode.tsx` | new (~15 LOC, ref + useEffect wrapper taking a factory producing a Node) |
 
 ## Work plan
 
@@ -51,6 +55,13 @@ controller in `views/pack-manager.ts` still drives it through
    body node (never the wrapper div — no extra DOM node, no class-identity drift), and
    expose `unmount()` to be called when the dialog's result settles. This is binding
    contract #2's mechanism; S06 removes every call site except `packPicker`.
+   **Ref-embed helper** (`src/react/ImperativeNode.tsx`, new): a ~15-line
+   `useRef` + `useEffect` wrapper taking a factory producing a `Node` — appends
+   the node on mount, removes it on unmount, never re-diffs its children. It is
+   needed now, not first in S08: S05's bridged packPicker bodies embed the
+   imperative Combobox and upload-list embeds `makeDragHandle` through it, so it
+   lives in `src/react/` and S05/S08 import it from there. The React row
+   exercises it immediately via the bridged `statusBadge`.
 2. **`PreviewImage`**: port `previewImage(url: Promise<string|null>, alt, className)`
    (previews.ts:58-70) to a component — state `src`, effect resolves the promise:
    fills `src` on a URL, adds the `unreadable` class on null. `alt`, `className`,
@@ -59,7 +70,7 @@ controller in `views/pack-manager.ts` still drives it through
 3. **`PackList` component** (pack-list.tsx, replacing pack-list.ts): props
    `{ onOpen(id: number) }`; state: `packs: PackListEntry[]`, search text, message
    `{text, loadFailed}`, `notice` text, per-row `Previews[]` (one cache per row, dropped
-   on every reload — today's comment at pack-list.ts:44).
+   on every reload — today's comment at pack-list.ts:46).
    - `say(text, fromLoad = false)` message-precedence rule ported verbatim
      (pack-list.ts:40-43): a successful reload clears the line only when a failed LOAD
      wrote it; each show of the list starts clear.
@@ -69,7 +80,7 @@ controller in `views/pack-manager.ts` still drives it through
      paints, failures included — keep it in a ref, not state.
 4. **Rows as JSX**: `<li class="pm-pack-row" data-id={String(pack.id)}>` with, in order:
    grip, thumbnail cell, open button, status cell, `statusBadge(pack.status)`, folder
-   button, Delete — the exact tree of `row()` (pack-list.ts:137-159). Rows keyed by
+   button, Delete — the exact tree of `row()` (pack-list.ts:141-181). Rows keyed by
    `data-id`. The row click handler keeps `rowClickOpens({ onControl, endsDrag:
    rowClickSuppressed() })` (:176-179); the grip's pointerdown keeps the
    `reorderAllowed(search.value)` guard then `startRowDrag(e, item, pack.id, { list, drop })`
@@ -92,22 +103,25 @@ controller in `views/pack-manager.ts` still drives it through
    flip on manual edit (:85-91), Enter → `onEnter` (:92-96), and `createPackDialog`'s
    button gating (`create.disabled = why !== null; create.title = why ?? ""` :121-122,
    message rule :123). `statusBadge`/`reservedLabel` stay el()-exported — the React row
-   bridges `statusBadge`'s output until S06 converts the el() pack header.
+   embeds `statusBadge`'s el() output through `ImperativeNode`
+   (src/react/ImperativeNode.tsx) until S06 converts the el() pack header.
 8. **Controller wiring** (views/pack-manager.ts): the `buildPackList((id) =>
    void openPack(id))` call site (:96) becomes a bridge/mountView mount of `PackList`;
    the controller keeps calling `list.clearMessage() / list.reload() / list.showError(...)`
-   through the handle (showList :106-115, openPack's error path :146). Nothing else in
+   through the handle (showList :103-113, openPack's error path :146). Nothing else in
    this file changes.
-9. Run `bun run build` + `bun test`; then review-cycle to convergence (see below) before
-   any owner test.
+9. Run `bun run build` + `bun test`; then review-cycle per AGENTS.md, both axes,
+   to convergence on this session's delta (coverage below) before any owner test.
+   The owner Windows checklist below gates the session's done-state; the session's
+   PR lands with `gh pr merge <N> --merge` (AGENTS.md merge rule).
 
 ## Deliberately out of scope
 
 - `openPack`/`showSticker`/`pendingReveal` in the controller (S06).
 - Converting `pack-list-drag.ts` or `reorder-drag.ts` code — wiring only, ref-wrap
   decision (phase file, "The drag decision").
-- Converting `statusBadge`'s el() body for the el() pack header (bridged for the React
-  row until S06).
+- Converting `statusBadge`'s el() body for the el() pack header (embedded via
+  `ImperativeNode` for the React row until S06).
 - Any CSS/class change; any `model/` change (`searchView`, `rowSlotAt`, `dropPosition`,
   `reorderAllowed`, `names.ts` untouched).
 - The rest of `dialogs.ts` (`packPicker`, `sendDialog`, confirm dialogs — S05).
@@ -129,6 +143,11 @@ controller in `views/pack-manager.ts` still drives it through
   (`rowClickSuppressed()` consumed at the row click; `clickSuppressed` cleared via
   `setTimeout(..., 0)`, pack-list-drag.ts:58).
 - Grep: no `StrictMode` import anywhere in `src/`.
+- `src/react/ImperativeNode.tsx` exists and is exercised by the bridged
+  `statusBadge` in the React row (S05 imports it from `src/react/`).
+- Review-cycle converged on this session's delta; the owner Windows checklist
+  passed in full (it gates the done-state); the PR lands via
+  `gh pr merge --merge`.
 
 ## Review-cycle coverage
 
@@ -164,6 +183,8 @@ controller in `views/pack-manager.ts` still drives it through
   not re-fire pointerdown handlers — single `onPointerDown`, no synthetic re-dispatch.
 - **Explicit-paint discipline** (phase risk 1): the list's reload path decides when rows
   rebuild (`paint()`); make sure no derived re-render duplicates or skips it.
-- Fallback if S04 overruns: the create-pack dialog subset (step 7) slips to S05, which
-  already owns the rest of `dialogs.ts` — sequencing survives because the controller
-  does not touch `createPackDialog`. The list screen itself (steps 1-6, 8) must land.
+- Fallback if S04 overruns: the create-pack dialog subset (step 7) slips to
+  S05's step 0 by explicit hand-off — S05 already owns the rest of `dialogs.ts`,
+  and its Preconditions carry the matching contingency line — so sequencing
+  survives because the controller does not touch `createPackDialog`. The list
+  screen itself (steps 1-6, 8) must land.

@@ -3,8 +3,10 @@
 Corrections to the phase file: none that change behavior; three clarifications recorded.
 (1) The phase file was verified against HEAD 64a809f; current HEAD is ca0b993 (later
 wayfinder commits) — every phase claim was re-verified against this tree on drafting day
-and still holds (first-run.ts 101 lines, race guard at :91, 25 test files, CSS totals,
-`renderFirstRun` referenced only by `src/main.ts` + the `src/api.ts:36` doc comment). 
+and still holds (first-run.ts 100 lines, race guard at :91, 25 test files, CSS totals,
+`renderFirstRun` referenced only by `src/main.ts:7`/`:24` and its own definition in
+first-run.ts:9 — the `src/api.ts:36` line is a prose doc comment on
+`getDefaultLibraryPath`, not a reference).
 (2) WP2 offers the helper "in shell.ts (or src/react/)"; plan.md binding contract #1
 fixes it in `src/react/` — this session puts it in new `src/react/mount.ts`.
 (3) The bare CSS names in the plan/phase are `src/editor/editor.css` and
@@ -14,7 +16,7 @@ fixes it in `src/react/` — this session puts it in new `src/react/mount.ts`.
 
 React 19 becomes a working build-time citizen (deps, types, `jsx: react-jsx`,
 plugin-react) with zero bytes of CSS/HTML/test/Rust change; the first-run view
-(`src/views/first-run.ts`, 101 lines) is hand-ported to a React component mounted into
+(`src/views/first-run.ts`, 100 lines) is hand-ported to a React component mounted into
 the existing `#app` shell via a root-tracking `mountView()` helper in
 `src/react/mount.ts` that enforces "React roots never outlive their view" for view
 switches and re-boots; licence notices gain react/react-dom; the converted view passes
@@ -269,9 +271,8 @@ dir for `com.stickerpackmaker.desktop`. Then:
 6. Scope creep via "while we're here" → the "Deliberately out of scope" lists are the
    review's scope fence.
 
-Overrun fallback: if WP3 fidelity work overruns, land WP1 + WP2 alone — that state is
-green (build + 25 tests pass, first-run still el()-rendered via the old
-`renderFirstRun` call, mount.ts + unmountViews wiring in place), and fold WP3 + WP4
-into the opening of S02, whose shell work depends only on mountView (delivered in
-WP2). Do not land a half-fidelity pilot to save the session: a wrong race guard is
-worse than a slipped session.
+Overrun fallback: if WP3 fidelity work overruns, S01 lands WP1+WP2 only and the pilot
+(WP3) moves to the opening of S02 as its step 0 — S02's Preconditions then hold by
+explicit hand-off, not silently; first-run never ships half-converted. Do not land a
+half-fidelity pilot to save the session: a wrong race guard is worse than a slipped
+session.

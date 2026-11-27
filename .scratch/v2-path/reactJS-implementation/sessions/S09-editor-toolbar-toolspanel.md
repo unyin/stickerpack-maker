@@ -43,15 +43,16 @@ toolbar/tools-panel el() code is gone from `src/views/editor.ts`.
    controller commands (`run(saveSession)` etc.) — no new commands invented.
    Every blocked-title rule from `refresh()` must survive: the reason strings
    of the §2-style blockers, notably `sizeToolBlocker(tool, doc, content,
-   entered, constraints, freeSide)` (:2439, using `stage.contentBounds()`
-   :463) for the four sizing tools, and the busy/save-refusal reasons.
+   entered, constraints, freeSide)` (:2439, using `stage.contentBounds()`,
+   stage.ts:463) for the four sizing tools, and the busy/save-refusal reasons.
 3. **`ToolsPanel.tsx`:** the left tab set — select/paint/effects/text
    sections with the `TOOL_PANEL` surfacing rule (tool buttons switch tool via
    `setTool`; the panel surfaces the section of the active tool, exactly as
    the el() version does — copy the surfacing logic, do not re-derive it).
    - EffectControls' blocks embed at their slots via `ImperativeNode`:
      `outlineBlock`, `glowBlock`, `warpBlock`, `actions` (the fields exported
-     at effect-controls.ts:62–66).
+     at effect-controls.ts:60–66 — `outlineBlock` :60, `glowBlock` :62,
+     `warpBlock` :64, `actions` :66).
    - The side input (freeSide) stays an **uncontrolled** input synced with a
      `document.activeElement` guard (one of the five focus-preservation
      guards) — a controlled re-render would clobber half-typed input.
@@ -60,16 +61,18 @@ toolbar/tools-panel el() code is gone from `src/views/editor.ts`.
      exit criterion). The eyedroppers stay embeds (`eyedropperButton`,
      `EYEDROPPER_STEM`, `EYEDROPPER_TITLE` — the single source of the
      §2 strings, kept as-is per the phase's island table).
-4. **Post-render effect sync:** a `useLayoutEffect` in ToolsPanel runs the
-   effect section of the old `refresh()` after every render —
-   `effectControls.update(...)` with the same state inputs, then
-   `stage?.setBrushRadius(effectControls.warp.radius)` and
-   `preview.request(previewRequest())` (the closing lines of `refresh()` at
-   :2575–2579). Same inputs, same order. This is the refresh()-dissolution
-   rule: tools-panel state + `effectControls.update()` + `preview.request()`
-   belong to ToolsPanel's layout effect, while `stage?.setCropBox` /
-   `setBrushRadius` reach the stage through CanvasPanel-owned setters
-   (controller-mediated, per S08's split).
+4. **Post-render effect sync — one owner per line:** a `useLayoutEffect` in
+   ToolsPanel runs only its own panel's part of the old `refresh()` after
+   every render — `effectControls.update(...)` with the same state inputs,
+   then `preview.request(previewRequest())` (the closing lines of `refresh()`
+   at :2575–2579, minus the stage-setter line). Same inputs, same order.
+   The stage setters are **CanvasPanel's**, not ToolsPanel's: per plan.md
+   binding contract #4 and the phase's dissolution rule, `stage?.setCropBox`
+   and `stage?.setBrushRadius(effectControls.warp.radius)` live in
+   CanvasPanel's own version-keyed effect (controller-mediated, per S08's
+   split), and this session those lines leave EditorApp's interim
+   `refresh()` driver (S08 step 4) — one owner, one location, never three.
+   ToolsPanel's layout effect never touches the stage.
 5. **Delete** the toolbar/tools-panel el() sections from
    `src/views/editor.ts`; the remaining el() code (right panel, text
    controls, save flows, message row) stays for S10/S11.
@@ -82,7 +85,10 @@ toolbar/tools-panel el() code is gone from `src/views/editor.ts`.
 - The FontPicker (imperative embed until S11; combobox port is post-adoption).
 - The eyedroppers (ref-embed only; porting would fork them).
 - The right panel, text tool controls, save flows (S10/S11).
-- CSS files (byte-identical), icons, new aria/role attributes, StrictMode.
+- CSS files (byte-identical), icons, new aria/role attributes.
+- No `<StrictMode>` anywhere (binding contract #3 — double-invoked effects
+  would churn the Konva stage and double-run the ToolsPanel
+  `effectControls.update()`/`preview.request()` sync).
 
 ## Exit criteria
 

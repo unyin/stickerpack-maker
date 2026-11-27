@@ -39,7 +39,7 @@ systems stay vanilla behind refs. Done when:
 
 1. Phase 1 (deps, plugin, jsx, mountView) and Phase 2 (shell converted; dialog/combobox
    decisions recorded as binding contracts) landed.
-2. Library re-point invalidation reaches `forgetPackManager()` (shell.ts:97 alongside
+2. Library re-point invalidation reaches `forgetPackManager()` (shell.ts:88 alongside
    `resetPackMemory()`/`forgetEditorOrigin()`).
 3. No parallel el()-based UX work (tickets 01/02) on these files — the sequencing swing
    factor.
@@ -52,12 +52,12 @@ Keep `pack-list-drag.ts` and `reorder-drag.ts` byte-identical, wired from JSX vi
   class surgery on nodes re-queried from the grid each move; a state-driven redesign
   would re-render the whole grid at pointer frequency for zero visual gain.
 - `pack-list-drag.ts` deliberately uses module-level singletons (`clickSuppressed`,
-  `disarmRelease`, `activeDrag`, :60/:76/:100) so exactly one drag exists app-wide and
+  `disarmRelease`, `activeDrag`, :50/:62/:93) so exactly one drag exists app-wide and
   a drag's ending click is suppressed across the row's own handler
-  (`rowClickSuppressed()`, consumed at pack-list.ts:188). React-state porting adds
+  (`rowClickSuppressed()`, consumed at pack-list.ts:178). React-state porting adds
   interleaving risk with React's event delegation for no payoff.
-- Both hosts are narrow interfaces (`RowDragHost` 4 members, `ReorderDragHost` 4
-  members); in React the host object is rebuilt into a ref each render so
+- Both hosts are narrow interfaces (`RowDragHost` 2 members — list, drop;
+  `ReorderDragHost` 4 members); in React the host object is rebuilt into a ref each render so
   `enabled()`/`indexOf()`/`drop()` always read the latest store state. The pure rules
   (`rowSlotAt`, `slotAt`, `dropPosition` in `model/modes.ts`) are untouched.
 
@@ -65,7 +65,8 @@ Keep `pack-list-drag.ts` and `reorder-drag.ts` byte-identical, wired from JSX vi
 
 **Files**: pack-list.ts (253), pack-list-drag.ts (wiring only), previews.ts (72), the
 dialogs subset `newPackFields`/`createPackDialog`/`statusBadge`/`reservedLabel`
-(dialogs.ts:27-135), a surgical slice of `views/pack-manager.ts`, plus a ~15-LOC
+(dialogs.ts ~:37-152: statusBadge :37, reservedLabel :50, newPackFields :60,
+createPackDialog :113-152), a surgical slice of `views/pack-manager.ts`, plus a ~15-LOC
 temporary bridge helper (`createRoot` into a detached div → `{element, unmount}`) for
 leaves with dual el()/React consumers (binding contract #2's mechanism).
 
@@ -126,8 +127,8 @@ only), bridge call-site removal (the packPicker-for-Editor bridge stays until Ph
 - **`PackViewStore`**: external store holding `{view, mode, selection, busy, notice,
   rejected, message}` with `subscribe()`/`getSnapshot()`, mirroring the EditorSession
   pattern. Every direct DOM write in today's closure is audited into a store field or
-  a derived render (~90 write sites: textContent/classList/disabled/title — the audit
-  list is a review-cycle artifact). Action bodies port verbatim: `run()`'s busy-gate,
+  a derived render (~40-45 write sites, measured 38 of the four core patterns —
+  textContent/classList/disabled/title — the audit list is a review-cycle artifact). Action bodies port verbatim: `run()`'s busy-gate,
   `setView`/`pruneSelection`, `importPaths`, `persistEmoji`, `reread()`'s drain,
   `reveal()`'s REVEAL_BUSY/REVEAL_GONE paths, the drop-event and document-keydown
   effects with their cleanups.
@@ -150,6 +151,14 @@ only), bridge call-site removal (the packPicker-for-Editor bridge stays until Ph
 `takeChangedStickers` — binding contract #3); touch the Editor, the drag modules'
 code, or any model file.
 
+**Recorded decision (S07-style asymmetry):** S06 stays atomic rather than splitting
+store-extraction out the way Phase 4's S07 does. Reasons: pack-view has no imperative
+islands (no Konva, no gesture state; its drag modules are ref-wrapped), and its
+write-site surface is ~44 versus the editor's 24 closure vars plus race guards — the
+split buys much less here. Named overrun fallback: if S06 round-1 review finds the
+mixed session overrunning, split into a store-extraction-only session followed by the
+tree/controller swap, consuming the phase's S04+S05 compression discount first.
+
 **Exit criteria**: build/tests green, CSS diff empty; no remaining bridge call sites
 except packPicker (grep-verifiable); focus preserved while typing Title/Short through
 a background `reload()`; focus + half-typed Emoji String preserved through a
@@ -157,7 +166,10 @@ a background `reload()`; focus + half-typed Emoji String preserved through a
 link → preview shows the new image once, no stale blob); reveal selects and scrolls;
 busy-gating (double-click Add runs one import); tab-switch-and-back keeps the open
 pack, its scroll, and re-reads without a Missing scan (`reload()`, not `openPack()`,
-SPEC §4); Settings re-point disposes everything (controller `dispose()` →
+SPEC §4); pack-list state (search text, message, scroll) survives open-pack-and-back,
+as today's cached-DOM re-attach does (views/pack-manager.ts:110,133,141) — satisfied
+either by keeping the list root mounted/hidden or by lifting that state into the
+controller; Settings re-point disposes everything (controller `dispose()` →
 `publish(NO_PACK_MANAGER)`).
 
 ## Risks

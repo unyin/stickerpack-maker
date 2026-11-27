@@ -1,6 +1,6 @@
 # Phase 2: Shell, shared widgets, Settings (2 sessions — S02–S03)
 
-Drafted by planning subagent (verified against the tree at ca0b993: shell.ts 157 LOC,
+Drafted by planning subagent (verified against the tree at ca0b993: shell.ts 156 LOC,
 dialog.ts 93, combobox.ts 266, settings.ts 306, shell-model.ts 38, theme.ts 65,
 icons.ts 69; dialog imported by 7 files, Combobox by exactly 2 — font-picker.ts and
 dialogs.ts:389; settings.ts has zero `title` attributes, shell.ts has two).
@@ -91,10 +91,9 @@ ref-leaf with no JSX children, ever (React must never own mounted el() views' DO
    `tabClickAction`, `backButtonState`) reused verbatim as the render math.
 5. **The re-boot callback stops at the boundary**: Settings receives `onLibraryChanged`
    doing `forgetPackManager(); resetPackMemory(); forgetEditorOrigin(); onReboot()` —
-   exactly today's callback. The `<Shell key={libraryGeneration}/>` centralization
-   replaces this when the root goes persistent in Phase 3/4; Phase 2 deliberately
-   keeps full root unmount/remount per boot (mountView's guarantee makes the later
-   switch cheap).
+   exactly today's callback. Phase 2's full root unmount/remount per boot is the
+   ADOPTED permanent design (binding contract #1: it reproduces today's scorched-earth
+   boot semantics); the keyed persistent root is a post-adoption option, not scheduled.
 
 ## Session A (S02)
 
@@ -105,7 +104,13 @@ doc comment; no behavior change yet.
 **A2. Shell chrome in React.** `src/shell.ts` → `src/shell.tsx` (only importer is
 main.ts, extensionless import survives); `src/react/Icon.tsx`; the one-word icons.ts
 edit. `refreshChrome` becomes render output driven by the PM store adapter; `show()`
-becomes the mount effect keyed on `screen` state; `setEditorNav` wired via the
+becomes the mount effect keyed on `screen` state — and it must be a `useLayoutEffect`
+(a passive effect would paint an empty content area for a frame on every tab
+switch/boot). It must also re-run the effect body for the *current* screen: today
+clicking the PM tab while on the pack list re-runs `show("pack-manager")` →
+`list.reload()` (`tabClickAction` returns `"show"`, shell-model.ts:31;
+views/pack-manager.ts:76-83,106-115, header :2-4) — React's state-identity no-op
+would silently drop that re-read. `setEditorNav` wired via the
 navigator. NOT: shell-model.ts, theme.ts, main.ts, CSS, banner wording, view modules.
 Exit: build passes; `document.querySelector('.topbar').outerHTML` before/after
 byte-equal; all three screens reachable; PM tab "› {Title}" follows renames live; back
@@ -137,8 +142,9 @@ empty string, not attribute removal — JSX must be `?? ""`, not `title={tab.too
 which removes the attribute on null); (2) `dialogOpen()` still true while a
 Settings-spawned confirm is open; (3) stale navigation: open the create-fresh confirm,
 cancel, immediately switch tabs — no dead-shell navigation; (4) banner + Settings focus
-after re-boot lands where it does today; (5) the 147 tooltip sites: `title:` attrs in
-el() become JSX `title` props mechanically; the ~97 `.title =` property writes in
+after re-boot lands where it does today; (5) the 148 tooltip sites: the 67 `title:`
+attribute sites in el() become JSX `title` props mechanically; the 81 `.title =`
+property writes in
 un-migrated views are untouched this phase (verified: settings.ts has zero, shell.ts
 the one dynamic site). SPEC §2's "Name (Shortcut) — description; disabled reason
 replaces description" has no paired sites in Phase 2, so the spot-check reduces to the

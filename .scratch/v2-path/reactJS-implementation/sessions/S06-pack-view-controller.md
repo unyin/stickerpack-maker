@@ -2,9 +2,9 @@
 
 Corrections to the phase file: minor line drift, all re-verified at HEAD:
 `views/pack-manager.ts` — `publish` :34, `setPackManagerListener` :41, `packManagerState`
-:46, `showPackList` :49, `pendingReveal` :59, `renderPackManager` :76,
-`forgetPackManager` :87, `build` :93, `showList` :106, `openPack` :117, `showSticker`
-:151, `dispose` :175. `pack-view.ts` — `run()` busy-gate :167-177, `setView` :181,
+:46, `showPackList` :51, `pendingReveal` :59, `renderPackManager` :76,
+`forgetPackManager` :89, `build` :94, `showList` :103, `openPack` :115, `showSticker`
+:152, `dispose` :175. `pack-view.ts` — `run()` busy-gate :167-177, `setView` :181,
 `importPaths` :284, `persistEmoji` :371, keydown guard :507, document keydown :524,
 `renderBanners` :580, `renderPanel` :589, `render` :597, panel guard :638, drain :644-647,
 REVEAL_BUSY :657, REVEAL_GONE :668, `scrollIntoView` :676. `editor.ts` is at
@@ -25,7 +25,9 @@ remaining `packPicker` bridge).
 ## Preconditions
 
 - S04 and S05 landed: list screen, dialogs, upload list, emoji leaves and panels are
-  React behind the bridge; the bridge helper exists.
+  React behind the bridge; the bridge helper exists. Contingency: if S05 handed
+  off `panels.ts` by explicit hand-off, it lands as this session's step 0 (work
+  plan below) — not silently assumed converted.
 - Phase 2's mount registry: `mountView()` guarantees unmount-before-clear-before-mount
   with exactly one view mounted at a time — S06 relies on it for root swaps and the
   scroll save/restore.
@@ -45,9 +47,15 @@ remaining `packPicker` bridge).
 
 ## Work plan
 
+0. **Contingency step 0 — only if S05 handed off `panels.ts`** (explicit
+   hand-off per S05's fallback): land `panels.ts` first as S05 planned it
+   (near-mechanical JSX, the emoji-box fit math untouched), including its
+   bridge mount with the renderPanel-swap unmount, before the write-site
+   audit below. Otherwise skip.
 1. **Write-site audit first** (phase risk 1's mitigation): enumerate every direct DOM
-   write in today's pack-view closure (~90 sites: `textContent`/`classList`/
-   `disabled`/`title` across banners, toolbar, title/short inputs, grid, panel). Produce
+   write in today's pack-view closure (38 core-pattern occurrences — ~44 with
+   generous matching — `textContent`/`classList`/`disabled`/`title` across
+   banners, toolbar, title/short inputs, grid, panel). Produce
    the audit list as a review-cycle artifact; every site maps to a store field or a
    derived render — nothing maps to "left as a direct write".
 2. **`PackViewStore`**: `{ view, mode, selection, busy, notice, rejected, message }`
@@ -113,16 +121,22 @@ remaining `packPicker` bridge).
    byte-identical.
 8. **Bridge call-site removal**: every S04/S05 bridge call inside the Pack Manager is
    replaced by direct React rendering — except `packPicker`'s, which stays until
-   Phase 4 (save-dialog.ts:14/:102).
-9. Run `bun run build` + `bun test`; review-cycle to convergence; the Editor save
-   dialog flow is re-checked in the delta review (phase risk 5).
+   the SaveDialog port decision (S11) resolves (save-dialog.ts:14/:102; see the
+   out-of-scope note below).
+9. Run `bun run build` + `bun test`; then review-cycle per AGENTS.md, both axes,
+   to convergence on this session's delta; the Editor save
+   dialog flow is re-checked in the delta review (phase risk 5). The owner
+   Windows checklist below gates the session's done-state; the session's PR
+   lands with `gh pr merge <N> --merge` (AGENTS.md merge rule).
 
 ## Deliberately out of scope
 
 - StrictMode (double-invoked effects would double-drain `takeChangedStickers` —
   binding contract #3).
 - The Editor, the drag modules' code, or any model file.
-- The `packPicker` bridge (stays until Phase 4).
+- The `packPicker` bridge: it stays until the SaveDialog port decision (S11)
+  resolves; if S11 keeps `save-dialog.ts` imperative, the bridge remains as a
+  named post-adoption follow-up (S12 records it).
 - Any CSS/class change; any new aria/role attributes (UI-audience rule).
 - Phase 4's `EditorController` extraction (S07) — no anticipatory refactoring of
   editor.ts.
@@ -151,11 +165,20 @@ remaining `packPicker` bridge).
   a Missing scan (`reload()`, not `openPack()` — SPEC §4).
 - Settings → re-point disposes everything: `forgetPackManager()` → `dispose()`
   (disposed=true, pack destroyed, `publish(NO_PACK_MANAGER)`).
+- Pack-list state (search text, message, scroll) survives open-pack-and-back
+  exactly as today's cached-DOM re-attach does (views/pack-manager.ts:110/
+  :141/:159 — the list element is detached on open, re-attached on `showList`,
+  DOM state intact). Satisfied by keeping the list root mounted/hidden or by
+  lifting the state into the controller.
+- Review-cycle converged on this session's delta; the owner Windows checklist
+  passed in full (it gates the done-state); the PR lands via
+  `gh pr merge --merge`.
 
 ## Review-cycle coverage
 
-- The write-site audit list (step 1) checked off line by line — every one of the ~90
-  DOM writes accounted for as store field or derived render; the reviewer greps the
+- The write-site audit list (step 1) checked off line by line — every one of the
+  38 core-pattern DOM writes (~44 with generous matching) accounted for as
+  store field or derived render; the reviewer greps the
   old closure for writes and confirms none was dropped (phase risk 1).
 - Every `key=` that can change while an input inside is focused (phase risk 2's
   named review finding); the three focus mechanisms match their guards.
@@ -207,7 +230,8 @@ remaining `packPicker` bridge).
   re-checked in this session's delta review.
 - Fallback if S06 overruns: the swap is atomic, so no scope slips to Phase 4 (S07 must
   start from a converged Phase 3). Instead, non-focus-critical polish (e.g. banner
-  text edge cases, notice wording diffs found in review) moves to a named S06b
-  follow-up session within Phase 3, and the Phase 3 compression lever (S04+S05 having
-  merged, if it appeared) is the capacity source. The store + tree + controller swap
-  itself must land here.
+  text edge cases, notice wording diffs found in review) moves to a Phase-3
+  overrun fallback session (store-extraction split per the phase file's recorded
+  asymmetry decision) — no new numbered session is created — and the Phase 3
+  compression lever (S04+S05 having merged, if it appeared) is the capacity
+  source. The store + tree + controller swap itself must land here.

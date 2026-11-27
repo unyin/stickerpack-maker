@@ -56,7 +56,10 @@ These decisions bind all sessions; relitigating one mid-phase is plan drift.
    DOM mounts, exactly one view mounted at a time, unmount-before-clear-before-mount
    order, shell root tracked separately and unmounted on re-boot). Phase 3/4 mount
    through it. Navigation across the React/el() boundary is a module-level navigator
-   seam mirroring `setPackManagerListener`.
+   seam mirroring `setPackManagerListener`. Per-boot shell remount is the ADOPTED
+   design (it reproduces today's scorched-earth boot semantics: fresh DOM per
+   Library); the keyed persistent `<Shell key={libraryGeneration}/>` alternative is
+   DROPPED — a post-adoption optimization option only, never scheduled.
 2. **Dialog and Combobox stay imperative islands** (Phase 2's firm decision, recorded for
    ADR-0010 candidacy). `dialog.ts` (93) and `combobox.ts` (266) are untouched through the
    whole adoption. React content inside a dialog body happens only via the bridge
@@ -69,9 +72,14 @@ These decisions bind all sessions; relitigating one mid-phase is plan drift.
    follow-up, not an exit criterion.
 4. **Stores.** `useSyncExternalStore` over existing shapes: `packManagerState` +
    `setPackManagerListener` (Phase 2), a `PackViewStore` mirroring the EditorSession
-   pattern (Phase 3), and the `EditorController` — the 25 closure vars of `buildEditor()`
-   extracted into a subscribable singleton in S07 *before any React exists* (Phase 4).
-   Mutable-snapshot pattern: version bump + notify; commands live outside React
+   pattern (Phase 3), and the `EditorController` — the ~24 closure vars of
+   `buildEditor()` (25 listed in early drafts; 24 measured) extracted into a
+   subscribable singleton in S07 *before any React exists* (Phase 4). The S07/S08
+   seam: the Editor message row is controller state from S07 (`say()` becomes
+   mutation+notify); during S08–S11 the un-ported `refresh()` sections are driven
+   from a single `EditorApp` `useLayoutEffect` keyed on `controller.version`,
+   shrinking as panels port, deleted in S12. No component may write DOM that React
+   owns. Mutable-snapshot pattern: version bump + notify; commands live outside React
    (event-driven, never effect-driven), so no effect cleanup can cancel what today
    always finishes.
 5. **Imperative islands stay vanilla**: `stage.ts` (1,286; useRef + useEffect keyed on
@@ -83,8 +91,8 @@ These decisions bind all sessions; relitigating one mid-phase is plan drift.
 6. **Behavior contracts preserved verbatim**, each named in its session's exit criteria:
    the changed-files drain (Editor → Pack Manager invalidation), the focus-preservation
    guards (half-typed inputs survive background reloads), the keyboard guard ladders
-   (Editor 12-step incl. the Windows Alt rulings; pack-view keydown/drop guards via
-   `dialogOpen()`), `run()`'s busy-gate, `editAsync`'s doc-identity refusal, the
+   (the Editor keydown guard ladder incl. the Windows Alt rulings; pack-view
+   keydown/drop guards via `dialogOpen()`), `run()`'s busy-gate, `editAsync`'s doc-identity refusal, the
    reveal-scroll timing, the SPM-17 emoji-select rollback.
 
 ## Verification record (main session, 2026-11-27)
@@ -105,3 +113,15 @@ firm island decision (embed is the default; swap is optional post-adoption).
 
 One counting note: Phase 3 measures its view surface at 2,517 LOC vs the analysis's
 2,333 — counting method (which files), not a scope change.
+
+Clean review (2026-11-27): three fresh reviewers (accuracy, consistency,
+adversarial) audited the full set with no prior context; they found one blocker (the
+S08 strangler seam — now recorded in binding contract #4's seam design and Phase 4's
+architecture decisions) and several majors (S02 anchor drift, missing landing steps in
+S02/S04/S05/S06, the S05 bridge-unmount gap, the S06 asymmetry decision) plus
+count/anchor corrections; four fixer agents applied them all. The final clean
+re-review verified every fix against the tree, found five minors and two nits
+(StrictMode fence in S11, Phase-3 merge-lever mentions in S04/S05, two stale
+phase-4 lines, pre-existing S04/S05 anchor imprecisions, two clarity nits) — all
+applied by the main session. Final verdict: CLEAR; every anchor and count in this
+set was measured against the tree at HEAD at review time.

@@ -31,15 +31,15 @@ markup, all islands and CSS untouched).
 - Baseline facts for the sweep, verified at ca0b993: settings.ts had zero
   `title` attributes; shell.ts had exactly two (the back button's static
   `BACK_TO_LIST_TITLE`, shell.ts:49, and the PM tab's dynamic
-  `pmTab.title = tab.tooltip ?? ""`, shell.ts:77-78).
+  `pmTab.title = tab.tooltip ?? ""`, shell.ts:68-69).
 
 ## Files touched
 No new files are planned. The sweep and S02's review findings land as fixes in:
 - `src/shell.tsx` (exists after S02; new)
 - `src/views/settings.tsx` (exists after S02; new)
 - `src/react/Icon.tsx`, `src/react/navigation.ts`, `src/react/use-message.ts`,
-  and the S01 mountView module under `src/react/` (exists after S02; modified
-  only where a finding requires)
+  and the S01 mountView module `src/react/mount.ts` (exists after S02;
+  modified only where a finding requires)
 
 The ADR-0010 candidacy record (step 4) goes in the PR description — no ADR is
 authored this phase, and nothing outside the sessions' converted surfaces
@@ -49,17 +49,18 @@ do-not-touch set is absolute (see Exit criteria).
 ## Work plan
 1. **Tooltip site 1 — back button.** `src/shell.tsx`: the back button carries
    the static `title={BACK_TO_LIST_TITLE}` ("Back to the list of packs",
-   shell-model.ts:8). Verify present; verify the button's other attributes and
+   shell-model.ts:9). Verify present; verify the button's other attributes and
    text unchanged (`secondary tb-back`, `type="button"`, `← Pack list`).
 2. **Tooltip site 2 — PM tab, the `?? ""` rule.** Today's code sets the
-   property to the empty string, not attribute removal (shell.ts:77-78). The
+   property to the empty string, not attribute removal (shell.ts:68-69). The
    JSX must be `title={tab.tooltip ?? ""}`. `grep -n 'title={tab.tooltip}'
    src/shell.tsx` must come back empty; `title={null}`-shaped expressions on
    the tab must not appear either. This is the whole of Phase 2's tooltip
-   mechanics: the ~147 repo-wide sites reduce to these two (SPEC §2
-   "Name (Shortcut)" pairs have no Phase-2 sites); settings.tsx has zero title
-   attributes; the 81 `.title =` property writes in un-migrated views are
-   untouched this phase.
+   mechanics: the 148 repo-wide sites (81 `.title =` property writes + 67
+   `title:` attribute sites, per the Corrections above) reduce to these two
+   (SPEC §2 "Name (Shortcut)" pairs have no Phase-2 sites); settings.tsx has
+   zero title attributes; the 81 `.title =` property writes in un-migrated
+   views are untouched this phase.
 3. **B1 checks 2-4, each verified and fixed if drifted:**
    - `dialogOpen()` stays true while a Settings-spawned confirm is open: the
      confirm is dialog.ts's own `document.body` append, outside every React

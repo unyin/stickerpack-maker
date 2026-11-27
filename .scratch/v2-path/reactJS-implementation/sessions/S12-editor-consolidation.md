@@ -1,11 +1,13 @@
 # S12: Editor consolidation — sweep, race audit, Windows check (Phase 4)
 
 Corrections to the phase file: the phase says "the 27 sites in git history are
-the checklist" for `refresh()` call sites. Measured at HEAD: 27 lines contain
-`refresh()` in `src/views/editor.ts`, one of which is the definition
-(`function refresh(): void` at :2323) — so the audit checklist is the **26 call
-sites** plus the definition. Everything else in the phase file verified as
-written.
+the checklist" for `refresh()` call sites. Measured at HEAD: the 27
+`refresh()` occurrences in `src/views/editor.ts` are **18 real call sites +
+8 comment references** (:305, :338, :342, :908, :1248, :1358, :1996, :2024)
+**+ the definition** (`function refresh(): void` at :2323) — and the grep
+misses the `session.subscribe(refresh)` wiring at :1249, which must be mapped
+too. So the audit checklist is the **18 call sites plus the :1249 subscribe
+wiring**. Everything else in the phase file verified as written.
 
 ## Goal
 
@@ -28,10 +30,13 @@ by running the audit below against S11's HEAD: any failed item un-cancels it.
 - S07–S11 landed: controller, React root + CanvasPanel, Toolbar + ToolsPanel,
   right panel, text controls + save flows.
 - The pre-S07 `src/views/editor.ts` (2,951 LOC) is reachable in git history —
-  it is the spec for the audit (the 26 `refresh()` call sites, the keyboard
-  ladder, the race guards).
+  it is the spec for the audit (the 18 `refresh()` call sites plus the :1249
+  `session.subscribe(refresh)` wiring, the keyboard ladder, the race guards).
 - The owner has passed the S08 and S11 Windows lists on those sessions'
   builds.
+- No `<StrictMode>` anywhere in `src/` (binding contract #3) — the fence
+  raised in S01 must still hold at phase close; StrictMode-safety stays the
+  post-adoption follow-up.
 
 ## Files touched
 
@@ -45,14 +50,24 @@ No CSS file, no island, no model file unless the audit finds a defect.
 ## Work plan
 
 1. **Final deletion:** remove the remaining el() build code from
-   `src/views/editor.ts`. The exported surface does not change — shell.ts
-   (:83's mount call), pack-manager and settings call sites stay untouched.
+   `src/views/editor.ts`. The exported surface does not change — src/shell.tsx
+   (the editor branch of `show()`, converted by S02; the mount call is today
+   shell.ts:83), pack-manager and settings call sites stay untouched.
    Target: the file keeps the mount entry, hook layer and `confirm*` helpers,
    under ~400 LOC.
 2. **Residue sweep:** grep the tree for dead imports, unused el() helpers,
    `ImperativeNode` embeds whose imperative source no longer exists, and any
    leftover module state in `src/views/editor.ts` (the `root ??=` cache must
-   be gone — the controller is the module state since S07).
+   be gone — the controller is the module state since S07). The EditorApp
+   interim refresh-driver effect is deleted with the last un-ported section
+   (S08's seam design: with the toolbar, tools panel and right panel ported,
+   its body is empty — remove the effect, not just its contents). Also retire
+   `withMessage` from `src/ui.ts`: its last callers died in S01/S02/S06
+   (first-run, settings, pack-view) and in S07–S08 (the editor's message
+   row became controller state). Grep ui.ts's exports for remaining
+   consumers before deleting — and leave `el()` itself alone: dialog.ts,
+   combobox.ts, the `confirm*` helpers (:2872–2940) and eyedropper.ts still
+   call it.
 3. **The written audit** (each item checked against the diff history, results
    recorded in the PR):
    1. No effect owns a gesture or `editAsync` lifetime — commands are plain
@@ -63,10 +78,13 @@ No CSS file, no island, no model file unless the audit finds a defect.
    3. No closure captured a stage instance: every stage reference goes
       through `controller.stage` (grep for captured `stage` outside the
       CanvasPanel effect).
-   4. Every `refresh()` call site from the pre-S07 file (26 call sites plus
-      the definition — the 27 occurrences in git history) maps to a controller
-      mutation or a session notify. Walk the list one by one and record the
-      mapping; an unmapped site is a lost redraw.
+   4. Every `refresh()` call site from the pre-S07 file maps to a controller
+      mutation or a session notify — the checklist is the **18 real call
+      sites + the `session.subscribe(refresh)` wiring at :1249** (the 27
+      occurrences in git history = 18 call sites + 8 comment references
+      (:305, :338, :342, :908, :1248, :1358, :1996, :2024) + the :2323
+      definition; the :1249 wiring is invisible to the grep). Walk the list
+      one by one and record the mapping; an unmapped site is a lost redraw.
    5. All five CSS files byte-identical (styles.css 449, dialog.css 45,
       combobox.css 72, editor.css 908, pack-manager.css 1285 = 2,759 lines).
    6. Build + tests green.
@@ -75,7 +93,7 @@ No CSS file, no island, no model file unless the audit finds a defect.
       hot-swaps without losing editor state.
 4. **Behavior-contract spot-checks** (binding contract #6, Editor items):
    the changed-files drain (Editor save → Pack Manager invalidation), the
-   focus-preservation guards, the 12-step keyboard ladder incl. the Windows
+   focus-preservation guards, the keydown guard ladder incl. the Windows
    Alt rulings, `run()`'s busy-gate, `editAsync`'s doc-identity refusal.
 5. **Review-cycle to convergence** (AGENTS.md) over the whole phase-4 delta
    or the remaining delta since the owner's last tested state.
@@ -87,8 +105,10 @@ No CSS file, no island, no model file unless the audit finds a defect.
 - Restyling anything; changing icons (Icons rule); adding a11y work beyond
   keeping existing attributes (UI-audience rule).
 - StrictMode-safety (binding contract #3: follow-up, not an exit criterion).
-- The FontPicker combobox swap and any SaveDialog port deferred by S11's
-  decision — post-adoption follow-ups, not Phase 4 work.
+- The FontPicker combobox swap, any SaveDialog port deferred by S11's
+  decision, and the packPicker bridge (which survives the adoption if S11's
+  decision kept save-dialog.ts imperative) — named post-adoption follow-ups,
+  not Phase 4 work.
 - New features, new commands, new CSS classes.
 
 ## Exit criteria
@@ -105,7 +125,8 @@ No CSS file, no island, no model file unless the audit finds a defect.
 
 ## Review-cycle coverage
 
-- The audit's item 4 is the reviewer's spine: the 26-site refresh mapping,
+- The audit's item 4 is the reviewer's spine: the 18-site refresh mapping
+  plus the :1249 `session.subscribe(refresh)` wiring,
   checked against git history, not against memory.
 - Any new cleanup added since S08 beyond the two allowed ones
   (`stage.destroy()`, overlay settle) — the #1 cost risk of the whole
@@ -113,7 +134,7 @@ No CSS file, no island, no model file unless the audit finds a defect.
 - DOM identity spot-checks on the panels converted in S09–S11 (a delta review
   may have missed class/title drift introduced then).
 - Residue sweep correctness: deletions must not remove still-referenced
-  exports (shell.ts, pack-manager, settings call sites unchanged).
+  exports (shell.tsx, pack-manager, settings call sites unchanged).
 
 ## Owner / Windows checklist
 

@@ -6,12 +6,14 @@ verified; `EditorSession` is imported from there at src/views/editor.ts:155).
 
 ## Goal
 
-Extract the ~25 mutable closure vars of `buildEditor()` and all command logic
+Extract the 24 mutable closure vars of `buildEditor()` and all command logic
 from `src/views/editor.ts` into a subscribable module-level singleton,
 `EditorController`, with zero behavior change and zero React. When this session
 ends, the el() DOM build still renders the Editor exactly as today, but it reads
 all state from the controller, every command (run/editAsync/gestures/session
-flows/save) is a controller method, and the hook layer
+flows/save) is a controller method, the message row is controller state
+(`say()` becomes mutation + notify; `withMessage(message, action)` inside
+`run()` is replaced by the controller message API), and the hook layer
 (`openFileInEditor`/`openThumbnailFileInEditor`/`forgetEditorOrigin`) works with
 the view never built — headless, before any React exists.
 
@@ -32,7 +34,7 @@ the view never built — headless, before any React exists.
 | `src/editor/app/editor-controller.ts` | new |
 | `src/editor/app/commands.ts` | new — only if `editor-controller.ts` would exceed ~600 LOC (phase-file rule) |
 
-Nothing under `src/editor/model/` (15 files), `src/editor/view/`, `src/editor/save.ts`,
+Nothing under `src/editor/model/` (16 files), `src/editor/view/`, `src/editor/save.ts`,
 `src/editor/api.ts`, `src/pack-manager/`, or any CSS file.
 
 ## Work plan
@@ -60,7 +62,10 @@ Nothing under `src/editor/model/` (15 files), `src/editor/view/`, `src/editor/sa
    - `run()` (busy-gate at :1136–1147): `if (busy) return; busy = true;
      stage?.setInteractive(false);` … finally `stage?.setInteractive(true)`,
      `busy = false`. Keep the read-and-set synchronous in one task (risk #5:
-     rapid double-click must still be swallowed).
+     rapid double-click must still be swallowed). Its `say("")` becomes a
+     controller mutation and its `withMessage(message, action)` is replaced
+     by the controller message API (step 4 below) — `run()` never touches
+     view DOM.
    - `editAsync()` with the doc-identity refusal at :1175
      (`if (current.doc !== doc) { … return; }`) copied verbatim.
    - `setTool`, `startSession` (:1207), `endSession` (:1400), `closeThenOpen`
@@ -74,14 +79,32 @@ Nothing under `src/editor/model/` (15 files), `src/editor/view/`, `src/editor/sa
    - The drag-drop plan handling: `dropPlan(payload.paths, kind, busy,
      dialogOpen())` at :2750 and the `setDropTarget(!dialogOpen())` over/enter
      branch at :2745.
-4. Move the `EffectPreview` instance (`new EffectPreview<EffectResult>(…)` at
+4. **The message row becomes controller state.** The controller gains message
+   fields `{ text, tone, links }` — `tone: "error" | "note"`, `links` the
+   `extra` nodes/strings of today's `say(text, tone, ...extra)` (:1045).
+   `say()` is rewritten as a controller method: mutate the fields, bump
+   `version`, notify — it no longer calls `message.replaceChildren` or the
+   `is-note` toggle. The message DOM rendering stays el()-driven this session:
+   the `p` at :282 stays el()-owned and the existing render pass (`refresh()`,
+   step 7) renders it from the controller fields, producing the exact same DOM
+   (children, `is-note` class, the error-tone rule quoted at :1042–1043).
+   `run()`'s `withMessage(message, action)` (:1144) is replaced by the
+   controller message API: clear the message state before the action, route a
+   thrown error's `errorMessage(err)` into it — same observable behavior, one
+   writer. `clearNote()` (:1132) and commitEmoji's note check (:1068) read
+   `tone === "note"` from the controller instead of `message.classList`. No
+   command writes message DOM directly anymore.
+5. Move the `EffectPreview` instance (`new EffectPreview<EffectResult>(…)` at
    :416) and its show callback into the controller. **No closure may capture a
    stage instance**: the show callback reads `controller.stage` dynamically, so
    a preview survives a stage rebuild.
-5. Re-point the hook layer (:2812+): `openFileHook` (assigned at :2759),
-   `openThumbnailHook`, `forgetOriginHook` (:2765–2776: `origin = { …origin,
+6. Re-point the hook layer (:2812+): `openFileHook` (assigned at :2759),
+   `openThumbnailHook`, `forgetOriginHook` (:2769–2776: `origin = { …origin,
    otherLibrary: true }`, same for `thumbnailOrigin`, `emoji?.forgetOrigin()`,
-   `libraryGeneration++`, refresh) become thin module functions delegating to
+   `libraryGeneration++` — bump + notify only; the trailing `refresh()` at
+   :2776 is dropped, since a notify with no subscriber is a no-op and
+   `refresh()` runs only when a view exists, its subscription registered by
+   `buildEditor()`) become thin module functions delegating to
    controller methods. Install them at module/controller init, **not** inside
    `buildEditor()`, so `forgetEditorOrigin()` and `openFileInEditor()` work with
    the view detached (risk #3: the `root ??=` module cache is replaced by the
@@ -89,15 +112,18 @@ Nothing under `src/editor/model/` (15 files), `src/editor/view/`, `src/editor/sa
    stays — no longer load-bearing for hook installation, but it preserves the
    lazy view-build timing. Document `startSession`'s preserved invariant:
    "showEditor() runs before the file opens, so the canvas can measure".
-6. Rewrite `refresh()` (:2323–2579) in place in `src/views/editor.ts` to read
+7. Rewrite `refresh()` (:2323–2579) in place in `src/views/editor.ts` to read
    `controller.*` instead of closure vars; it remains the el() view's single
    render pass. The `refresh()` call sites that sat inside moved command code
    disappear into the mutation's notify; call sites in view-local DOM handlers
    keep calling `refresh()` directly. Either way, every old call site must still
    produce exactly one synchronous render before control returns — the mapping
-   of all 26 call sites (27 `refresh()` occurrences minus the definition) is
-   the S12 audit checklist, so keep a list while moving.
-7. If `editor-controller.ts` would exceed ~600 LOC, split command methods into
+   of all 18 real call sites is the S12 audit checklist (27 `refresh()`
+   occurrences at HEAD = 18 call sites + 8 comment mentions (:305, :338, :342,
+   :908, :1248, :1358, :1996, :2024) + the definition at :2323; plus the
+   `session.subscribe(refresh)` wiring at :1249, which the grep misses — map it
+   too), so keep a list while moving.
+8. If `editor-controller.ts` would exceed ~600 LOC, split command methods into
    `src/editor/app/commands.ts` (mixed into the controller or free functions
    taking the controller) — phase-file rule, not a design choice.
 
@@ -124,9 +150,16 @@ Nothing under `src/editor/model/` (15 files), `src/editor/view/`, `src/editor/sa
 - The race guards are character-identical in the controller: `run()`'s busy-gate
   + `stage?.setInteractive`, `editAsync`'s `current.doc !== doc` refusal,
   `beginWarp`/`beginWand`'s busy/active guards.
-- Hook layer headless: `forgetEditorOrigin()` and `openFileInEditor()` work
-  without `renderEditor()` ever having been called (temporary unit check or
-  manual: re-point Library from Settings before ever opening the Editor).
+- Hook layer headless: hooks mutate controller state and notify without
+  requiring a mounted view — a notify with no subscriber is a no-op
+  (`forgetEditorOrigin()` and `openFileInEditor()` work without
+  `renderEditor()` ever having been called; temporary unit check or manual:
+  re-point Library from Settings before ever opening the Editor). With a view
+  mounted, the same notifications drive `refresh()` exactly as today.
+- The message row is controller state: grep proves no command writes
+  `message.*` DOM directly — the el() render pass is the only writer, and the
+  error/note tones, `clearNote`'s note-only rule and `withMessage`'s
+  error-tone routing behave exactly as today.
 - Review-cycle (AGENTS.md) converged; PR lands via `gh pr merge --merge`.
 - Owner smoke test (pre-React — behavior must be *identical*): open an image,
   drag/transform, add text, rect-cut + paste, wand Shift/Alt drag, warp drag,
@@ -144,6 +177,9 @@ Nothing under `src/editor/model/` (15 files), `src/editor/view/`, `src/editor/sa
 - Hook installation moved out of `buildEditor()` without changing the
   ask-then-show-then-open ordering documented at :2836+.
 - Comments recording owner decisions moved with their code.
+- The message-state move: `say()`/`withMessage` semantics unchanged (error
+  tone, note tone, the `say("")` clear before an action, `clearNote`'s
+  note-only rule); the only DOM writer is the el() render pass.
 
 ## Owner / Windows checklist
 

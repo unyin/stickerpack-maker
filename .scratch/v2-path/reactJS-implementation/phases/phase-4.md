@@ -19,7 +19,7 @@ gesture state) are preserved *without adding cancellations that don't exist toda
 **Definition of done.** `src/views/editor.ts` no longer builds DOM (keeps only the
 mount entry, hook layer and `confirm*` helpers, < ~400 LOC); the view mounts via
 mountView() as a React root; all editor state lives in the subscribable controller;
-build + tests pass; CSS byte-identical; the owner's Windows checklist passes. All 15
+build + tests pass; CSS byte-identical; the owner's Windows checklist passes. All 16
 `src/editor/model/*` files, `save.ts`, `geometry.ts`, `lasso.ts`, `warp-brush.ts`,
 `reveal.ts`, `effect-preview.ts` reused verbatim (never rewritten).
 
@@ -30,8 +30,8 @@ Manager converted, dialog/combobox binding contracts). The editor branch of `sho
 ## Store & architecture decisions (bind all Editor sessions)
 
 - **`EditorController`** — new module-level singleton (`src/editor/app/editor-controller.ts`,
-  plus `src/editor/app/commands.ts` if the file would exceed ~600 LOC) owning the ~25
-  mutable closure vars of `buildEditor()` (constraints, session, stage, busy, showBox,
+  plus `src/editor/app/commands.ts` if the file would exceed ~600 LOC) owning the ~24
+  mutable closure vars of `buildEditor()` (25 listed in early drafts; 24 measured:
   tool, overlayLayerId, fonts, fontsProblem, nextStyle, lastFormat, freeSide, origin,
   thumbnailOrigin, libraryGeneration, emoji at :238-269; warp :433, basis :437,
   brushSize :577, tolerance :593, feathered :622, downloadNote :635, emojiLeafHidden
@@ -54,6 +54,13 @@ Manager converted, dialog/combobox binding contracts). The editor branch of `sho
   `stage?.setCropBox`/`setBrushRadius` → CanvasPanel's layout effect. Tree order
   preserves "canvas redraws first, then the panels measure": CanvasPanel placed first
   among the workspace children.
+- **The message row and the S08–S11 strangler seam**: the message row is controller
+  state from S07 (`say()` becomes mutation+notify with the message DOM rendered from
+  state); `EditorApp` derives the empty/workspace visibility from session presence;
+  during S08–S11 the un-ported `refresh()` sections run from a single `EditorApp`
+  `useLayoutEffect` keyed on `controller.version`, each port session (S09/S10/S11)
+  removing its own section, S12 deleting the remainder. No code path may write DOM
+  React owns.
 - **Imperative islands — wrap vs port:**
 
 | Module | Decision | Reason |
@@ -72,8 +79,8 @@ Manager converted, dialog/combobox binding contracts). The editor branch of `sho
   skeleton) · `Toolbar` · `ToolsPanel` (left tabs; embeds EffectControls blocks + text
   controls) · `CanvasPanel` (stage ref leaf + text overlay + status strip + drop
   target) · `LayersPanel` · `ActionsPanel` · `EmojiPanel` · `SaveDialog` (contingent).
-  New files under `src/views/editor/` plus a ~15-line `ImperativeNode.tsx` ref-embed
-  helper. `src/views/editor.ts` stays the module entry — `renderEditor()`, the hook
+  New files under `src/views/editor/`, importing the `ImperativeNode.tsx`
+  ref-embed helper created in Phase 3 (S04, `src/react/`) `src/views/editor.ts` stays the module entry — `renderEditor()`, the hook
   layer (`openFileHook`/`openThumbnailHook`/`forgetOriginHook`/`setEditorNav`) and the
   `confirm*` helpers stay exported there so shell.ts and pack-manager call sites are
   untouched.
@@ -88,7 +95,7 @@ The single riskiest move, isolated with zero behavior change.
 consumes the controller), new `src/editor/app/editor-controller.ts` (+ `commands.ts`).
 Nothing under `src/editor/model/`, `src/editor/view/`, or any CSS file.
 
-**Builds**: the singleton store; all ~25 closure vars become controller fields; `run`,
+**Builds**: the singleton store; all ~24 closure vars become controller fields; `run`,
 `editAsync`, `setTool`, `startSession`, `endSession`, the warp/wand/compose gesture
 handlers, `saveSession`, `commitEmoji`, `stickerLink`/`thumbnailLink` generation, and
 the drag-drop plan handling become controller methods; the EffectPreview instance and
@@ -114,8 +121,8 @@ tabs and back — session and pixel state unchanged (pre-React, behavior must be
 
 **Touches**: `src/views/editor.ts` (mount switches to mountView("editor", …); the
 canvas-host/listener/overlay code of `buildEditor()` deleted), `src/shell.ts` (editor
-branch of `show()`, one line), new `EditorApp.tsx`, `CanvasPanel.tsx`,
-`ImperativeNode.tsx`; controller (viewTransform cache, mounted flag);
+branch of `show()`, one line), new `EditorApp.tsx`, `CanvasPanel.tsx`;
+`ImperativeNode.tsx` (S04's `src/react/`, imported, not created); controller (viewTransform cache, mounted flag);
 `src/editor/view/stage.ts` — one small addition only: a way to restore pan/zoom into a
 rebuilt stage (today the view transform is Konva-held and an unmount would silently
 reset it to fit).
@@ -127,8 +134,9 @@ builds `new EditorStage(canvasHost, session)`, wires the stage callbacks to cont
 methods, restores the cached view transform, and re-asserts `setTool`/
 `setCropGuidesVisible`/`setBrushRadius`/the in-flight EffectPreview override on
 remount. The document-level keydown/keyup/paste listeners (:2597-2735) and the
-drag-drop registration become mount effects with the same guard ladder (mounted check
-→ Ctrl+S preventDefault → Alt suppression → `textOverlay.isOpen` → busy/downloadNote →
+drag-drop registration become mount effects with the same keydown guard ladder (Ctrl+S
+preventDefault carrying `view.isConnected` → the mounted check (`!current ||
+!view.isConnected` return) → Alt suppression → `textOverlay.isOpen` → busy/downloadNote →
 isTextTarget → pick/lasso keys → `shortcutOf` → undo/redo/save/cut/Esc-cascade/Delete,
 in that exact order). The text overlay: mount cleanup commits via the overlay's own
 settle path rather than dropping it.
@@ -153,7 +161,8 @@ Crop/Reset view/Close/Save…) with every §2 blocked-title rule from `refresh()
 the left tab set (select/paint/effects/text sections, the TOOL_PANEL surfacing rule);
 EffectControls' blocks embedded at their slots via `ImperativeNode`, with a
 post-render `useLayoutEffect` running the effect section of the old `refresh()`
-(effectControls.update, stage.setBrushRadius, preview.request). Side-input remains an
+(effectControls.update, preview.request; the stage setters setCropBox/setBrushRadius
+are CanvasPanel's, per the architecture section). Side-input remains an
 uncontrolled input synced with the `document.activeElement` guard.
 
 **NOT**: port EffectControls internals, the FontPicker (imperative embed in the text
@@ -222,9 +231,15 @@ keeps only the mount entry, hook layer and `confirm*` helpers), any residue.
 gesture/`editAsync` lifetime; (2) the stage effect's deps are exactly session
 identity; (3) no closure captured a stage instance (grep `controller.stage`); (4)
 every `refresh()` call site from the old file maps to a controller mutation or session
-notify (the 27 sites in git history are the checklist); (5) CSS byte-identical;
-(6) build + tests green; (7) Fast Refresh works on the new .tsx (Phase 1's payoff,
-now real). Then review-cycle to convergence and the owner's Windows checklist: a
+notify — the audit spine is the 27 `refresh()` occurrences (18 real call sites + 8
+comment lines :305, :338, :342, :908, :1248, :1358, :1996, :2024 + 1 definition
+:2323), plus the `session.subscribe(refresh)` wiring at :1249 that the
+occurrence-grep misses; (5) CSS byte-identical; (6) build + tests green; (7) Fast
+Refresh works on the new .tsx (Phase 1's payoff, now real); (8) retire `withMessage`
+from `src/ui.ts` once its last caller died (callers: first-run S01, settings S02,
+pack-view S06, editor S07–S08 message-state work) — grep ui.ts exports for remaining
+consumers before deleting; `el()` itself survives (dialog.ts, combobox.ts, the
+`confirm*` helpers, eyedropper). Then review-cycle to convergence and the owner's Windows checklist: a
 fresh-eyes pass of the S08/S11 Windows lists plus a text-heavy session (overlay
 typing, combobox pick, colour eyedroppers) — the interactions the analysis flags as
 where a "working" port fails in owner tests.
@@ -247,14 +262,15 @@ existing attributes (UI-audience rule).
    controller; every hook works headless from S07 onward (before any React exists);
    `startSession`'s contract "showEditor() runs before the file opens, so the canvas
    can measure" is documented as a preserved invariant.
-4. **Focus-clobbering by re-render** (five activeElement guards in `refresh()`):
-   uncontrolled inputs + explicit sync in layout effects with the same guard;
-   EffectControls/FontPicker not ported at all.
+4. **Focus-clobbering by re-render** (the activeElement guards — 3 inside `refresh()`
+   (:2394, :2527, :2530), 5 across the editor view surface incl. :1901 and
+   effect-controls.ts:292): uncontrolled inputs + explicit sync in layout effects
+   with the same guard; EffectControls/FontPicker not ported at all.
 5. **`run()` busy-gating under React event batching**: `busy` is read-and-set
    synchronously in one task; React never re-enters it because commands are plain
    functions outside the render cycle. Rapid-double-click is in the S07 owner smoke
    test.
-6. **Keyboard contract drift** (the 12-step guard ladder incl. the Windows Alt
+6. **Keyboard contract drift** (the keydown guard ladder incl. the Windows Alt
    rulings of 2026-11-24): the ladder moves as a unit into one effect; any reordering
    shows up as Alt-menu or shortcut regression on Windows — hence per-session
    Windows touchpoints, not one check at the end.

@@ -18,11 +18,18 @@ the bridged `packPicker` — opens and saves. When S05 ends all CSS is byte-iden
 
 ## Preconditions
 
-- S04 landed: bridge helper (`src/react/bridge.ts`) exists and its dialog-settle
-  unmount pattern is proven; create-pack dialog subset converted.
+- S04 landed: bridge helper (`src/react/bridge.ts`) and ref-embed helper
+  (`src/react/ImperativeNode.tsx`) exist and the dialog-settle unmount pattern
+  is proven; create-pack dialog subset converted — or S04 handed off the
+  create-pack dialog subset, which then lands as this session's step 0
+  (explicit hand-off, matching S04's fallback).
 - Phase 2's decisions: `dialog.ts` (93 LOC) and `combobox.ts` (266 LOC) are imperative
   islands — untouched here (binding contract #2).
 - Phase 3 precondition: no parallel el()-based UX work (tickets 01/02) on these files.
+- Compression lever (plan.md): if S04 and this session both converge in one
+  review round, this session absorbs S04's leftovers and Phase 3 finishes in
+  two sessions — decide at session start (S06's fallback quotes this lever
+  for budget).
 
 ## Files touched
 
@@ -41,20 +48,33 @@ the bridged `packPicker` — opens and saves. When S05 ends all CSS is byte-iden
    shape: build a React body, `bridge()` it, pass the element as the body node, and call
    the bridge's `unmount()` when the handle's result settles. The `dialogOpen()` guard
    (dialog.ts:91) keeps protecting the pack view's keydown/drop.
+   **Bridge unmount contract:** every path that discards a bridged root's host
+   content must unmount the root first — dialog settle, the `renderPanel` swap
+   (pack-view.ts:589-594: the panel body is replaced whenever selection
+   changes), and the `newPackArea` swap (dialogs.ts:426/:435: the inline
+   New-pack form is cleared and re-populated). A leaked root is a memory leak
+   plus a possible write to detached DOM. The bridge helper's contract is
+   "borrow a node: unmount on return", and each call site names its discard
+   point.
 2. **`packPicker` internals** (dialogs.ts:386): the combobox row + inline New-pack area
    render React through the bridge, but the exported `PackPicker` interface
    (dialogs.ts:356 — `elements: HTMLElement[]`, `selected()`, `load()`, `focus()`) is
    preserved exactly: the bridged element goes into `elements[0]`/`[1]`. The Combobox
-   itself stays imperative (island). `save-dialog.ts:102`
+   itself stays imperative (island), embedded in the bridged React body through
+   `ImperativeNode` (src/react/ImperativeNode.tsx, from S04). `save-dialog.ts:102`
    (`const picker = packPicker({ message, onChange: () => sync() })`) must keep working
    with zero edits — that is the phase's named cross-view regression.
    `defaultPackId`/`initialFocus`/`packMemory` rules (pack-memory.ts:27/:41) are used
-   verbatim, not reimplemented.
+   verbatim, not reimplemented. The inline New-pack form is bridged React since
+   S04's `newPackFields` conversion: the `newPackArea` swap (dialogs.ts:426/:435)
+   discards it on create and on every re-open of the form — unmount that root
+   before each swap (its named discard point).
 3. **`sendDialog`** (dialogs.ts:466-531): port verbatim — Send disabled until a pack is
    chosen with the reason in `title` (:482-483: `send.disabled = picker.selected() ===
    null; send.title = "Choose a pack to send to"`), the inline New-pack flow disabling
-   and re-enabling the button (:412-420: `newPackButton.disabled = true` +
-   `title = "Create the pack below first"`, restored after `choose(pack)`), and the
+   and re-enabling the button (:410-411 `newPackButton.disabled = true` +
+   `title = "Create the pack below first"`, restored at :427-428 after
+   `choose(pack)`), and the
    initial focus rule (:528: `if (initialFocus("send", picker.selected() !== null) ===
    "submit") handle.buttons.get("send")?.focus(); else picker.focus()`). The
    "Delete originals after sending" Move checkbox stays.
@@ -62,10 +82,13 @@ the bridged `packPicker` — opens and saves. When S05 ends all CSS is byte-iden
    `.ul-*` classes). Port exactly:
    - first `.ul-open:not(:disabled)` focused with `preventScroll` (:67-68) and
      `list.scrollTop = 0` (:69);
-   - width fit as an effect: rAF then `document.fonts.ready.then(fit)` re-running
+   - width fit as an effect: `fit(); document.fonts.ready.then(fit)`
+     (:74-76 — no rAF in upload-list; the rAF-then-fonts.ready pattern is
+     panels.ts's, kept there) re-running
      `fitWidth(handle.dialog, list)` (:74-76) — same measured-from-live-layout math
      (`fitWidth` at :206);
-   - `makeDragHandle` stays imperative via ref (OS drag-out to Explorer/Telegram);
+   - `makeDragHandle` stays imperative, embedded via `ImperativeNode`
+     (src/react/ImperativeNode.tsx, from S04) — OS drag-out to Explorer/Telegram;
    - save-error restore: `lastStored` (:116-125 — stored on success, `input.value =
      lastStored` on failure) becomes component state.
 5. **`emoji-field.ts`**: `measureEmojiGlyph(fontSize, fontFamily)` (:24) kept verbatim
@@ -80,7 +103,13 @@ the bridged `packPicker` — opens and saves. When S05 ends all CSS is byte-iden
    the existing renderPanel guard (pack-view.ts:638: `if (!panel.contains(
    document.activeElement) || !editing) renderPanel()`) keeps protecting the bridged
    textarea — do not weaken it, S06 replaces it by construction (stable keys).
-8. Run `bun run build` + `bun test`; review-cycle to convergence before any owner test.
+   The `renderPanel` swap (pack-view.ts:591-594) discards the previous panel's
+   bridged content on every selection change — unmount that root before
+   `panel.replaceChildren(...)` runs (the bridge unmount contract of step 1).
+8. Run `bun run build` + `bun test`; then review-cycle per AGENTS.md, both axes,
+   to convergence on this session's delta before any owner test. The owner
+   Windows checklist below gates the session's done-state; the session's PR
+   lands with `gh pr merge <N> --merge` (AGENTS.md merge rule).
 
 ## Deliberately out of scope
 
@@ -93,7 +122,10 @@ the bridged `packPicker` — opens and saves. When S05 ends all CSS is byte-iden
 - Any CSS/class change; any `model/` change (`messages.ts`, `names.ts`,
   `pack-memory.ts` untouched); the Editor (only its save dialog gets *tested*, not
   edited).
-- No `<StrictMode>` (binding contract #3).
+- No `<StrictMode>` anywhere — the fence covers every bridged dialog body and
+  panel (binding contract #3).
+- No new aria/role attributes — existing aria/role stay untouched in every
+  converted dialog body and panel (UI-audience rule).
 
 ## Exit criteria
 
@@ -113,15 +145,25 @@ the bridged `packPicker` — opens and saves. When S05 ends all CSS is byte-iden
   preselected).
 - Grep: no `StrictMode` import in `src/`; `git diff` on `src/dialog.ts` and
   `src/combobox.ts` empty.
+- Review-cycle converged on this session's delta; the owner Windows checklist
+  passed in full (it gates the done-state); the PR lands via
+  `gh pr merge --merge`.
 
 ## Review-cycle coverage
 
 - Every `bridge()` call site: unmount wired to the dialog result's settle path
-  (`handle.result` then/catch), no leaked roots after cancel or error paths.
+  (`handle.result` then/catch), no leaked roots after cancel or error paths —
+  and, per the step 1 bridge unmount contract ("borrow a node: unmount on
+  return"), every path that discards a bridged root's host content unmounts the
+  root first: dialog settle, the `renderPanel` swap (pack-view.ts:591-594), and
+  the `newPackArea` swap (dialogs.ts:426/:435). Each call site names its
+  discard point; a leaked root is a memory leak plus a possible write to
+  detached DOM.
 - Focus rules inside dialogs: React re-renders must never steal focus from the
   combobox input or the emoji box while the dialog is open (renderPanel guard still
   consulted at pack-view.ts:638).
-- `copyFlash`/`fitWidth`/`fit` effect cleanups: rAF ids and timers cancelled, no
+- `copyFlash`/`fitWidth`/`fit` effect cleanups: copyFlash timers, the
+  `fonts.ready` fit callbacks, and panels' rAF ids cancelled, no
   setState-after-unmount paths.
 - Class-identity diff of every dialog body and panel against the el() tree (`.ul-*`,
   `.pm-check`, `.pm-new-pack`, `.pack-combo-row`, badge classes).
@@ -145,7 +187,9 @@ the bridged `packPicker` — opens and saves. When S05 ends all CSS is byte-iden
 
 - **Fonts-ready/rAF timing across the bridge**: the width fits measure live layout; if
   the effect runs before the dialog is laid out the measurement is wrong — keep the
-  rAF-then-fonts.ready ordering exactly as upload-list.ts:74-76.
+  exact orderings as today: `fit()` then `fonts.ready` in upload-list.ts:74-76,
+  rAF then `fonts.ready` in panels.ts:113-115. The two patterns differ; do not
+  unify them.
 - **Focus fights between React bodies and imperative dialogs** (phase risk 2): the
   combobox owns focus inside the picker; React re-renders must not remount the bridged
   element while it is focused — the renderPanel guard and dialog-settle unmount are the
@@ -154,5 +198,7 @@ the bridged `packPicker` — opens and saves. When S05 ends all CSS is byte-iden
   the dialog before `copyFlash`'s timer fires — the effect cleanup must make that a
   no-op.
 - Fallback if S05 overruns: `panels.ts` (the most mechanical, self-contained file) slips
-  to the front of S06, which rebuilds the panel mount point anyway — sequencing
-  survives; dialogs + upload-list + the Editor save-dialog regression must land here.
+  to S06's step 0 by explicit hand-off — S06's Preconditions carry the matching
+  contingency line and its work plan step 0 names the landing — and S06 rebuilds
+  the panel mount point anyway, so sequencing survives; dialogs + upload-list +
+  the Editor save-dialog regression must land here.
