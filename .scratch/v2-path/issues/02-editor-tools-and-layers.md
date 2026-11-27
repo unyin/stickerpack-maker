@@ -1,6 +1,7 @@
 # Triage: Editor tools and layers
 
 Type: grilling
+Status: claimed
 
 ## Question
 
