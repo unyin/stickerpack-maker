@@ -37,7 +37,7 @@ export interface EmojiBlock {
 export interface EmojiStore {
   /** The sticker's current Emoji String; rejects when it is gone. */
   read(packId: number, stickerId: number): Promise<string>;
-  /** Write through; resolves the string the core stored (with whitespace stripped). */
+  /** Write through; resolves the string the core stored (everything that is not an emoji stripped). */
   write(stickerId: number, emojiString: string): Promise<string>;
 }
 
@@ -51,7 +51,12 @@ export const EMOJI_GONE: EmojiBlock = {
   message: "This sticker no longer exists (it was deleted or moved since it was opened), so its Emoji String cannot be edited.",
 };
 
-/** The Emoji String as the Library stores it: every space stripped (SPEC §5). */
+/**
+ * The staged Emoji String tidied before a save: every space stripped here
+ * (SPEC §5), so the value handed over has no whitespace to carry. Not the
+ * stored form — the core keeps only the emoji, whatever is typed
+ * (SPM-39).
+ */
 export function stripEmojiSpaces(emojiString: string): string {
   return emojiString.replace(/\s+/g, "");
 }

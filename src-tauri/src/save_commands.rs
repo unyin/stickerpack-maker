@@ -164,9 +164,9 @@ fn parse_cap_kb(raw: &str) -> Result<u64, String> {
 /// file, so the bytes go to a temporary file first (removed afterwards); the
 /// core then checks it as a sticker (format, size, dimensions) like any
 /// drop-in, and appends it with an order-encoded name (ADR-0003) or puts it
-/// in its slot. `emoji` is the new sticker's Emoji String, stored with its
-/// spaces stripped like `stickers::set_emoji_string` (SPEC §5); a replace
-/// keeps the sticker's own string and ignores it.
+/// in its slot. `emoji` is the new sticker's Emoji String, stripped to its
+/// emoji by `stickers::strip_to_emoji` like `stickers::set_emoji_string`
+/// (SPEC §5); a replace keeps the sticker's own string and ignores it.
 pub fn write_sticker(
     conn: &mut Connection,
     library_dir: &Path,
@@ -177,7 +177,7 @@ pub fn write_sticker(
     let temp = TempFile::write(encoded.format.as_str(), &encoded.bytes)?;
     match target {
         SaveTarget::Append { pack_id } => {
-            let emoji_string: String = emoji.chars().filter(|c| !c.is_whitespace()).collect();
+            let emoji_string = stickers::strip_to_emoji(emoji);
             let new = [NewSticker { path: temp.0.clone(), emoji_string }];
             let mut outcome = stickers::add_stickers(conn, library_dir, pack_id, &new, None)?;
             if let Some(rejected) = outcome.rejected.pop() {
@@ -292,6 +292,24 @@ mod tests {
         let spaced = write_sticker(&mut lib.conn, lib.dir.path(), append, &encoded(&sticker_image(5), SaveFormat::Png), " 😀 🎉 ").unwrap();
         assert_eq!(spaced.emoji_string, "😀🎉");
         assert_eq!(load_stickers(&lib.conn, pack.id).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_new_sticker_strips_non_emoji_like_an_emoji_edit_does() {
+        let mut lib = Lib::new();
+        let pack = create_pack(&mut lib.conn, lib.dir.path(), "Cats", None).unwrap();
+        let append = SaveTarget::Append { pack_id: pack.id };
+        // The staged box may hold pasted words (owner decision 2026-11-27):
+        // the stored string is the emoji alone.
+        let typed = "cats 😀 and 🎉!";
+        let saved = write_sticker(&mut lib.conn, lib.dir.path(), append, &encoded(&sticker_image(4), SaveFormat::Png), typed)
+            .unwrap();
+        assert_eq!(saved.emoji_string, "😀🎉");
+        // One strip function behind both entry points, so the two cannot drift.
+        let other =
+            write_sticker(&mut lib.conn, lib.dir.path(), append, &encoded(&sticker_image(5), SaveFormat::Png), "").unwrap();
+        let edited = stickers::set_emoji_string(&lib.conn, other.id, typed).unwrap();
+        assert_eq!(edited.emoji_string, saved.emoji_string);
     }
 
     #[test]

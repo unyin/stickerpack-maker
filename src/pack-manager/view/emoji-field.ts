@@ -32,7 +32,8 @@ export function measureEmojiGlyph(fontSize: string, fontFamily: string): number 
 
 /**
  * An Emoji String box saves when it changes (blur), and Enter ends the edit
- * (the core strips every whitespace, so there are no line breaks to type).
+ * (the core strips everything that is not an emoji, so there are no line
+ * breaks to type).
  */
 export function bindEmojiSave(input: HTMLTextAreaElement, save: (value: string) => void): void {
   input.addEventListener("change", () => save(input.value));

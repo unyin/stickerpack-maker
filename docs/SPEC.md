@@ -165,7 +165,8 @@ or Settings, a long pack Title).
 - Large preview; metadata: position, format, dimensions, file size.
 - **Emoji String**: inline editable box of four rows of five that shows all 20 emoji at once
   (type, or Win+. for the Windows emoji panel); past 20 it grows a row instead of scrolling.
-  Every space is stripped when it is saved and the count ignores spaces. Beside the box: a
+  Everything that is not an emoji is stripped when it is saved, and the count counts the
+  stored emoji (owner decision 2026-11-27). Beside the box: a
   small square icon-only **copy** button (a successful copy shows ✓ with a soft green fill,
   border and icon, `--success-*`, the red failure tint's mirror, here and in the Upload list:
   owner decision 2026-11-25) and the live 1–20 count; the count warning shows
@@ -266,13 +267,13 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   success tone (a soft green fill with its border and text; Pack-level, Tones; no change of size) and its tooltip's description
   becomes "Upload… — Ready to go live: every sticker has its file and 1–20 emoji", so colour is
   never the only signal (owner decisions 2026-11-25). Ready means all of: at least 1 sticker; at
-  most 120; no sticker Missing; every Emoji String counted as the app counts (spaces ignored)
+  most 120; no sticker Missing; every Emoji String counted as the app counts (only emoji are stored)
   at 1–20 emoji; the pack is a Draft; a thumbnail, if set, is not Missing (no thumbnail does
   not block). Otherwise the button and its tooltip are as above; a disabled button is never
   green, and a Live pack never is. It is recomputed on every render, so emoji edits (panel or
   dialog), Refresh, add/delete and Go Live / Revert to Draft all update it.
 - **The emoji box.** A fixed two-row box that never resizes and scrolls inside past 20 emoji. It
-  saves like the detail panel's Emoji String box (§5 Detail panel): on change, every space
+  saves like the detail panel's Emoji String box (§5 Detail panel): on change, non-emoji
   stripped, warn-only (never blocks), Enter ends the edit, through the same command, so the
   edit reaches the Library and the pack view's tiles and panel. The dialog's preferred width fits
   ten emoji per row, computed from the measured width of an emoji glyph in the emoji font

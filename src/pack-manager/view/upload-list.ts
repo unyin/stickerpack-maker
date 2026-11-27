@@ -30,7 +30,7 @@ import { previewImage, type Previews } from "./previews";
 
 /** What the dialog asks of the pack view. */
 export interface UploadListHost {
-  /** Save a sticker's Emoji String like the detail panel does; resolves with the stored string (spaces stripped), rejects with the reason. */
+  /** Save a sticker's Emoji String like the detail panel does; resolves with the stored string (non-emoji stripped), rejects with the reason. */
   saveEmoji(sticker: StickerView, emojiString: string): Promise<string>;
 }
 
@@ -119,7 +119,7 @@ export async function openUploadList(view: PackView, previews: Previews, host: U
       host.saveEmoji(sticker, value).then(
         (stored) => {
           lastStored = stored;
-          input.value = stored; // spaces stripped, as saved
+          input.value = stored; // stripped to its emoji, as saved
         },
         (err) => {
           input.value = lastStored;
