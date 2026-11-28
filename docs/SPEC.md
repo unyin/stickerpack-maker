@@ -944,10 +944,15 @@ pass.
     text-presentation characters never leave the text font. Emoji runs (ZWJ sequences,
     flags, keycaps) apply the emoji font's own plain GSUB ligatures; there is still no
     general shaping (SPM-9's line, now explicit), and a joiner nothing consumes draws
-    nothing. Limits (owner decision 2026-11-24): a custom emoji font the Rust parser
-    cannot colour-paint (woff2, or CBDT/sbix/SVG-emoji bytes) still renders in the DOM
-    but the canvas falls back to the bundled Noto; bitmap (CBDT/sbix) painting is
-    planned for v2 (§9 v2 plan, Emoji fonts), woff2 decoding is parked in the v3 lot, and
+    nothing. Bitmap emoji ARE painted on the canvas (SPM-69): a custom emoji font that
+    carries its colour as CBDT/CBLC bitmaps or PNG sbix draws instead of falling back to
+    Noto — the strike nearest at or above the text's size is chosen (the largest when none
+    is that big), decoded, scaled and composited in the same tiny-skia path as COLR layers,
+    placed by the strike's own metrics. Above the font's biggest strike emoji upscale and
+    look slightly soft: the owner's font tops out at a 96 px strike, and the DOM has the
+    same limit. Limits (owner decision 2026-11-24, amended by SPM-69): a custom emoji font
+    the Rust parser still cannot colour-paint (woff2 bytes) renders in the DOM but the
+    canvas falls back to the bundled Noto — woff2 decoding is parked in the v3 lot — and
     SVG-in-OpenType is rejected (§9 Rejected ideas; owner, 2026-11-27). Since SPM-18 an optional outline (the text controls above)
     strokes those glyph outlines BEHIND the fill — round joins, the width the
     reach beyond the ink in the layer's own px, the same reach the pixel Outline
@@ -1190,8 +1195,6 @@ task lands, its behaviour moves into the spec body (§2–§6) and its entry lea
   layer named "Lifted"); **Copy image** in the Pack Manager; an owner hand test of paste targets
   on Windows before shipping.
 - **Emoji fonts** (EPIC-9; ticket `.scratch/v2-path/issues/03-emoji-fonts.md`):
-  - **v1.1**: the Rust text renderer paints bitmap (CBDT/CBLC and PNG sbix) emoji, so Editor
-    text layers draw a custom bitmap emoji font instead of falling back to Noto (SPM-69).
   - The emoji font library: the app keeps its own `fonts/` folder in the app-config directory,
     copies a picked custom emoji font into it and lists the copies as entries in the Settings
     Emoji font dropdown (add/remove, pick once, reuse forever); today's stored path moves into
