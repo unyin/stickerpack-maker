@@ -365,8 +365,8 @@ export async function buildPackView(packId: number, host: PackViewHost): Promise
 
   /**
    * Save a sticker's Emoji String into the Library and the view; resolves with
-   * the stored string (the core strips every space), rejects with the reason.
-   * Shared by the detail panel and the Upload list.
+   * the stored string (the core strips everything that is not an emoji),
+   * rejects with the reason. Shared by the detail panel and the Upload list.
    */
   async function persistEmoji(sticker: StickerView, emojiString: string): Promise<string> {
     const saved = await setEmojiString(sticker.id, emojiString);

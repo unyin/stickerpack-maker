@@ -17,6 +17,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use super::files::{self, has_pending_plan, remove_names, stage_copy, sticker_file_name, FaultPoint, Step};
 use super::packs::open_pack_files;
 use super::schema::{load_pack, load_sticker, load_stickers, Format, Sticker};
+use crate::emoji_property::is_emoji;
 use crate::limits::{EMOJI_MAX, EMOJI_MIN, KB, PACK_MAX_STICKERS, STICKER_MAX_KB, STICKER_SIDE, THUMBNAIL_MAX_KB, THUMBNAIL_SIDE};
 
 /// Largest sticker file Telegram accepts (SPEC §7).
@@ -94,6 +95,16 @@ pub fn emoji_count(emoji_string: &str) -> usize {
 pub fn emoji_warning(emoji_string: &str) -> Option<Warning> {
     let count = emoji_count(emoji_string);
     (!(EMOJI_MIN..=EMOJI_MAX).contains(&count)).then_some(Warning::EmojiCount { count })
+}
+
+/// An Emoji String as the Library stores it: every grapheme cluster that
+/// carries no emoji character is dropped, so pasted words and whitespace
+/// never reach the stored string (owner decision 2026-11-27: everything that
+/// is not an emoji is stripped when it is saved). Cluster granularity keeps a
+/// ZWJ family, a flag, a skin tone and a keycap whole. Applied on save only,
+/// never to a string already stored.
+pub fn strip_to_emoji(emoji_string: &str) -> String {
+    emoji_string.graphemes(true).filter(|g| g.chars().any(is_emoji)).collect()
 }
 
 /// Warn when a pack holds more than the pack sticker cap (warn only, SPEC §3).
@@ -452,12 +463,13 @@ pub fn delete_stickers(
     load_stickers(conn, pack_id)
 }
 
-/// Set a sticker's Emoji String with every whitespace character removed
-/// (owner decision 2026-11-21: Telegram takes a plain run of emoji); the
-/// stored string is what one-click copy reproduces. Never blocks: check
-/// `emoji_warning` for the emoji count rule.
+/// Set a sticker's Emoji String with everything that is not an emoji removed
+/// (owner decision 2026-11-27, extending the 2026-11-21 one: Telegram takes a
+/// plain run of emoji, so pasted words and spaces go too, see
+/// `strip_to_emoji`); the stored string is what one-click copy reproduces.
+/// Never blocks: check `emoji_warning` for the emoji count rule.
 pub fn set_emoji_string(conn: &Connection, sticker_id: i64, emoji_string: &str) -> Result<Sticker, String> {
-    let stripped: String = emoji_string.chars().filter(|c| !c.is_whitespace()).collect();
+    let stripped = strip_to_emoji(emoji_string);
     let changed = conn
         .execute(
             "UPDATE stickers SET emoji_string = ?1 WHERE id = ?2",
@@ -1150,6 +1162,49 @@ mod tests {
         let edited = set_emoji_string(&lib.conn, s[0].id, " 👨‍👩‍👧 🇫🇷\t❤️\n\u{a0}🎉 ").unwrap();
         assert_eq!(edited.emoji_string, "👨‍👩‍👧🇫🇷❤️🎉");
         assert_eq!(emoji_count(&edited.emoji_string), 4);
+    }
+
+    #[test]
+    fn strip_to_emoji_keeps_emoji_clusters_and_drops_everything_else() {
+        // Pasted words and spaces around two emoji go, the emoji stay.
+        assert_eq!(strip_to_emoji("party time 🎉👨‍👩‍👧 ok!"), "🎉👨‍👩‍👧");
+        // Sequences a per-character filter would break apart: a ZWJ family
+        // with a stray letter, a regional-indicator flag, a VS16 heart, a
+        // keycap, an England tag sequence, a lone skin tone modifier.
+        assert_eq!(strip_to_emoji("👨‍👩‍👧 x"), "👨‍👩‍👧");
+        assert_eq!(strip_to_emoji("🇫🇷"), "🇫🇷");
+        assert_eq!(strip_to_emoji("❤️"), "❤️");
+        assert_eq!(strip_to_emoji("3️⃣"), "3️⃣");
+        assert_eq!(strip_to_emoji("🏴󠁧󠁢󠁥󠁮󠁧󠁿"), "🏴󠁧󠁢󠁥󠁮󠁧󠁿");
+        assert_eq!(strip_to_emoji("\u{1F3FB}"), "\u{1F3FB}");
+        // The Emoji property, not Emoji_Presentation: a bare digit counts and
+        // is kept (the accepted edge of owner decision 2026-11-27).
+        assert_eq!(strip_to_emoji("3"), "3");
+        // Nothing to keep: letters only, whitespace only (a no-break space,
+        // a tab, a newline), nothing at all.
+        assert_eq!(strip_to_emoji("letters"), "");
+        assert_eq!(strip_to_emoji(" \t\n\u{a0}"), "");
+        assert_eq!(strip_to_emoji(""), "");
+        // A dangling ZWJ is not trimmed: the cluster keeps it as it arrived.
+        assert_eq!(strip_to_emoji("\u{1F9D1}\u{200D}x"), "\u{1F9D1}\u{200D}");
+    }
+
+    #[test]
+    fn emoji_string_stores_only_the_emoji_of_pasted_text() {
+        let mut lib = Lib::new();
+        let pack = lib.pack("p");
+        let s = lib.seed(pack.id, &["A"]);
+        // Pasting from a chat window brings words with the emoji (owner
+        // decision 2026-11-27): only the emoji are stored, so the loose count
+        // is exact.
+        let edited = set_emoji_string(&lib.conn, s[0].id, "send this 🎉👨‍👩‍👧 please").unwrap();
+        assert_eq!(edited.emoji_string, "🎉👨‍👩‍👧");
+        assert_eq!(emoji_count(&edited.emoji_string), 2);
+        assert_eq!(emoji_warning(&edited.emoji_string), None);
+        // Letters alone leave the stored string empty, still warn-only.
+        let empty = set_emoji_string(&lib.conn, s[0].id, "nothing to see here").unwrap();
+        assert_eq!(empty.emoji_string, "");
+        assert_eq!(emoji_warning(&empty.emoji_string), Some(Warning::EmojiCount { count: 0 }));
     }
 
     // ---- Replace ----
