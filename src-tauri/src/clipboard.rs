@@ -59,10 +59,9 @@ pub fn split_frame(frame: &[u8]) -> Result<(u32, u32, &[u8]), String> {
 /// its size fields are `usize` and describe another app's data, so they are
 /// checked like a request's before they reach the frame.
 pub fn to_rgba(image: &ImageData<'_>) -> Result<Rgba, String> {
-    let too_wide = || format!("the clipboard image's {} px does not fit in a frame", image.width);
-    let width = u32::try_from(image.width).map_err(|_| too_wide())?;
-    let height = u32::try_from(image.height)
-        .map_err(|_| format!("the clipboard image's {} px does not fit in a frame", image.height))?;
+    let too_big = |px: usize| format!("the clipboard image's {px} px does not fit in a frame");
+    let width = u32::try_from(image.width).map_err(|_| too_big(image.width))?;
+    let height = u32::try_from(image.height).map_err(|_| too_big(image.height))?;
     let expected = rgba_len(width, height)?;
     if image.bytes.len() != expected {
         return Err(format!(
@@ -171,12 +170,10 @@ mod tests {
     /// every build the app ships.
     #[cfg(target_pointer_width = "64")]
     #[test]
-    fn to_rgba_refuses_a_size_wider_than_the_frame_header() {
-        let image = ImageData {
-            width: u32::MAX as usize + 1,
-            height: 1,
-            bytes: Vec::new().into(),
-        };
-        assert!(to_rgba(&image).unwrap_err().contains("does not fit in a frame"));
+    fn to_rgba_refuses_a_side_beyond_the_frame_header() {
+        for (width, height) in [(u32::MAX as usize + 1, 1), (1, u32::MAX as usize + 1)] {
+            let image = ImageData { width, height, bytes: Vec::new().into() };
+            assert!(to_rgba(&image).unwrap_err().contains("does not fit in a frame"));
+        }
     }
 }
