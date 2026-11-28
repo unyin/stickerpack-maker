@@ -151,13 +151,18 @@ pub fn repoint_library(
 /// the webview's FontFace can parse. Case-insensitive.
 const CUSTOM_EMOJI_FONT_EXTENSIONS: [&str; 3] = ["ttf", "otf", "woff2"];
 
-/// A colour-emoji font reaches tens of MB — Noto's CBDT build is ~24 MB
-/// and Apple's sbix build ~90 MB+ — and real custom emoji packs can be
-/// larger still, so the cap sits at 256 MiB: every known emoji font fits
-/// with room, while a deliberately absurd "font" is still refused before
-/// its bytes cross into the webview (owner, 2026-11-24: the first cap,
-/// 64 MiB, blocked real packs and was raised).
-const CUSTOM_EMOJI_FONT_MAX_BYTES: u64 = 256 * 1024 * 1024;
+/// The cap is the engine's, not the app's: Blink — inside WebView2 —
+/// refuses a web font over 128 MiB (kMaxDecompressedSizeMb), and all JS
+/// then sees of that is an opaque "Invalid font data" with no hint of the
+/// real limit, so the app refuses such a font up front with a message
+/// naming the limit instead. The guard checks the file's size, which is
+/// exact for .ttf/.otf; a .woff2 under the cap can still decompress past
+/// kMaxDecompressedSizeMb and land on the engine's opaque refusal (woff2
+/// decoding is parked, SPEC v3 lot). The same guard covers the font
+/// library's copies once SPM-71 lands (the earlier 64 MiB cap was briefly
+/// raised to 256 MiB before being pinned to the engine's limit;
+/// .scratch/v2-path/issues/03-emoji-fonts.md, owner, 2026-11-27/28).
+const CUSTOM_EMOJI_FONT_MAX_BYTES: u64 = 128 * 1024 * 1024;
 
 /// Validate a picked custom emoji font path: suffix, existence, size cap.
 /// The command takes any path from the webview, so the guard (not the UI's
@@ -173,8 +178,14 @@ fn custom_emoji_font_problem(path: &str) -> Option<String> {
     }
     match fs::metadata(&p) {
         Ok(m) if m.len() > CUSTOM_EMOJI_FONT_MAX_BYTES => Some(format!(
-            "font file {path} is {} MB; the limit is {} MB",
-            m.len() / (1024 * 1024),
+            "font file {path} is {} MB; the app's embedded web engine \
+             (WebView2) refuses web fonts over {} MB, so this one cannot \
+             be loaded — pick a smaller font file",
+            // Ceiling for the file's size: truncating would quote a size
+            // smaller than reality — 128 MiB + 1 byte would print "128 MB",
+            // the very limit the message names. The limit itself is a whole
+            // MiB, so plain division stays exact.
+            m.len().div_ceil(1024 * 1024),
             CUSTOM_EMOJI_FONT_MAX_BYTES / (1024 * 1024)
         )),
         Ok(_) => None,
@@ -773,5 +784,34 @@ mod tests {
         assert!(problem.unwrap().starts_with("cannot read"));
         // No extension at all.
         assert!(custom_emoji_font_problem("C:\\Fonts\\font").is_some());
+    }
+
+    #[test]
+    fn custom_emoji_font_guard_passes_exactly_the_cap_and_refuses_one_byte_over() {
+        let dir = tempfile::tempdir().unwrap();
+        // The guard reads metadata().len() — the logical size — so set_len
+        // stands in for 128 MiB of bytes without writing them to disk.
+        let at_cap = dir.path().join("at-cap.ttf");
+        fs::File::create(&at_cap)
+            .unwrap()
+            .set_len(CUSTOM_EMOJI_FONT_MAX_BYTES)
+            .unwrap();
+        // Exactly at the engine's limit: still loadable, so no problem.
+        assert_eq!(custom_emoji_font_problem(at_cap.to_str().unwrap()), None);
+        // One byte over: refused, naming the engine's 128 MB web-font
+        // limit so the message reads as the engine's known bound, not an
+        // arbitrary app cap — and quoting the file's size CEILED, never
+        // truncated: a size smaller than reality (128 MiB + 1 byte
+        // printing "128 MB", the limit itself) would contradict the
+        // refusal.
+        let over = dir.path().join("over.ttf");
+        fs::File::create(&over)
+            .unwrap()
+            .set_len(CUSTOM_EMOJI_FONT_MAX_BYTES + 1)
+            .unwrap();
+        let problem = custom_emoji_font_problem(over.to_str().unwrap()).unwrap();
+        assert!(problem.contains("129 MB"));
+        assert!(problem.contains("128 MB"));
+        assert!(problem.contains("WebView2"));
     }
 }

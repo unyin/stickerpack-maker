@@ -177,9 +177,11 @@ or Settings, a long pack Title).
   **Twemoji** — bundled, artwork CC-BY 4.0 with the credit shown in Settings and the licence
   texts shipped beside the fonts; **Windows** — the system's Segoe UI Emoji, nothing bundled;
   **custom font file** — a user-picked .ttf/.otf/.woff2, read from where it is and never shipped;
-  a custom file that is missing, not a font, or refused by the app's embedded web engine (some
+  a custom file that is missing, not a font, over the embedded web engine's (WebView2/Blink)
+  128 MiB web-font limit, or refused by that engine (some
   fonts Windows itself renders are rejected inside the app — not a bug drawable around) falls
-  back to Android with a message in Settings.
+  back to Android with a message in Settings; the over-limit message names the limit up front,
+  because the engine's own refusal is an opaque "Invalid font data" (owner decision 2026-11-27).
   The choice changes every emoji in the app without a restart (one font-family stack on the
   emoji fields' shared variable, re-measuring the Emoji String box; since SPM-20, Editor
   text layers' emoji follow the same choice — the Rust text renderer draws them in colour
@@ -1190,9 +1192,6 @@ task lands, its behaviour moves into the spec body (§2–§6) and its entry lea
 - **Emoji fonts** (EPIC-9; ticket `.scratch/v2-path/issues/03-emoji-fonts.md`):
   - **v1.1**: the Rust text renderer paints bitmap (CBDT/CBLC and PNG sbix) emoji, so Editor
     text layers draw a custom bitmap emoji font instead of falling back to Noto (SPM-69).
-  - **v1.1**: a custom emoji font over WebView2's 128 MiB web-font limit is refused with a
-    clear message naming that limit (today's cap is 256 MiB and the engine's refusal is opaque)
-    (SPM-70).
   - The emoji font library: the app keeps its own `fonts/` folder in the app-config directory,
     copies a picked custom emoji font into it and lists the copies as entries in the Settings
     Emoji font dropdown (add/remove, pick once, reuse forever); today's stored path moves into
