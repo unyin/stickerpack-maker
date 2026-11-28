@@ -15,10 +15,15 @@
 //! tiny-skia: each layer's outline filled with its CPAL colour or gradient,
 //! with the clip, transform and composite-mode stacks the COLRv1 paint
 //! graph needs. Angular sweep gradients have no tiny-skia rasteriser; the
-//! bundled fonts use none (a guard test pins that). Bitmap emoji formats
-//! (CBDT, sbix, SVG) are not painted in v1 — a chain font that only
-//! carries them is skipped for that glyph, a documented limit (owner
-//! decision, 2026-11-24).
+//! bundled fonts use none (a guard test pins that). Since SPM-69 a font that
+//! carries its colour as bitmaps instead is painted too: CBDT/CBLC (PNG
+//! formats 17-19) and PNG sbix both come back from ttf-parser as PNG
+//! payloads, so one decode path serves both — the strike nearest at or above
+//! the text's size is chosen (the largest when none is that big), scaled and
+//! composited in the same tiny-skia path, top-left placed by the strike's own
+//! metrics. Large emoji therefore upscale from the font's biggest strike and
+//! look slightly soft where it tops out at 96 px (SPEC §6); SVG-in-OpenType
+//! stays unpainted (rejected, §9).
 //!
 //! Emoji runs (ZWJ sequences, flags, keycaps, skin tones) are reduced with
 //! the chain font's own plain GSUB ligature lookups — no general shaping
@@ -31,7 +36,9 @@ use std::sync::Arc;
 
 use fontdb::Database;
 use ttf_parser::colr::{ClipBox, CompositeMode, Paint, Painter};
-use ttf_parser::{Face, GlyphId, RgbaColor, Transform as FontTransform};
+use ttf_parser::{
+    Face, GlyphId, RasterGlyphImage, RasterImageFormat, RgbaColor, Transform as FontTransform,
+};
 use tiny_skia::{
     BlendMode as SkiaBlend, FillRule, FilterQuality, LinearGradient, Mask, Paint as SkiaPaint,
     Path as SkiaPath, PathBuilder, Pattern, Pixmap, PixmapRef, RadialGradient, Shader, SpreadMode,
@@ -112,20 +119,49 @@ impl EmojiFonts {
 }
 
 /// One colour glyph to draw: which chain source, which glyph, how far the
-/// pen moves and how font units scale (px per font unit) at the text's size.
+/// pen moves and how its ink scales at the text's size.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct EmojiGlyph {
     pub source: usize,
     pub id: GlyphId,
     pub advance: f32,
+    /// px per unit of the glyph's ink: a font unit for a COLR glyph, a pixel
+    /// of the chosen strike for a bitmap one (SPM-69).
     pub scale: f32,
+    /// The strike's pixels per em for a bitmap glyph, `None` for a COLR
+    /// glyph: which kind of ink this is, and which strike to paint.
+    pub bitmap_ppem: Option<u16>,
+}
+
+/// The PNG bitmap strike `glyph_raster_image` selects for `id` at `ppem`, or
+/// `None` when the glyph has no image there or the image is not PNG.
+///
+/// One decode path serves CBDT/CBLC and sbix: ttf-parser reports both as PNG
+/// payloads, so painting, measuring and covering all read the same strike
+/// here. The other raster formats (mono and BGRA bitmaps) stay unpainted, and
+/// a strike that declares no pixels per em has no scale to paint at, so
+/// neither is a strike this module can use.
+pub(super) fn png_strike<'a>(
+    face: &'a Face,
+    id: GlyphId,
+    ppem: u16,
+) -> Option<RasterGlyphImage<'a>> {
+    let image = face.glyph_raster_image(id, ppem)?;
+    if image.format != RasterImageFormat::PNG || image.pixels_per_em == 0 {
+        return None;
+    }
+    Some(image)
 }
 
 /// Resolve a run against one face, or `None` when the face does not
 /// colour-cover it (see `EmojiFonts::resolve_run`).
 fn resolve_in(face: &Face, source: usize, run: &[char], size: f32) -> Option<Vec<EmojiGlyph>> {
     let upem = face.units_per_em() as f32;
-    let scale = size / upem;
+    // Advances are font units whatever the ink is, so they scale by the em.
+    let em = size / upem;
+    // The strike to ask for: ttf-parser picks the smallest strike at or above
+    // this ppem, else the largest (SPM-69's rule for free).
+    let ppem = (size.round() as u16).max(1);
     // Glyph ids as the font sees them, each with its ignorable flag. An
     // ignorable the font does not even cmap-map (Noto maps no VS16) is
     // dropped up front, as the browser's shaper drops unmapped
@@ -152,12 +188,18 @@ fn resolve_in(face: &Face, source: usize, run: &[char], size: f32) -> Option<Vec
             continue; // a joiner nothing consumed: default-ignorable, vanishes
         }
         // Monochrome coverage in an emoji font is not emoji drawing
-        // (SPEC §5): a font that only outlines the character loses it.
-        if !face.is_color_glyph(id) {
-            return None;
-        }
-        let advance = face.glyph_hor_advance(id)? as f32 * scale;
-        glyphs.push(EmojiGlyph { source, id, advance, scale });
+        // (SPEC §5): a font that only outlines the character loses it. COLR
+        // layers are preferred — sharp at any size — and since SPM-69 a PNG
+        // bitmap strike stands in for them: the glyph's ink is then the
+        // strike's pixels, scaled from the strike rather than the em.
+        let (scale, bitmap_ppem) = if face.is_color_glyph(id) {
+            (em, None)
+        } else {
+            let image = png_strike(face, id, ppem)?;
+            (size / image.pixels_per_em as f32, Some(image.pixels_per_em))
+        };
+        let advance = face.glyph_hor_advance(id)? as f32 * em;
+        glyphs.push(EmojiGlyph { source, id, advance, scale, bitmap_ppem });
     }
     Some(glyphs)
 }
@@ -295,6 +337,25 @@ pub(super) fn colour_glyph_bounds(face: &Face, id: GlyphId) -> Option<(f32, f32,
     let mut painter = BoundsPainter { face, ctm: FontTransform::default(), stack: Vec::new(), total: None };
     face.paint_color_glyph(id, 0, RgbaColor::new(0, 0, 0, 255), &mut painter)?;
     painter.total
+}
+
+/// The ink box of a BITMAP glyph in the chosen strike's pixels (y up), or
+/// `None` when the glyph has no PNG image in a strike. The same left/bottom/
+/// right/top box `colour_glyph_bounds` gives in font units, so the caller's
+/// ink arithmetic is identical — only the unit its scale converts differs.
+///
+/// ttf-parser reports `x` as the image's left edge from the pen origin and
+/// `y` as its BOTTOM edge above the baseline (it converts CBDT's bearing-Y to
+/// that bound; sbix states the same edge directly, as `originOffsetY`), so
+/// `y + height` is the image's top.
+pub(super) fn bitmap_glyph_bounds(
+    face: &Face,
+    id: GlyphId,
+    ppem: u16,
+) -> Option<(f32, f32, f32, f32)> {
+    let image = png_strike(face, id, ppem)?;
+    let (x, y) = (f32::from(image.x), f32::from(image.y));
+    Some((x, y, x + f32::from(image.width), y + f32::from(image.height)))
 }
 
 /// A painter that only tracks ink: the outline boxes of the glyphs the COLR
@@ -713,6 +774,7 @@ pub(crate) fn bundled_bytes(path: &str) -> std::sync::Arc<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::emoji_bitmap_test_font;
     use crate::editor::emoji_test_font;
 
     /// A painter that only records which paint kinds a colour glyph uses.
@@ -776,5 +838,158 @@ mod tests {
         let hand: Vec<char> = "🫵".chars().collect();
         let glyphs = chain.resolve_run(&db, &hand, 100.0).expect("the third source covers it");
         assert_eq!(glyphs[0].source, 2, "the non-covering second source is skipped");
+    }
+
+    // ---- SPM-69: bitmap (CBDT/CBLC and sbix) coverage ----
+
+    /// The hand-built CBLC/CBDT bytes really are a two-strike PNG bitmap font:
+    /// both strikes parse through the one `glyph_raster_image` call with the
+    /// metrics the fixture declares, which is what the painting tests lean on.
+    #[test]
+    fn the_bitmap_fixture_parses_its_two_strikes() {
+        let bytes = emoji_bitmap_test_font::bytes();
+        let face = Face::parse(&bytes, 0).unwrap();
+        let id = face.glyph_index('😀').expect("the fixture maps the grinning face");
+        assert_eq!(face.glyph_hor_advance(id), Some(1000));
+        assert!(!face.is_color_glyph(id), "the fixture carries no COLR layers");
+        // (strike ppem, left edge, bottom edge, side) — the 32 ppem strike is
+        // offset right of the pen and above the baseline, the 96 ppem one
+        // sits on it.
+        for (ppem, x, y, side) in [(32u16, 8i16, 4i16, 32u16), (96, 0, 0, 96)] {
+            let image = face.glyph_raster_image(id, ppem).expect("a strike");
+            assert_eq!(image.format, RasterImageFormat::PNG);
+            assert_eq!((image.x, image.y), (x, y), "left edge and bottom edge at {ppem} ppem");
+            assert_eq!((image.width, image.height), (side, side), "the image's side");
+            assert_eq!(image.pixels_per_em, ppem, "the strike the request selected");
+            assert_eq!(&image.data[..4], b"\x89PNG", "a PNG payload, as the painter expects");
+        }
+        // The ink box the layout grows the text's box by: the same
+        // (x0, y0, x1, y1) box as a COLR glyph's, in the strike's pixels.
+        assert_eq!(bitmap_glyph_bounds(&face, id, 32), Some((8.0, 4.0, 40.0, 36.0)));
+        assert_eq!(bitmap_glyph_bounds(&face, id, 96), Some((0.0, 0.0, 96.0, 96.0)));
+        assert_eq!(bitmap_glyph_bounds(&face, GlyphId(0), 32), None, "notdef carries no bitmap");
+    }
+
+    /// A bitmap-ONLY font colour-covers its glyph (SPM-69). Before this the
+    /// chain demanded `is_color_glyph` (COLR), so a bitmap face lost every
+    /// run and the text fell back to the bundled Noto.
+    #[test]
+    fn a_bitmap_only_font_colour_covers_its_glyph() {
+        let db = fontdb::Database::new();
+        let chain = EmojiFonts::new(vec![EmojiSource::Bytes(std::sync::Arc::new(
+            emoji_bitmap_test_font::bytes(),
+        ))]);
+        let grin: Vec<char> = "😀".chars().collect();
+        // Size 100 against strikes of 32 and 96: nothing at or above 100, so
+        // the largest (96) is chosen, and the ink scales from it, not the em.
+        let glyphs = chain.resolve_run(&db, &grin, 100.0).expect("the bitmap chain covers it");
+        assert_eq!((glyphs.len(), glyphs[0].source, glyphs[0].bitmap_ppem), (1, 0, Some(96)));
+        assert_eq!(glyphs[0].advance, 100.0, "the advance still scales by the em");
+        assert!((glyphs[0].scale - 100.0 / 96.0).abs() < 1e-4, "the ink scales from the strike");
+        // Size 32 asks for 32 ppem exactly: the at-or-above strike, scale 1.
+        let glyphs = chain.resolve_run(&db, &grin, 32.0).unwrap();
+        assert_eq!((glyphs[0].bitmap_ppem, glyphs[0].scale), (Some(32), 1.0));
+        // Two characters with no ligature in the fixture: a ligature-free
+        // run keeps both glyphs and both advances.
+        let pair: Vec<char> = "😀😀".chars().collect();
+        let glyphs = chain.resolve_run(&db, &pair, 32.0).expect("both characters resolve");
+        assert_eq!(glyphs.len(), 2, "no ligature: one glyph per character");
+        assert_eq!(glyphs.iter().map(|g| g.advance).sum::<f32>(), 64.0);
+        // A character the fixture does not map stays uncovered, so the caller
+        // falls back exactly as before.
+        assert!(chain.resolve_run(&db, &['A'], 32.0).is_none());
+        // In chain order the bitmap face wins over the real Noto behind it:
+        // no fallback, the custom font draws.
+        let chain = EmojiFonts::new(vec![
+            EmojiSource::Bytes(std::sync::Arc::new(emoji_bitmap_test_font::bytes())),
+            EmojiSource::Bytes(bundled_bytes("fonts/Noto-COLRv1.ttf")),
+        ]);
+        let glyphs = chain.resolve_run(&db, &grin, 100.0).unwrap();
+        assert_eq!((glyphs[0].source, glyphs[0].bitmap_ppem), (0, Some(96)));
+    }
+
+    /// A COLR glyph still reports the COLR kind, so the sharp vector path
+    /// keeps winning where a font has both (and unchanged where it has COLR
+    /// alone).
+    #[test]
+    fn a_colr_glyph_carries_no_bitmap_strike() {
+        let db = fontdb::Database::new();
+        let chain = EmojiFonts::new(vec![EmojiSource::Bytes(std::sync::Arc::new(
+            emoji_test_font::bytes(),
+        ))]);
+        let grin: Vec<char> = "😀".chars().collect();
+        let glyphs = chain.resolve_run(&db, &grin, 100.0).expect("the COLR font covers it");
+        assert_eq!(glyphs[0].bitmap_ppem, None);
+        assert_eq!(glyphs[0].scale, 0.1, "font units at a 100 px em on 1000 upem");
+    }
+
+    /// The hand-built sbix bytes really are a one-strike PNG bitmap font, and
+    /// `glyph_raster_image` reads Apple's table with the metrics the fixture
+    /// declares: the origin offsets are the left and bottom edge the CBDT
+    /// path reports through its bearings, so the same placement math holds.
+    #[test]
+    fn the_sbix_fixture_parses_its_strike() {
+        let bytes = emoji_bitmap_test_font::sbix_bytes();
+        let face = Face::parse(&bytes, 0).unwrap();
+        // sbix alone: ttf-parser asks sbix before CBDT, so a font carrying
+        // both would never tell these tests anything about sbix.
+        assert!(face.tables().sbix.is_some());
+        assert!(face.tables().cbdt.is_none(), "an sbix-only bitmap face");
+        let id = face.glyph_index('😀').expect("the fixture maps the grinning face");
+        assert_eq!(face.glyph_hor_advance(id), Some(1000));
+        assert!(!face.is_color_glyph(id), "the fixture carries no COLR layers");
+        let image = face.glyph_raster_image(id, 64).expect("the single strike");
+        assert_eq!(image.format, RasterImageFormat::PNG);
+        assert_eq!((image.x, image.y), (4, 2), "left edge and bottom edge");
+        assert_eq!((image.width, image.height), (16, 16), "the image's side");
+        assert_eq!(image.pixels_per_em, 64, "the strike's declared ppem");
+        assert_eq!(&image.data[..4], b"\x89PNG", "a PNG payload, as the painter expects");
+        assert_eq!(bitmap_glyph_bounds(&face, id, 64), Some((4.0, 2.0, 20.0, 18.0)));
+        assert_eq!(bitmap_glyph_bounds(&face, GlyphId(0), 64), None, "notdef carries no bitmap");
+    }
+
+    /// A bitmap-ONLY sbix font colour-covers its glyph (SPM-69): the strike
+    /// stands in for the COLR layers the chain used to demand, and the ink
+    /// scales from the strike like any other bitmap.
+    #[test]
+    fn an_sbix_only_font_colour_covers_its_glyph() {
+        let db = fontdb::Database::new();
+        let chain = EmojiFonts::new(vec![EmojiSource::Bytes(std::sync::Arc::new(
+            emoji_bitmap_test_font::sbix_bytes(),
+        ))]);
+        let grin: Vec<char> = "😀".chars().collect();
+        // 64 px against the 64 ppem strike: the strike is painted 1:1.
+        let glyphs = chain.resolve_run(&db, &grin, 64.0).expect("the sbix chain covers it");
+        assert_eq!((glyphs.len(), glyphs[0].source), (1, 0));
+        assert_eq!(glyphs[0].bitmap_ppem, Some(64));
+        assert_eq!(glyphs[0].advance, 64.0, "the advance still scales by the em");
+        assert_eq!(glyphs[0].scale, 1.0, "the ink scales from the strike");
+        // Size 100 asks past the only strike: it still paints 64 ppem, and
+        // the ink scales up from it rather than from the em.
+        let glyphs = chain.resolve_run(&db, &grin, 100.0).unwrap();
+        assert_eq!(glyphs[0].bitmap_ppem, Some(64));
+        assert!((glyphs[0].scale - 100.0 / 64.0).abs() < 1e-4);
+    }
+
+    /// A glyph the sbix face has no image for stays uncovered, so the chain
+    /// moves on exactly as it does for a character the font does not map.
+    #[test]
+    fn a_glyph_with_no_sbix_image_stays_uncovered() {
+        let db = fontdb::Database::new();
+        let sbix = EmojiFonts::new(vec![EmojiSource::Bytes(std::sync::Arc::new(
+            emoji_bitmap_test_font::sbix_bytes(),
+        ))]);
+        // The fixture maps only the grinning face: everything else is notdef,
+        // which carries no bitmap.
+        assert!(sbix.resolve_run(&db, &['A'], 64.0).is_none());
+        // Behind a covering font the same face loses nothing: the real Noto's
+        // hand is drawn even though the sbix face comes first.
+        let chain = EmojiFonts::new(vec![
+            EmojiSource::Bytes(std::sync::Arc::new(emoji_bitmap_test_font::sbix_bytes())),
+            EmojiSource::Bytes(bundled_bytes("fonts/Noto-COLRv1.ttf")),
+        ]);
+        let hand: Vec<char> = "🫵".chars().collect();
+        let glyphs = chain.resolve_run(&db, &hand, 64.0).expect("the next source covers it");
+        assert_eq!((glyphs[0].source, glyphs[0].bitmap_ppem), (1, None));
     }
 }

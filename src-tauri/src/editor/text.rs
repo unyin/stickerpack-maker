@@ -10,7 +10,10 @@
 //! falls back per character — a fixed preference list first, then any
 //! installed face whose cmap covers it — and an emoji-presentation
 //! character is drawn IN COLOUR from the style's emoji font chain
-//! (super::emoji), never as a monochrome outline (SPEC §5). Layout stays
+//! (super::emoji), never as a monochrome outline (SPEC §5). That colour is
+//! COLR layers or, since SPM-69, a bitmap emoji strike (CBDT/CBLC or PNG
+//! sbix) scaled from the strike's own pixels: both are painted into the same
+//! box, so the emoji ink the box grows for is the ink that lands. Layout stays
 //! no-shaping (SPM-9's line): lines split at '\n', left-aligned, kerned
 //! with the chosen font's `kern` table; what the emoji font ligates with
 //! plain GSUB ligatures (ZWJ sequences, flags, keycaps), we ligate, and a
@@ -41,14 +44,19 @@ use std::sync::OnceLock;
 use ab_glyph::{Font, FontRef, GlyphId, OutlineCurve};
 use fontdb::{Database, Family, Query};
 use serde::Deserialize;
-use tiny_skia::{FillRule, LineCap, LineJoin, Paint, PathBuilder, Pixmap, Transform};
+use tiny_skia::{
+    FillRule, FilterQuality, LineCap, LineJoin, Paint, PathBuilder, Pattern, Pixmap, SpreadMode,
+    Transform,
+};
 use ttf_parser::{GlyphId as EmojiGlyphId, RgbaColor};
 
 use super::emoji::{
-    colour_glyph_bounds, continues_emoji_run, is_vs16, is_zwj, starts_emoji_run, DrawPainter,
-    EmojiFonts,
+    bitmap_glyph_bounds, colour_glyph_bounds, continues_emoji_run, is_vs16, is_zwj, png_strike,
+    starts_emoji_run, DrawPainter, EmojiFonts,
 };
-use super::placement::{check_extent, from_pixmap, transform_of, Bounds, LayerTransform, PlacedImage};
+use super::placement::{
+    check_extent, from_pixmap, to_pixmap, transform_of, Bounds, LayerTransform, PlacedImage,
+};
 use super::Rgba;
 use crate::limits::{TEXT_MAX_FONT_SIZE, TEXT_MAX_OUTLINE_WIDTH, TEXT_MIN_FONT_SIZE};
 
@@ -199,7 +207,8 @@ struct Laid {
 
 /// A colour glyph to paint after the monochrome path: which emoji chain
 /// source, which glyph, at what pen x (layout coordinates) and baseline,
-/// with its font-unit scale.
+/// with the scale its ink converts to px by — font units for a COLR glyph,
+/// the chosen strike's pixels for a bitmap one (SPM-69).
 #[derive(Clone, Copy)]
 struct ColourGlyph {
     source: usize,
@@ -207,6 +216,8 @@ struct ColourGlyph {
     scale: f32,
     x: f32,
     baseline: f32,
+    /// The strike's pixels per em for a bitmap glyph, `None` for a COLR one.
+    bitmap_ppem: Option<u16>,
 }
 
 /// A resolvable monochrome glyph: which face draws it, its glyph id, its
@@ -397,6 +408,7 @@ fn lay_out(
                             scale: g.scale,
                             x: pen,
                             baseline,
+                            bitmap_ppem: g.bitmap_ppem,
                         });
                         pen += g.advance;
                     }
@@ -483,7 +495,13 @@ fn box_and_path(
     }
     for glyph in &colour {
         let ink = emoji.with_source(fonts, glyph.source, |face| {
-            colour_glyph_bounds(face, glyph.id).map(|(x0, y0, x1, y1)| {
+            // COLR glyphs ink in font units, bitmap glyphs (SPM-69) in their
+            // strike's pixels; `glyph.scale` converts either to px.
+            let bounds = match glyph.bitmap_ppem {
+                None => colour_glyph_bounds(face, glyph.id),
+                Some(ppem) => bitmap_glyph_bounds(face, glyph.id, ppem),
+            };
+            bounds.map(|(x0, y0, x1, y1)| {
                 (
                     glyph.x + x0 * glyph.scale,
                     glyph.baseline - y1 * glyph.scale,
@@ -664,13 +682,73 @@ fn paint_colour(
     let foreground = RgbaColor::new(r, g, b, 255);
     let (ox, oy) = (laid.metrics.origin_x, laid.metrics.origin_y);
     for glyph in &laid.colour {
-        emoji.with_source(fonts, glyph.source, |face| {
-            let place = Transform::from_scale(glyph.scale, -glyph.scale)
-                .post_translate(ox + glyph.x, oy + glyph.baseline);
-            let mut painter = DrawPainter::new(face, canvas, transform.pre_concat(place));
-            face.paint_color_glyph(glyph.id, 0, foreground, &mut painter);
+        emoji.with_source(fonts, glyph.source, |face| match glyph.bitmap_ppem {
+            // COLR layers: the painter draws the paint graph in font units.
+            None => {
+                let place = Transform::from_scale(glyph.scale, -glyph.scale)
+                    .post_translate(ox + glyph.x, oy + glyph.baseline);
+                let mut painter = DrawPainter::new(face, canvas, transform.pre_concat(place));
+                face.paint_color_glyph(glyph.id, 0, foreground, &mut painter);
+            }
+            // Bitmap strikes (SPM-69): the strike's PNG scaled into place.
+            Some(ppem) => paint_bitmap(canvas, face, glyph, ppem, (ox, oy), transform),
         });
     }
+}
+
+/// Paint one bitmap colour glyph: the chosen strike's PNG decoded, scaled and
+/// composited into `canvas` under the layer `transform`, at the box position
+/// the strike's own metrics give (SPM-69).
+///
+/// The image's `x` is its left edge from the pen and its `y` the BOTTOM edge
+/// above the baseline, both in strike px; raster data is y-down, so the
+/// top-left lands `height` px above the bottom edge and nothing is flipped.
+/// The declared metrics place the image, its decoded pixels are what is
+/// drawn (a font whose PNG disagrees with its declared size still draws,
+/// anchored at that bottom edge). Filtering is bilinear: above the font's
+/// biggest strike the emoji upscale and soften, the accepted limit (SPEC §6).
+/// A payload that will not decode inks nothing rather than failing the whole
+/// layer — the box was already laid out around its declared ink.
+fn paint_bitmap(
+    canvas: &mut Pixmap,
+    face: &ttf_parser::Face,
+    glyph: &ColourGlyph,
+    ppem: u16,
+    (ox, oy): (f32, f32),
+    transform: Transform,
+) {
+    let Some(image) = png_strike(face, glyph.id, ppem) else { return };
+    let Ok(decoded) = image::load_from_memory(image.data) else { return };
+    let rgba = decoded.to_rgba8();
+    let (width, height) = (rgba.width(), rgba.height());
+    let straight = Rgba { width, height, pixels: rgba.into_raw() };
+    // tiny-skia composites premultiplied: the one conversion path layers use.
+    let Ok(pixmap) = to_pixmap(&straight) else { return };
+    let k = glyph.scale;
+    let left = ox + glyph.x + f32::from(image.x) * k;
+    let bottom = oy + glyph.baseline - f32::from(image.y) * k;
+    let place = Transform::from_scale(k, k).post_translate(left, bottom - height as f32 * k);
+    let Some(rect) = tiny_skia::Rect::from_xywh(0.0, 0.0, width as f32, height as f32) else {
+        return;
+    };
+    let paint = Paint {
+        shader: Pattern::new(
+            pixmap.as_ref(),
+            SpreadMode::Pad,
+            FilterQuality::Bilinear,
+            1.0,
+            Transform::identity(),
+        ),
+        anti_alias: true,
+        ..Default::default()
+    };
+    canvas.fill_path(
+        &PathBuilder::from_rect(rect),
+        &paint,
+        FillRule::Winding,
+        transform.pre_concat(place),
+        None,
+    );
 }
 
 /// Draw a text layer at scale 1 into its box: what the webview shows, and
@@ -763,6 +841,7 @@ fn draw_window(
 #[cfg(test)]
 mod tests {
     use super::super::emoji::{bundled_bytes, EmojiSource};
+    use super::super::emoji_bitmap_test_font;
     use super::super::emoji_test_font;
     use super::super::fallback_test_font;
     use super::super::test_font::{self, FAMILY};
@@ -787,6 +866,24 @@ mod tests {
         EmojiFonts::new(vec![EmojiSource::Bytes(std::sync::Arc::new(emoji_test_font::bytes()))])
     }
 
+    /// An emoji chain of the synthetic BITMAP font alone (SPM-69): two
+    /// CBDT/CBLC strikes, 32 ppem green and 96 ppem red, so a painted colour
+    /// says which strike was chosen.
+    fn bitmap_chain() -> EmojiFonts {
+        EmojiFonts::new(vec![EmojiSource::Bytes(std::sync::Arc::new(
+            emoji_bitmap_test_font::bytes(),
+        ))])
+    }
+
+    /// An emoji chain of the synthetic SBIX font alone (SPM-69): ONE 64 ppem
+    /// strike, a 16x16 blue image 4 px right of the pen with its bottom edge
+    /// 2 px above the baseline.
+    fn sbix_chain() -> EmojiFonts {
+        EmojiFonts::new(vec![EmojiSource::Bytes(std::sync::Arc::new(
+            emoji_bitmap_test_font::sbix_bytes(),
+        ))])
+    }
+
     fn px(image: &Rgba, x: u32, y: u32) -> [u8; 4] {
         let i = ((y * image.width + x) * 4) as usize;
         image.pixels[i..i + 4].try_into().unwrap()
@@ -800,6 +897,24 @@ mod tests {
             .filter(|p| p[3] > 0)
             .map(|p| p.try_into().unwrap())
             .collect()
+    }
+
+    /// The rectangle the pixels that ink at all cover: (left, top, right,
+    /// bottom), inclusive — where drawn ink actually landed.
+    fn ink_box(image: &Rgba) -> (u32, u32, u32, u32) {
+        let (mut left, mut top, mut right, mut bottom) = (u32::MAX, u32::MAX, 0, 0);
+        for y in 0..image.height {
+            for x in 0..image.width {
+                if px(image, x, y)[3] > 0 {
+                    left = left.min(x);
+                    top = top.min(y);
+                    right = right.max(x);
+                    bottom = bottom.max(y);
+                }
+            }
+        }
+        assert!(left != u32::MAX, "the image inks nothing");
+        (left, top, right, bottom)
     }
 
     #[test]
@@ -1026,6 +1141,108 @@ mod tests {
                 "{text}: the box matches the ligature"
             );
         }
+    }
+
+    // ---- SPM-69: bitmap emoji ----
+
+    #[test]
+    fn a_bitmap_emoji_paints_the_strike_its_size_asks_for() {
+        // The fixture's strikes are 32 ppem (green) and 96 ppem (red), so the
+        // painted colour says which strike the rule chose: nearest at or
+        // above the size (20 -> 32, 32 -> 32, 50 -> 96), else the largest
+        // (100 -> 96, 300 -> 96). A bitmap-only font draws at all — before
+        // SPM-69 the chain saw no COLR layers and fell back to Noto.
+        let (db, chain) = (fonts(), bitmap_chain());
+        let green = [0, 255, 0, 255];
+        let red = [255, 0, 0, 255];
+        for (size, strike, painted, other) in [
+            (20.0, 32, green, red),
+            (32.0, 32, green, red),
+            (50.0, 96, red, green),
+            (100.0, 96, red, green),
+            (300.0, 96, red, green),
+        ] {
+            let out = render(&db, &chain, &spec("😀", size)).unwrap();
+            let seen = colours(&out.image);
+            assert!(seen.contains(&painted), "size {size} paints the {strike} ppem strike: {seen:?}");
+            assert!(!seen.contains(&other), "size {size} paints only that strike: {seen:?}");
+        }
+    }
+
+    #[test]
+    fn bitmap_ink_lands_where_the_strike_metrics_say_and_grows_the_box() {
+        // At a 32 px size the 32 ppem strike is painted 1:1 (k = 1). Its
+        // image is 32x32 px, 8 px right of the pen and with its bottom edge
+        // 4 px above the baseline; Test Sans ascends 0.8 em, so the baseline
+        // is at 25.6 and the ink covers x 8..40, y -10.4..21.6. That is right
+        // of the 32 px advance and above the ascent, so the box grows to
+        // 40x43 with the text 11 px down in it — and the painted ink sits
+        // exactly in the box the layout reserved: left edge at pen + x*k,
+        // bottom edge at baseline + y*k.
+        let out = render(&fonts(), &bitmap_chain(), &spec("😀", 32.0)).unwrap();
+        assert_eq!((out.image.width, out.image.height), (40, 43), "the box grows to the bitmap ink");
+        assert_eq!((out.metrics.origin_x, out.metrics.origin_y), (0.0, 11.0));
+        assert_eq!(ink_box(&out.image), (8, 0, 39, 32), "the placed strike, whole");
+        assert_eq!(px(&out.image, 20, 16), [0, 255, 0, 255], "the strike's own pixels inside");
+        assert_eq!(px(&out.image, 7, 16)[3], 0, "nothing left of its left edge");
+        assert_eq!(px(&out.image, 20, 33)[3], 0, "nothing below its bottom edge");
+    }
+
+    #[test]
+    fn a_bitmap_emoji_scales_up_from_the_biggest_strike() {
+        // 300 px against the 96 ppem strike: k = 3.125, so the whole 96x96
+        // image covers the advance and sits on the baseline, and the box
+        // grows 60 px above it for the overhang. Upscaling is bilinear — the
+        // accepted softness above the font's biggest strike — and the painted
+        // ink still fills exactly the place the layout reserved for it.
+        let out = render(&fonts(), &bitmap_chain(), &spec("😀", 300.0)).unwrap();
+        assert_eq!(out.image.width, 300, "the advance and the bitmap ink agree");
+        assert!((out.metrics.origin_y - 60.0).abs() < 0.01, "the box grew above the bitmap ink");
+        assert_eq!(ink_box(&out.image), (0, 0, 299, 299));
+        assert_eq!(px(&out.image, 150, 150), [255, 0, 0, 255], "the upscaled strike inks");
+        // 300 px of layout box plus the 60 px of overhang, give or take the
+        // em's own float rounding (ascent + descent land a hair over 300).
+        assert!([360, 361].contains(&out.image.height), "height {}", out.image.height);
+    }
+
+    #[test]
+    fn a_window_render_of_a_bitmap_emoji_matches_its_placed_render() {
+        // The one shared draw path (SPM-69): a bitmap emoji through
+        // rasterise_placed and through rasterise_window over the placed box
+        // inks identically, so Crop's clip and the save's canvas window show
+        // exactly the pixels merge composites.
+        let (db, chain, s) = (fonts(), bitmap_chain(), spec("😀", 100.0));
+        let t = LayerTransform { x: 5.0, y: 7.0, scale_x: 1.5, scale_y: 1.5, rotation: 30.0 };
+        let placed = rasterise_placed(&db, &chain, &s, &t).unwrap();
+        assert!(placed.image.pixels.chunks(4).any(|p| p[3] > 0), "the placed render inks");
+        let window = TextWindow {
+            x: placed.x,
+            y: placed.y,
+            width: placed.image.width,
+            height: placed.image.height,
+        };
+        let windowed = rasterise_window(&db, &chain, &s, &t, window).unwrap();
+        assert_eq!(windowed.pixels, placed.image.pixels);
+    }
+
+    #[test]
+    fn an_sbix_emoji_lands_where_its_origin_offsets_say() {
+        // The sbix face's one strike is 64 ppem, so a 64 px size paints it 1:1
+        // (k = 1). Its image is 16x16 px, 4 px right of the pen and with its
+        // bottom edge 2 px above the baseline; Test Sans ascends 0.8 em, so
+        // the baseline is at 51.2 and the ink covers x 4..20, y 33.2..49.2.
+        // That sits inside the 64 px advance and the 64 px line, so the box
+        // stays 64x64 — and sbix needs no painting code of its own: the one
+        // bitmap branch places it exactly as it places the CBDT strikes, left
+        // edge at pen + x*k, bottom edge at baseline - y*k.
+        let out = render(&fonts(), &sbix_chain(), &spec("😀", 64.0)).unwrap();
+        assert_eq!((out.image.width, out.image.height), (64, 64));
+        assert_eq!((out.metrics.origin_x, out.metrics.origin_y), (0.0, 0.0));
+        assert_eq!(ink_box(&out.image), (4, 33, 19, 49), "the placed strike, whole");
+        assert_eq!(px(&out.image, 12, 40), [0, 0, 255, 255], "the strike's own pixels inside");
+        assert_eq!(px(&out.image, 3, 40)[3], 0, "nothing left of its left edge");
+        assert_eq!(px(&out.image, 12, 32)[3], 0, "nothing above its top edge");
+        assert_eq!(px(&out.image, 12, 50)[3], 0, "nothing below its bottom edge");
     }
 
     // ---- SPM-18: the outline style ----

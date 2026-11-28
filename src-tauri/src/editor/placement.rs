@@ -133,7 +133,7 @@ impl Bounds {
 }
 
 /// Straight RGBA8 -> tiny-skia's premultiplied pixmap.
-fn to_pixmap(image: &Rgba) -> Result<Pixmap, String> {
+pub(super) fn to_pixmap(image: &Rgba) -> Result<Pixmap, String> {
     let expected = image.width as usize * image.height as usize * 4;
     if image.pixels.len() != expected {
         return Err(format!(
