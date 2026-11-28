@@ -26,6 +26,7 @@ import {
   scaleLongestSide,
   setTransform,
   type CropAction,
+  type CropPixels,
   type Doc,
   type RasterLayer,
 } from "../src/editor/model/document";
@@ -48,9 +49,9 @@ function coords(width: number, height: number): RgbaImage {
 /**
  * A stand-in for the Rust crop of an UNTRANSFORMED layer at whole pixels:
  * copy the layer's pixels under each clip rect. Rust's own tests cover the
- * transformed case (src-tauri/src/editor/crop.rs).
+ * transformed case and the fully transparent check (src-tauri/src/editor/crop.rs).
  */
-function copyClips(doc: Doc, plan: readonly CropAction[]): Map<string, RgbaImage> {
+function copyClips(doc: Doc, plan: readonly CropAction[]): Map<string, CropPixels> {
   const out = new Map<string, RgbaImage>();
   for (const action of plan) {
     if (action.kind !== "clip") continue;
@@ -349,22 +350,63 @@ test("a turned layer that truly crosses the box is still clipped", () => {
   expect(clip.rect.y + clip.rect.height).toBeLessThanOrEqual(10);
 });
 
-test("a crossing layer whose part in the box is transparent is kept, like a transparent layer inside the box", () => {
+test("a crossing layer whose part in the box is fully transparent is dropped (owner, 2026-11-21)", () => {
   let doc = newDocument(coords(12, 12), "base", { width: 10, height: 10 });
   doc = setTransform(doc, "layer-1", { ...IDENTITY, x: -1, y: -1 });
   doc = addRasterLayer(doc, coords(4, 4), "ghost", { ...IDENTITY, x: 8, y: 8 });
   const plan = planCrop(doc, BOX10);
   expect(plan.map((a) => a.kind)).toEqual(["clip", "clip"]);
   const images = copyClips(doc, plan);
-  const ghost = plan[1] as Extract<CropAction, { kind: "clip" }>;
-  images.set("layer-2", image(ghost.rect.width, ghost.rect.height)); // Rust drew nothing
-  expect(cropLayers(doc, plan, images).layers.map((l) => l.id)).toEqual(["layer-1", "layer-2"]);
-  // Even when it is the only layer.
+  images.set("layer-2", null); // Rust found every pixel inside the box transparent
+  expect(cropLayers(doc, plan, images).layers.map((l) => l.id)).toEqual(["layer-1"]);
+  // A layer entirely inside the box is never checked: a transparent one stays as it is.
+  const clear = newDocument(image(4, 4), "clear", { width: 10, height: 10 });
+  expect(planCrop(clear, BOX10)).toEqual([{ kind: "keep", id: "layer-1" }]);
+  expect(cropLayers(clear, planCrop(clear, BOX10), new Map())).toBe(clear);
+});
+
+test("Crop drops a fully transparent crossing layer in one undo step, survivors keeping ids, names and order", () => {
+  const S = STICKER.side;
+  let doc = newDocument(coords(S + 20, S), "base", startCanvas(STICKER));
+  doc = addRasterLayer(doc, image(8, 8), "ghost", { ...IDENTITY, x: S - 4, y: 0 });
+  doc = addRasterLayer(doc, image(4, 4, 9), "top", { ...IDENTITY, x: 2, y: 2 });
+  const session = new EditorSession(doc);
+  const before = session.doc;
+  const box = cropBox(before, S);
+  const plan = planCrop(before, box);
+  expect(plan.map((a) => a.kind)).toEqual(["clip", "clip", "keep"]);
+  const images = copyClips(doc, plan);
+  images.set("layer-2", null);
+  session.apply("Crop", (d) => cropLayers(d, plan, images));
+  const after = session.doc;
+  expect(after.layers.map((l) => [l.id, l.name])).toEqual([
+    ["layer-1", "base"],
+    ["layer-3", "top"],
+  ]);
+  // The clipped survivor is re-placed at its box; the untouched layer is reused.
+  expect(after.layers[0]).toMatchObject({ kind: "raster", name: "base", transform: { ...IDENTITY, x: box.x, y: box.y } });
+  expect(after.layers[1]).toBe(before.layers[2]);
+  expect([after.width, after.height]).toEqual([before.width, before.height]);
+  session.undo();
+  expect(session.doc).toBe(before); // the dropped layer is back in one step
+  session.redo();
+  expect(session.doc).toBe(after);
+});
+
+test("Crop does not happen when dropping the crossing layers would leave no layer", () => {
+  // The pre-click blocker only sees the plan, so the apply-time guard is the
+  // one that holds when every crossing layer comes back fully transparent.
   const only = newDocument(image(4, 4, 1), "only", { width: 10, height: 10 });
   const edge = setTransform(only, "layer-1", { ...IDENTITY, x: 8 });
-  const edgePlan = planCrop(edge, BOX10);
-  const out = cropLayers(edge, edgePlan, new Map([["layer-1", image(2, 4)]]));
-  expect(out.layers.map((l) => l.id)).toEqual(["layer-1"]);
+  const plan = planCrop(edge, BOX10);
+  expect(plan.map((a) => a.kind)).toEqual(["clip"]);
+  expect(cropBlocker(plan, BOX10)).toBeNull();
+  expect(() => cropLayers(edge, plan, new Map([["layer-1", null]]))).toThrow(NOTHING_IN_BOX);
+  // One layer inside the box and the crop runs: only the crossing layer goes.
+  const mixed = addRasterLayer(edge, image(2, 2, 2), "inside", { ...IDENTITY, x: 0, y: 0 });
+  expect(planCrop(mixed, BOX10).map((a) => a.kind)).toEqual(["clip", "keep"]);
+  const cropped = cropLayers(mixed, planCrop(mixed, BOX10), new Map([["layer-1", null]]));
+  expect(cropped.layers.map((l) => l.id)).toEqual(["layer-2"]);
 });
 
 test("cropOutcome and cropClipInputs summarise a plan", () => {

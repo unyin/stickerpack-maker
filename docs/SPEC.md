@@ -608,6 +608,12 @@ pass.
   - Layers **entirely outside** the box are discarded in the same single undo step (owner
     decision 2026-11-20). If every layer is entirely outside, Crop is disabled ("Nothing is
     inside the box"), because a session always keeps at least one layer.
+  - A layer **crossing the box edge** whose part inside the box is **fully transparent**
+    (every pixel's alpha 0) is discarded the same way, in the same single undo step (owner
+    decision 2026-11-21): nothing of it is left inside the box. Text layers follow the same
+    rule, on the pixels their crossing part rasterises to. The "at least one layer" rule is
+    unchanged: the pre-click check cannot see pixels, so a Crop that would drop every layer
+    this way runs, changes nothing, and says "Nothing is inside the box".
   - Crop is disabled, with the reason in its tooltip, when nothing lies outside the box (owner confirmed 2026-11-21).
   - Crop never moves the view: the canvas origin does not move.
   - Text layers on Crop (owner confirmed 2026-11-21): a text layer
@@ -1168,8 +1174,6 @@ task lands, its behaviour moves into the spec body (§2–§6) and its entry lea
     land on whole pixels (the whole-pixel half of the 2026-11-21 "Shift-drag snap" entry; its
     grid half went to the v3 lot) (SPM-61).
   - Custom canvas resize: type width × height, centre anchor, nothing scaled (SPM-62).
-  - **v1.1**: Crop also drops a layer that crosses the box edge when its part inside the box
-    is fully transparent (owner, 2026-11-21) (SPM-63).
   - A text-to-image button in the Text category, not the action grid: its subject is one text
     layer, like Edit text; it changes neither the stack count nor the layer order, and it
     mirrors the effects' Apply commit (owner, 2026-11-21 and 2026-11-25) (SPM-60).

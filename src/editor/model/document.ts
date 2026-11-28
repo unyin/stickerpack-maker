@@ -693,6 +693,13 @@ export function layerInput(layer: Layer): LayerInput {
  */
 export type CropInput = LayerInput & { readonly clip: Rect };
 
+/**
+ * What Rust rendered for one clipped layer: its clip's pixels, or null when
+ * every one of them is transparent — nothing of the layer is left inside the
+ * box, so Crop discards it (owner decision 2026-11-21).
+ */
+export type CropPixels = RgbaImage | null;
+
 /** The layers a plan clips, text included, with what Rust needs to re-render each. */
 export function cropClipInputs(doc: Doc, plan: readonly CropAction[]): (CropInput & { readonly id: string })[] {
   const inputs: (CropInput & { readonly id: string })[] = [];
@@ -711,28 +718,29 @@ export const NOTHING_IN_BOX = "Nothing is inside the box: drag the image into it
  * Apply a crop plan as ONE operation (SPEC §6): clipped layers get their new
  * pixels (`images`, by layer id, each exactly its rect's size) at their rect,
  * untransformed, keeping their id, name and stack position; layers entirely
- * outside the box are removed (a crossing layer is kept even when its part
- * in the box happens to be transparent). The canvas size never changes. A
- * plan that changes nothing returns the document as is (no undo step); one
- * that would leave no layer throws NOTHING_IN_BOX.
+ * outside the box are removed, and so is a crossing layer whose pixels came
+ * back null — every pixel inside the box transparent, so the layer has
+ * nothing left there (owner decision 2026-11-21, text layers included). The
+ * canvas size never changes. A plan that changes nothing returns the document
+ * as is (no undo step); one that would leave no layer throws NOTHING_IN_BOX.
  */
 export function cropLayers(
   doc: Doc,
   plan: readonly CropAction[],
-  images: ReadonlyMap<string, RgbaImage>,
+  images: ReadonlyMap<string, CropPixels>,
 ): Doc {
   if (plan.length !== doc.layers.length || plan.some((a, i) => a.id !== doc.layers[i].id)) {
     throw new Error("the crop plan does not match the document");
   }
-  const outcome = cropOutcome(plan);
-  if (outcome === "nothing-outside") return doc;
-  if (outcome === "nothing-inside") throw new Error(NOTHING_IN_BOX);
+  if (cropOutcome(plan) === "nothing-outside") return doc;
   const layers: Layer[] = [];
   plan.forEach((action, i) => {
     const layer = doc.layers[i];
     if (action.kind === "keep") layers.push(layer);
     if (action.kind !== "clip") return;
     const image = images.get(action.id);
+    // Fully transparent inside the box: the layer is discarded like one outside it.
+    if (image === null) return;
     const { rect } = action;
     if (!image || image.width !== rect.width || image.height !== rect.height) {
       throw new Error(`the cropped pixels for layer ${action.id} do not match its box`);
@@ -741,6 +749,8 @@ export function cropLayers(
     const { id, name } = layer;
     layers.push({ kind: "raster", id, name, image, transform: { ...IDENTITY, x: rect.x, y: rect.y } });
   });
+  // Dropping the crossing layers too can empty the session: a session keeps at least one layer.
+  if (layers.length === 0) throw new Error(NOTHING_IN_BOX);
   return withLayers(doc, layers);
 }
 

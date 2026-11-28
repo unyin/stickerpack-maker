@@ -452,7 +452,10 @@ pub const CROP_LAYERS_HEADER: &str = "x-crop-layers";
 /// layers' RGBA bytes concatenated, header `x-crop-layers` = their sizes,
 /// transforms and clips (text layers carry their text and no bytes). A
 /// text layer rasterises with the style's emoji chain (SPM-20).
-/// Response: each clip's RGBA bytes, concatenated.
+/// Response: one u32 LE keep/drop flag per layer (1 kept, 0 dropped — its
+/// whole clip came out fully transparent, so Crop discards that layer in the
+/// same undo step, owner decision 2026-11-21), then the kept clips' RGBA
+/// bytes, concatenated in order.
 #[tauri::command(async)]
 pub fn editor_crop_layers(
     request: tauri::ipc::Request<'_>,

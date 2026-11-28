@@ -1347,7 +1347,8 @@ function buildEditor(): HTMLElement {
       },
       ({ plan, byId }, doc) => {
         current.apply("Crop", (d) => cropLayers(d, plan, byId));
-        const notice = cropTextNotice(doc, plan);
+        // A text layer Rust dropped as fully transparent was not converted, so it is not counted.
+        const notice = cropTextNotice(doc, plan, byId);
         if (notice) say(notice, "note");
       },
     );

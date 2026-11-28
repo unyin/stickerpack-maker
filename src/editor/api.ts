@@ -5,7 +5,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { RgbaImage } from "./model/image";
 import type { Effect, EffectResult } from "./model/effects";
-import { layerInput, textStyleOf, type CropInput, type Doc, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
+import { layerInput, textStyleOf, type CropInput, type CropPixels, type Doc, type CutResult, type LayerInput, type Point, type Rect, type TextRender, type TextStyle, type Transform } from "./model/document";
 import type { Contribution } from "./model/region";
 import type { WandMask } from "./model/wand";
 import { IMPORT_EXTENSIONS } from "../shared/import-extensions";
@@ -153,13 +153,13 @@ export function decodePlacedFrame(frame: ArrayBuffer): PlacedImage {
 export const CROP_LAYERS_HEADER = "x-crop-layers";
 
 /**
- * Re-render layers clipped to their rectangles in Rust (ADR-0005), one
- * image per input, each exactly its clip's size; text layers are rasterised.
- * Pixels go as one raw body; sizes, transforms, text and clips ride in a
- * header. The response is the clips' RGBA bytes concatenated, so it is
- * split here by the known sizes.
+ * Re-render layers clipped to their rectangles in Rust (ADR-0005), one entry
+ * per input, each a clip of exactly its clip's size; text layers are
+ * rasterised. Pixels go as one raw body; sizes, transforms, text and clips
+ * ride in a header. The response's keep/drop flags say which crossing layers
+ * came out fully transparent: those read null (Crop discards them).
  */
-export async function cropImages(inputs: readonly CropInput[]): Promise<RgbaImage[]> {
+export async function cropImages(inputs: readonly CropInput[]): Promise<CropPixels[]> {
   const { body, meta } = encodeLayers(inputs);
   const frame = await invokeRaw(
     "editor_crop_layers",
@@ -170,14 +170,25 @@ export async function cropImages(inputs: readonly CropInput[]): Promise<RgbaImag
   return splitClips(frame, inputs.map((i) => i.clip));
 }
 
-/** Split concatenated RGBA bytes into one image per clip; the sizes must add up exactly. */
-export function splitClips(frame: ArrayBuffer, clips: readonly Rect[]): RgbaImage[] {
-  const expected = clips.reduce((n, c) => n + c.width * c.height * 4, 0);
-  if (frame.byteLength !== expected) {
-    throw new Error(`cropped pixels have ${frame.byteLength} bytes, expected ${expected}`);
+/**
+ * Parse a crop response: one u32 LE keep/drop flag per clip, then the kept
+ * clips' RGBA bytes, so it is split here by the known sizes. A dropped clip
+ * reads null; the kept sizes must add up to the rest exactly.
+ */
+export function splitClips(frame: ArrayBuffer, clips: readonly Rect[]): CropPixels[] {
+  const flagBytes = clips.length * 4;
+  if (frame.byteLength < flagBytes) {
+    throw new Error(`crop flags have ${frame.byteLength} bytes, expected ${flagBytes}`);
   }
-  let offset = 0;
-  return clips.map((c) => {
+  const flags = new DataView(frame, 0, flagBytes);
+  const kept = clips.map((_, i) => flags.getUint32(i * 4, true) !== 0);
+  const expected = clips.reduce((n, c, i) => n + (kept[i] ? c.width * c.height * 4 : 0), 0);
+  if (frame.byteLength - flagBytes !== expected) {
+    throw new Error(`cropped pixels have ${frame.byteLength - flagBytes} bytes, expected ${expected}`);
+  }
+  let offset = flagBytes;
+  return clips.map((c, i) => {
+    if (!kept[i]) return null;
     const length = c.width * c.height * 4;
     const pixels = new Uint8ClampedArray(frame, offset, length);
     offset += length;
