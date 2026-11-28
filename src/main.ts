@@ -1,10 +1,12 @@
 import "./styles.css";
 import "./dialog.css";
+import { createElement } from "react";
 import { getAppState } from "./api";
 import { applyEmojiStyle } from "./emoji-style";
 import { renderShell } from "./shell";
 import { initTheme } from "./theme";
-import { renderFirstRun } from "./views/first-run";
+import { mountView, unmountViews } from "./react/mount";
+import { FirstRun } from "./views/first-run";
 import { el, errorMessage } from "./ui";
 
 const rootElement = document.getElementById("app");
@@ -21,15 +23,21 @@ async function boot(): Promise<void> {
   try {
     const state = await getAppState();
     if (state.libraryStatus === "unconfigured") {
-      renderFirstRun(root, () => void boot());
+      mountView(
+        root,
+        "first-run",
+        createElement(FirstRun, { onReady: () => void boot() }),
+      );
     } else {
       // The persisted emoji style (SPM-17), before any view can render
       // emoji; a broken custom file falls back to Android with a problem
       // shown in Settings (applyEmojiStyle never throws).
       await applyEmojiStyle(state.emojiStyle, state.customEmojiFontPath);
+      unmountViews();
       renderShell(root, state, () => void boot());
     }
   } catch (err) {
+    unmountViews();
     root.replaceChildren(
       el(
         "div",

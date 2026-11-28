@@ -1,5 +1,6 @@
 import type { AppState } from "./api";
 import { icon, type IconName } from "./icons";
+import { unmountViews } from "./react/mount";
 import { clear, el } from "./ui";
 import { forgetEditorOrigin, openFileInEditor, openThumbnailFileInEditor, renderEditor, setEditorNav } from "./views/editor";
 import type { StickerOrigin } from "./shared/sticker-origin";
@@ -79,6 +80,7 @@ export function renderShell(
 
   function show(view: ViewId): void {
     screen = view;
+    unmountViews();
     clear(content);
     if (view === "editor") content.append(renderEditor());
     else if (view === "pack-manager")
