@@ -5,7 +5,7 @@ import { getAppState } from "./api";
 import { applyEmojiStyle } from "./emoji-style";
 import { renderShell } from "./shell";
 import { initTheme } from "./theme";
-import { mountView, unmountViews } from "./react/mount";
+import { mountView, unmountShell, unmountViews } from "./react/mount";
 import { FirstRun } from "./views/first-run";
 import { el, errorMessage } from "./ui";
 
@@ -23,6 +23,7 @@ async function boot(): Promise<void> {
   try {
     const state = await getAppState();
     if (state.libraryStatus === "unconfigured") {
+      unmountShell();
       mountView(
         root,
         "first-run",
@@ -38,6 +39,7 @@ async function boot(): Promise<void> {
     }
   } catch (err) {
     unmountViews();
+    unmountShell();
     root.replaceChildren(
       el(
         "div",

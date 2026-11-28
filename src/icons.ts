@@ -5,7 +5,7 @@
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-const PATHS = {
+export const PATHS = {
   /** Opens in another program: a box with an arrow leaving it. */
   external: ["M14 4h6v6", "M20 4l-9 9", "M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"],
   /** Refresh: a circular arrow. */
