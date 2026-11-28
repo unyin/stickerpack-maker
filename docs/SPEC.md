@@ -1209,9 +1209,9 @@ task lands, its behaviour moves into the spec body (§2–§6) and its entry lea
   until then, CMT-407). The sizing trio's diagram icons — a square holding the image, a
   square overflowed by it, a plain image — are proposed but **UNDECIDED** until the owner
   sees them rendered at the icon pass (owner, 2026-11-25, CMT-414/415); the four session
-  icons should free roughly 50px of top-row headroom at the 1100px floor. New icons join
-  the existing inline set (`src/icons.ts`: 24×24 outline style, currentColor, rendered at
-  1.05em; the eyedropper is the one filled exception), and icon-only controls keep the §2
+  icons should free roughly 50px of top-row headroom at the 1100px floor. New icons come
+  from `lucide-react` (24×24 outline, currentColor, matching the existing inline set in
+  `src/icons.ts`, rendered at 1.05em; the eyedropper is the one filled exception), and icon-only controls keep the §2
   tooltip contract and a descriptive accessible name — the N1 blessing: the icon-only
   eyedropper's aria stays the description, never the bare tool name.
 
@@ -1233,9 +1233,8 @@ task lands, its behaviour moves into the spec body (§2–§6) and its entry lea
 
   Additions from the v2 triage (ticket `.scratch/v2-path/issues/08-look-and-feel.md`): the new
   controls of Editor tools and layers (mirror, crop to content, text-to-image, lock, canvas
-  resize) join the pass; new icons come from `lucide-react` (the same 24×24 outline,
-  currentColor style) rather than new inline ones, and the existing 11 icons of `src/icons.ts`
-  are ported as-is unless one clashes on the rendered sheet.
+  resize) join the pass; `lucide-react` replaces new inline icons, and the existing 11 icons
+  of `src/icons.ts` are ported as-is unless one clashes on the rendered sheet.
 
 ### v2 parking lot (UX)
 Empty: every entry was triaged on 2026-11-27/28 into the v2 plan above, the v3 or v4 lot, or
