@@ -1,6 +1,7 @@
 # Write the v2 plan down
 
 Type: task
+Status: claimed
 Blocked by: 09
 
 ## Question
