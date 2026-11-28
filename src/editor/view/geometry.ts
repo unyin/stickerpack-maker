@@ -14,6 +14,7 @@ import {
   scaleLongestSide,
   textLayersOf,
   type CropAction,
+  type CropPixels,
   type Doc,
   type Layer,
   type Point,
@@ -250,11 +251,18 @@ export function cropBlocker(plan: readonly CropAction[], box: Rect): string | nu
 
 /**
  * The note after a Crop that turned crossing text layers into images (owner
- * decision 2026-11-22), or null when no text was converted. Undo brings
- * the text back.
+ * decision 2026-11-22), or null when no text was converted. A crossing text
+ * layer Rust reported fully transparent inside the box (`images` null) was
+ * dropped, not converted, so it is not counted. Undo brings the text back.
  */
-export function cropTextNotice(doc: Doc, plan: readonly CropAction[]): string | null {
-  const converted = plan.filter((a, i) => a.kind === "clip" && doc.layers[i]?.kind === "text").length;
+export function cropTextNotice(
+  doc: Doc,
+  plan: readonly CropAction[],
+  images: ReadonlyMap<string, CropPixels>,
+): string | null {
+  const converted = plan.filter(
+    (a, i) => a.kind === "clip" && doc.layers[i]?.kind === "text" && images.get(a.id) !== null,
+  ).length;
   if (converted === 0) return null;
   return converted === 1
     ? "1 text layer crossed the crop edge and was converted to an image."

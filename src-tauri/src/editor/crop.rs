@@ -7,6 +7,10 @@
 //! result is an untransformed image whose top-left is `clip`'s. A text layer
 //! crossing the box edge arrives as text and is rasterised straight into its
 //! clip (text.rs `rasterise_window`), so it is clipped exactly like an image.
+//! A clip with nothing left visible — every pixel's alpha 0 — is not sent back
+//! at all: the layer shows nothing inside the box, so Crop discards it in the
+//! same undo step (owner decision 2026-11-21), text layers included, since
+//! their rasterised clip goes through the same check.
 
 use fontdb::Database;
 use serde::Deserialize;
@@ -80,14 +84,30 @@ pub fn crop_layer(layer: &LayerInput, clip: ClipRect) -> Result<Rgba, String> {
     Ok(from_pixmap(&canvas))
 }
 
-/// Crop every layer of a request, in order; the response body is their
-/// RGBA bytes concatenated (each clip's size is known to the webview).
+/// True when every pixel of a clip is invisible (alpha 0): the layer shows
+/// nothing inside the crop box, so it has nothing left to keep.
+fn fully_transparent(image: &Rgba) -> bool {
+    image.pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 0)
+}
+
+/// Crop every layer of a request, in order. The response body is one u32 LE
+/// keep/drop flag per layer (1 kept, 0 dropped), then the kept clips' RGBA
+/// bytes concatenated in order (each clip's size is known to the webview). A
+/// clip that came out fully transparent is dropped: Crop discards that layer
+/// in the same undo step (owner decision 2026-11-21), text layers included.
 pub fn crop(layers: &[(LayerInput, ClipRect)]) -> Result<Vec<u8>, String> {
+    let mut flags = Vec::with_capacity(layers.len() * 4);
     let mut body = Vec::new();
     for (layer, clip) in layers {
-        body.extend_from_slice(&crop_layer(layer, *clip)?.pixels);
+        let image = crop_layer(layer, *clip)?;
+        let keep = !fully_transparent(&image);
+        flags.extend_from_slice(&u32::from(keep).to_le_bytes());
+        if keep {
+            body.extend_from_slice(&image.pixels);
+        }
     }
-    Ok(body)
+    flags.extend_from_slice(&body);
+    Ok(flags)
 }
 
 #[cfg(test)]
@@ -119,6 +139,19 @@ mod tests {
 
     fn merged_px(p: &PlacedImage, doc_x: i32, doc_y: i32) -> [u8; 4] {
         px(&p.image, (doc_x - p.x) as u32, (doc_y - p.y) as u32)
+    }
+
+    /// Every pixel invisible: a layer that shows nothing where it is clipped.
+    fn transparent(width: u32, height: u32) -> Rgba {
+        Rgba { width, height, pixels: vec![0; (width * height * 4) as usize] }
+    }
+
+    /// A crop response split into its keep/drop flags, in order, and the kept
+    /// clips' bytes.
+    fn response(mut response: Vec<u8>, layers: usize) -> (Vec<bool>, Vec<u8>) {
+        let body = response.split_off(layers * 4);
+        let flags = response.as_chunks::<4>().0.iter().map(|f| u32::from_le_bytes(*f) != 0).collect();
+        (flags, body)
     }
 
     #[test]
@@ -254,8 +287,69 @@ mod tests {
         let fonts = Database::new();
         let layers = split_crop_layers(&meta, &body, &fonts, &EmojiFonts::empty()).unwrap();
         assert_eq!(layers[0].1, ClipRect { x: 1, y: 0, width: 1, height: 1 });
-        assert_eq!(crop(&layers).unwrap(), vec![5, 6, 7, 255, 9, 10, 11, 255]);
+        let (flags, clips) = response(crop(&layers).unwrap(), 2);
+        assert_eq!(flags, vec![true, true]);
+        assert_eq!(clips, &[5, 6, 7, 255, 9, 10, 11, 255]);
         assert!(split_crop_layers(&meta, &body[..11], &fonts, &EmojiFonts::empty()).is_err());
+    }
+
+    #[test]
+    fn a_crossing_layer_whose_clip_is_fully_transparent_is_dropped() {
+        // A transparent 8x8 layer hanging over the box's top-left corner: it
+        // crosses the edge and shows nothing inside, so Crop discards it
+        // (owner decision 2026-11-21).
+        let layer = placed(transparent(8, 8), LayerTransform { x: -2.5, y: -3.5, ..LayerTransform::IDENTITY });
+        let clip = ClipRect { x: 0, y: 0, width: 4, height: 4 };
+        let (flags, out) = response(crop(&[(layer, clip)]).unwrap(), 1);
+        assert_eq!(flags, vec![false]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn a_crossing_text_whose_rasterised_clip_is_fully_transparent_is_dropped() {
+        // "A" at 100 px placed at (-30, 0) inks document y 10..80, so a clip
+        // that stops above the glyph rasterises to nothing: the text layer is
+        // dropped like an image, not turned into one.
+        let fonts = super::super::test_font::database();
+        let meta: Vec<CropMeta> = serde_json::from_str(&format!(
+            r##"[{{"width":60,"height":100,"transform":{{"x":-30,"y":0,"scaleX":1,"scaleY":1,"rotation":0}},
+                  "text":{{"text":"A","fontFamily":"{}","fontSize":100,"color":"#00ff00"}},
+                  "clip":{{"x":0,"y":0,"width":30,"height":8}}}}]"##,
+            super::super::test_font::FAMILY
+        ))
+        .unwrap();
+        let layers = split_crop_layers(&meta, &[], &fonts, &EmojiFonts::empty()).unwrap();
+        let (flags, out) = response(crop(&layers).unwrap(), 1);
+        assert_eq!(flags, vec![false]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn an_opaque_crossing_layer_is_kept_with_todays_pixels() {
+        // The drag-to-crop case with pixels inside the box: the layer is kept
+        // and its bytes are exactly the clip `crop_layer` renders.
+        let layer = placed(coords(40, 30), LayerTransform { x: -5.0, y: -3.0, ..LayerTransform::IDENTITY });
+        let clip = ClipRect { x: 0, y: 0, width: 20, height: 20 };
+        let (flags, out) = response(crop(&[(layer.clone(), clip)]).unwrap(), 1);
+        assert_eq!(flags, vec![true]);
+        assert_eq!(out, crop_layer(&layer, clip).unwrap().pixels.as_slice());
+    }
+
+    #[test]
+    fn a_mix_of_dropped_and_kept_layers_keeps_flags_and_byte_order() {
+        // Kept, dropped, kept: the flags follow the layers and only the kept
+        // clips' bytes follow the flags, in order.
+        let first = placed(coords(4, 4), LayerTransform::IDENTITY);
+        let gone = placed(transparent(10, 10), LayerTransform { x: -3.0, y: -3.0, ..LayerTransform::IDENTITY });
+        let last = placed(coords(4, 4), LayerTransform { x: -2.0, y: -2.0, ..LayerTransform::IDENTITY });
+        let clip = ClipRect { x: 0, y: 0, width: 2, height: 2 };
+        let layers = [(first.clone(), clip), (gone, clip), (last.clone(), clip)];
+        let (flags, out) = response(crop(&layers).unwrap(), 3);
+        assert_eq!(flags, vec![true, false, true]);
+        let mut expected = crop_layer(&first, clip).unwrap().pixels;
+        expected.extend_from_slice(&crop_layer(&last, clip).unwrap().pixels);
+        assert_eq!(out, expected.as_slice());
+        assert_eq!(out.len(), 2 * 2 * 2 * 4);
     }
 
     #[test]
@@ -300,7 +394,8 @@ mod tests {
         // The text arrives already clip-sized, at the clip's top-left.
         assert_eq!((layers[1].0.image.width, layers[1].0.image.height), (30, 100));
         assert_eq!((layers[1].0.transform.x, layers[1].0.transform.y), (0.0, 0.0));
-        let out = crop(&layers).unwrap();
+        let (flags, out) = response(crop(&layers).unwrap(), 3);
+        assert_eq!(flags, vec![true, true, true]);
         assert_eq!(&out[..4], &[5, 6, 7, 255]);
         assert_eq!(&out[out.len() - 4..], &[9, 10, 11, 255]);
         assert_eq!(out.len(), 4 + 30 * 100 * 4 + 4);

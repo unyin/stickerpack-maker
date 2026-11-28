@@ -486,18 +486,24 @@ test("Crop notes how many crossing text layers became images (owner, 2026-11-22)
   const base = newDocument(image(4, 4, 255), "base", { width: 10, height: 10 });
   const box = { x: 0, y: 0, width: 10, height: 10 };
   const inside = addTextLayer(base, HI, render(4, 4), { ...IDENTITY, x: 2, y: 2 });
-  expect(cropTextNotice(inside, planCrop(inside, box))).toBeNull(); // kept as text
+  expect(cropTextNotice(inside, planCrop(inside, box), new Map())).toBeNull(); // kept as text
   const one = addTextLayer(base, HI, render(20, 4), { ...IDENTITY, x: 5, y: 0 });
-  expect(cropTextNotice(one, planCrop(one, box))).toBe(
+  const onePlan = planCrop(one, box);
+  expect(cropTextNotice(one, onePlan, new Map())).toBe(
     "1 text layer crossed the crop edge and was converted to an image.",
   );
+  // Dropped as fully transparent inside the box (Rust reports null) is not a conversion.
+  expect(cropTextNotice(one, onePlan, new Map([["layer-2", null]]))).toBeNull();
   const two = addTextLayer(one, HI, render(20, 4), { ...IDENTITY, x: -5, y: 5 });
-  expect(cropTextNotice(two, planCrop(two, box))).toBe(
+  expect(cropTextNotice(two, planCrop(two, box), new Map())).toBe(
     "2 text layers crossed the crop edge and were converted to images.",
+  );
+  expect(cropTextNotice(two, planCrop(two, box), new Map([["layer-2", null]]))).toBe(
+    "1 text layer crossed the crop edge and was converted to an image.",
   );
   // A crossing image layer is not text: no note.
   const img = newDocument(image(20, 4, 255), "wide", { width: 10, height: 10 });
-  expect(cropTextNotice(img, planCrop(img, box))).toBeNull();
+  expect(cropTextNotice(img, planCrop(img, box), new Map())).toBeNull();
 });
 
 test("the font picker matches names starting with the query first, then containing it", () => {

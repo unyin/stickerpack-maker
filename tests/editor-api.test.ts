@@ -66,7 +66,10 @@ mock.module("@tauri-apps/api/core", () => ({
       return { width: 2400, height: 1200, exceedsCap: true };
     }
     if (cmd === "editor_merge_layers") return placedFrame(-2, 3, frame(1, 1, 5));
-    if (cmd === "editor_crop_layers") return new Uint8Array([1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]).buffer;
+    if (cmd === "editor_crop_layers") {
+      // Two keep flags, then the two clips' bytes.
+      return new Uint8Array([1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]).buffer;
+    }
     if (cmd === "editor_list_fonts") return ["Arial", "Segoe UI"];
     if (cmd === "editor_render_text") return textFrame();
     if (cmd === "editor_cut_layer") {
@@ -196,8 +199,28 @@ test("crop sends one raw body plus a size/transform/clip header, and splits the 
   ]);
 });
 
+test("splitClips reads the response's keep/drop flags and splits only the kept clips", () => {
+  const clips = [
+    { x: 0, y: 0, width: 1, height: 1 },
+    { x: 3, y: 4, width: 1, height: 2 },
+  ];
+  const buf = new ArrayBuffer(8 + 8);
+  const view = new DataView(buf);
+  view.setUint32(0, 0, true); // dropped: every pixel inside the box is transparent
+  view.setUint32(4, 1, true);
+  new Uint8Array(buf, 8).set([5, 6, 7, 8, 9, 10, 11, 12]);
+  const out = api.splitClips(buf, clips);
+  expect(out[0]).toBeNull();
+  const kept = out[1]!;
+  expect([kept.width, kept.height, ...kept.pixels]).toEqual([1, 2, 5, 6, 7, 8, 9, 10, 11, 12]);
+});
+
 test("splitClips refuses a response whose size does not match the clips", () => {
-  expect(() => api.splitClips(new ArrayBuffer(3), [{ x: 0, y: 0, width: 1, height: 1 }])).toThrow("expected 4");
+  const kept = new ArrayBuffer(4);
+  new DataView(kept).setUint32(0, 1, true);
+  const clip = { x: 0, y: 0, width: 1, height: 1 };
+  expect(() => api.splitClips(kept, [clip])).toThrow("expected 4");
+  expect(() => api.splitClips(new ArrayBuffer(3), [clip])).toThrow("crop flags have 3 bytes");
 });
 
 test("merge and crop send text layers as text in the header, with no body bytes", async () => {
