@@ -416,8 +416,8 @@ every sticker in order with its emoji, to copy from. All of it is owner decision
   (soft red, with a fill now), toggled for the flash as before, and the ready **Upload…**. Text
   on the fills is at least 4.5:1 and the borders at least 3:1 on the page and panel, in both
   themes. On hover a toned button keeps its fill (`button.secondary:hover` would wipe the tint)
-  and darkens its border to the text colour. The other tinted controls move onto these later (§9,
-  Unified tone styles) (owner decisions 2026-11-25).
+  and darkens its border to the text colour. The other tinted controls move onto these later (§9 v2 plan,
+  shadcn/ui pass: the shared tone variants) (owner decisions 2026-11-25).
 - **Bulk import**: drag-drop multiple images onto a pack, or pick them with Add images. Same
   validity rule as drop-in — valid files added as-is in natural filename order ("sticker2"
   before "sticker10"), because Windows hands dropped files over in its own drag order, not
@@ -444,7 +444,7 @@ pass.
   exactly 8px from the controls on both sides; the fourth sits after the flexible spacer,
   8px from **Save…** on its right and 8px from the spacer on its left (owner decision
   2026-11-25). Undo, Redo, Save… and Close become icons and the seven renamed sizing and
-  crop controls stay text (owner decisions 2026-11-25; the icon pass is parked for v2 — §9).
+  crop controls stay text (owner decisions 2026-11-25; the icon pass is planned for v2 — §9 v2 plan).
   The row holds its one line from the window's 1100px minimum up (Window, below).
 - **The reserved message row** sits under the top row: fixed minimum height, never collapsed
   (§2; the CMT-290 canvas jump).
@@ -453,7 +453,7 @@ pass.
   (owner decision 2026-11-25 — Reset view sits in the status cluster, never floating at the
   canvas/panel boundary).
 - **A left tabbed tools panel (192px)**: browser-style tab leaves stuck on the panel's top
-  edge and protruding past it over the canvas until the icon pass (§9). The tabs:
+  edge and protruding past it over the canvas until the icon pass (§9 v2 plan). The tabs:
   - **Select**: Move, Rectangle, Lasso, Wand; the Tolerance and Feather fields; the contextual
     actions Cut and Paste.
   - **Paint**: Erase, Restore, Warp; the Brush field; Remove background, which stays
@@ -483,7 +483,7 @@ pass.
   (like Delete and Ctrl+Z today): **V** Move, **R** Rectangle, **L** Lasso, **W** Wand,
   **E** Erase, **Shift+E** Restore, **B** Warp, **O** Outline, **G** Glow, **T** activates the
   Text category. The bindings sit in a changeable data-driven table; a rebinding UI is parked
-  for v2 (§9). The existing modified shortcuts (Ctrl+Z/Y/X/V/S, Delete, Esc) are unchanged.
+  in the v3 lot (§9; owner, 2026-11-28). The existing modified shortcuts (Ctrl+Z/Y/X/V/S, Delete, Esc) are unchanged.
 - **A right panel (240px)** with tabs **Layers / Actions / Emoji**:
   - **Layers**: the layer list in a bounding box; the action buttons BELOW the box's bottom
     edge, a two-column grid — the left column changes the stack's size (a tall **Add image as
@@ -944,8 +944,9 @@ pass.
     general shaping (SPM-9's line, now explicit), and a joiner nothing consumes draws
     nothing. Limits (owner decision 2026-11-24): a custom emoji font the Rust parser
     cannot colour-paint (woff2, or CBDT/sbix/SVG-emoji bytes) still renders in the DOM
-    but the canvas falls back to the bundled Noto; woff2 decoding and bitmap blitting
-    are parked for v2. Since SPM-18 an optional outline (the text controls above)
+    but the canvas falls back to the bundled Noto; bitmap (CBDT/sbix) painting is
+    planned for v2 (§9 v2 plan, Emoji fonts), woff2 decoding is parked in the v3 lot, and
+    SVG-in-OpenType is rejected (§9 Rejected ideas; owner, 2026-11-27). Since SPM-18 an optional outline (the text controls above)
     strokes those glyph outlines BEHIND the fill — round joins, the width the
     reach beyond the ink in the layer's own px, the same reach the pixel Outline
     effect's width gives on an unscaled layer (the tool converts its document
@@ -1098,10 +1099,13 @@ pass.
 
 ## 8. Out of scope for v1 (future seams)
 
-- Bot API sync (model is shaped for it; Draft/Live and short-name lock anticipate it).
-- Custom emoji packs (100×100), animated .TGS, video .WEBM.
-- DB reconstruction from orphaned files.
-- Project files / version history; export/prep folders; scratch saves.
+The v1 seams were triaged for v2 on 2026-11-27 (`.scratch/v2-path/issues/04-future-seams.md`); none
+entered v2:
+
+- Bot API sync, custom emoji packs (100×100), video .WEBM, Editor project files / scratch
+  saves: the §9 v3 lot.
+- Sticker version history: the §9 v4 lot.
+- Animated .TGS, DB reconstruction from orphaned files, export/prep folders: §9 Rejected ideas.
 
 ## 9. Deferred decisions
 
@@ -1120,62 +1124,82 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
   time can give a messy outline, because the view lags the pointer slightly during the pan
   (owner, 2026-11-22: rare combination, not worth fixing now).
 
-### v2 parking lot (UX)
-- Emoji font library: the app keeps its own `fonts/` folder (inside the app-config
-  directory), copies a picked custom emoji font into it, and lists the copies as regular
-  entries in the Settings Emoji font dropdown (add/remove, pick-once-reuse-forever) — the
-  app's copy survives whatever happens to the original file, and the broken-font-at-boot
-  fallback becomes near-impossible to hit. Parked to keep v1's scope (owner, 2026-11-24:
-  raised during the SPM-17 Windows test; inverting SPM-17's store-the-path-not-a-copy
-  decision is the point). The owner expects much of the v2 list to slip to v3.
-- Emoji `.ttc` font files: Chromium's FontFace refuses whole TTC collections, but the
-  app's Rust read could unwrap the container (tiny `ttcf` header parse) and hand the
-  webview the emoji member (match "Emoji" in the name table, else the first) before the
-  engine sees the bytes — small, pure, testable; the inner font still must pass the engine
-  (parked next to the library idea, owner, 2026-11-24; the picker filter and the read
-  guard would gain `.ttc`).
-- Unified tone styles: tokens are central today, but each consumer re-composes them in its own
-  selector (`button.danger`, the `.banner` rule, the warn banners and flags, the reorder tiles,
-  the input `.warn` state, the message line). v2 moves every tinted control onto shared tone
-  classes (the `.tone-success` and `.tone-danger` of §5 are the start), so one edit propagates
-  app-wide (owner decision 2026-11-25).
-- Double-click shortcuts (e.g. double-click a sticker to open the Editor).
-- Right-click context menu mirroring the detail panel's commands.
-- Click-and-hold a sticker to activate Reorder mode.
-- Group-drag reorder (moving several stickers at once).
-- Trash/recovery area for deleted stickers.
-- Bulk emoji-set: rejected as unnecessary — not planned.
-- Editor: every edge of the selection box is grabbable for resizing, not just the corners.
-- Editor: custom canvas resizing (in v1 only Fit in, Cover and Long side change the canvas).
-- Editor: Crop could also drop a layer that crosses the box edge when its part inside the
-  box is fully transparent. In v1 such a layer is kept; only layers entirely outside the box
-  are discarded (owner, 2026-11-21: may revisit).
-- Editor: a manual text-to-image conversion button, so a text layer can be edited with pixel
-  tools (e.g. Cut) without merging it onto another layer first (owner, 2026-11-21). When it is
-  built it lives in the Text category, not the action grid — its subject is one text layer,
-  like Edit text; it changes neither the stack count nor the layer order, and it mirrors the
-  effects' Apply commit; the Rust rasterisation machinery already exists through Glow on text
-  and a Crop crossing a text layer (owner, 2026-11-25).
-- Editor: real clipboard for Cut/Copy: Ctrl+C copies the selected pixels (or the selected
-  layer) to the system clipboard as PNG, Ctrl+X does the same and leaves a transparent
-  hole, so stickers can be copied between sessions and apps (owner, 2026-11-21).
-- Editor: hold Shift while moving a layer to snap to whole pixels or to a grid. Note:
-  Shift+click already toggles a layer in or out of the selection, so a Shift-drag must
-  not also toggle it; and the Editor has no grid yet (owner, 2026-11-21).
-- Pack Manager: a button next to the Emoji String field that opens an emoji picker for easy
-  selection (owner, 2026-11-21).
-- Editor: layer locking, so a locked layer cannot be selected, moved or edited by accident
-  (owner, 2026-11-22).
-- Settings: Editor defaults (the tool settings a session starts with) configurable in the
-  Settings tab. In v1 Editor settings last only until the app closes and always start from
-  the defaults (owner, 2026-11-22).
-- Editor: mirror a layer along its vertical axis (flip it left ↔ right); its horizontal
-  axis too (flip top ↔ bottom) if that is cheap and easy once the first one is built
-  (owner, 2026-11-23).
-- Editor: remove a layer's excess transparency — crop the layer to its visible content,
-  the "crop to content" function of other graphics editors (owner, 2026-11-23).
-- **Editor icon pass** (SPM-15's deferred visual polish — a later iteration, undecided by
-  design; the owner's framing from the design rounds: icons are the last touch). Settled
+### v2 plan
+Triaged with the owner on 2026-11-27/28 in the Wayfinder map `.scratch/v2-path/map.md`. Each entry's
+decision and reasoning live in its map ticket; its work lives in the named Trekker epic and
+task. Order: React adoption, then the shadcn/ui pass, then the four UX epics (Pack Manager
+interactions, Editor tools and layers, Real clipboard, Emoji fonts), the Editor icon pass last
+(`.scratch/v2-path/issues/09-group-v2-survivors.md`). Four Rust-only tasks, marked **v1.1**, run alongside
+the React port and ship as v1.1.0 (SPM-73); v2.0.0 ships after the icon pass (SPM-74). When a
+task lands, its behaviour moves into the spec body (§2–§6) and its entry leaves this list.
+
+- **React adoption** (EPIC-4, SPM-41–52): the view layer moves to React 19 with today's look
+  kept: CSS byte-identical, hand-ported, Konva vanilla behind a ref, no react-konva. Plan:
+  `.scratch/v2-path/reactJS-implementation/plan.md`; ADR-0010; ticket `.scratch/v2-path/issues/08-look-and-feel.md`.
+- **shadcn/ui pass** (EPIC-5, SPM-53–56), folding in the former "UI rework on shadcn/ui"
+  (owner, 2026-11-27) and "Unified tone styles" (owner decision 2026-11-25) entries: real
+  shadcn/ui on Base UI and Tailwind v4 without Preflight; the app's own colour values in
+  shadcn's variables, every pair measured against 3:1; shadcn Dialog, Command and Tooltip
+  replace the imperative Dialog, Combobox and tooltips, with the §2 tooltip and dialog
+  contracts as exit criteria; every tinted control moves onto shared tone variants (the
+  `.tone-success` and `.tone-danger` of §5 are the start; today each consumer re-composes the
+  tokens in its own selector: `button.danger`, the `.banner` rule, the warn banners and flags,
+  the reorder tiles, the input `.warn` state, the message line), so one edit propagates
+  app-wide. The style (control heights, radius) is the owner's pick from a rendered sheet.
+  ADR-0010; tickets `.scratch/v2-path/issues/05-shadcn-fit.md`, `.scratch/v2-path/issues/08-look-and-feel.md`.
+- **Pack Manager interactions** (EPIC-6; ticket `.scratch/v2-path/issues/01-pack-manager-interactions.md`):
+  - Double-click a sticker tile to go straight to Edit, skipping the Edit / Replace… / Cancel
+    ask (the unsaved-changes dialog still applies) (SPM-57).
+  - A right-click menu, built as a reusable app-wide component: it mirrors the detail panel's
+    commands for one selected sticker and the aggregate panel's for several; right-clicking
+    outside the selection selects that tile first (SPM-57).
+  - Click-and-hold a tile (~500ms by default, adjustable in Settings) to start a reorder drag;
+    holding a selected tile drags the whole selection as one block (group-drag reorder). The
+    Reorder toggle stays, and in toggle mode a selected tile also drags the whole selection
+    (SPM-58).
+  - An emoji picker button next to the Emoji String field, drawing with the app's chosen
+    emoji font from bundled offline data (owner, 2026-11-21) (SPM-59).
+- **Editor tools and layers** (EPIC-7; ticket `.scratch/v2-path/issues/02-editor-tools-and-layers.md`):
+  - All eight selection-box handles resize, each keeping the aspect ratio and anchored on its
+    opposite point (SPM-61).
+  - Whole-pixel landing with no modifier key: moves, resizes and Rectangle selection corners
+    land on whole pixels (the whole-pixel half of the 2026-11-21 "Shift-drag snap" entry; its
+    grid half went to the v3 lot) (SPM-61).
+  - Custom canvas resize: type width × height, centre anchor, nothing scaled (SPM-62).
+  - **v1.1**: Crop also drops a layer that crosses the box edge when its part inside the box
+    is fully transparent (owner, 2026-11-21) (SPM-63).
+  - A text-to-image button in the Text category, not the action grid: its subject is one text
+    layer, like Edit text; it changes neither the stack count nor the layer order, and it
+    mirrors the effects' Apply commit (owner, 2026-11-21 and 2026-11-25) (SPM-60).
+  - Mirror a layer left ↔ right and top ↔ bottom, image layers only (SPM-60).
+  - Crop a layer to its visible content (owner, 2026-11-23) (SPM-60).
+  - Layer locking: a locked layer cannot be picked on the canvas, moved, painted or effected;
+    it stays selectable from the layer list; whole-image tools still affect it (SPM-64).
+  - An Editor right-click menu on the reusable menu component (SPM-65).
+  - Editor defaults in Settings: the full set of tool fields plus a "Reset Editor defaults"
+    button; each Editor session starts from them, and changes made inside the Editor never
+    write back (SPM-66).
+- **Real clipboard** (EPIC-8; tickets `.scratch/v2-path/issues/06-image-clipboard.md`,
+  `.scratch/v2-path/issues/07-real-clipboard.md`): **v1.1**: Rust clipboard commands on `arboard`, writing PNG
+  plus an alpha-carrying `CF_DIBV5` (SPM-67). Then (SPM-68): Ctrl+C copies the selected pixels
+  or layer(s) to the system clipboard; Ctrl+X becomes a standard cut that leaves a transparent
+  hole; Ctrl+V pastes the app's own last copy in place at full fidelity; the Paste button reads
+  through Rust; the in-app Cut button becomes **Lift to new layer** (Ctrl+Shift+J, the new
+  layer named "Lifted"); **Copy image** in the Pack Manager; an owner hand test of paste targets
+  on Windows before shipping.
+- **Emoji fonts** (EPIC-9; ticket `.scratch/v2-path/issues/03-emoji-fonts.md`):
+  - **v1.1**: the Rust text renderer paints bitmap (CBDT/CBLC and PNG sbix) emoji, so Editor
+    text layers draw a custom bitmap emoji font instead of falling back to Noto (SPM-69).
+  - **v1.1**: a custom emoji font over WebView2's 128 MiB web-font limit is refused with a
+    clear message naming that limit (today's cap is 256 MiB and the engine's refusal is opaque)
+    (SPM-70).
+  - The emoji font library: the app keeps its own `fonts/` folder in the app-config directory,
+    copies a picked custom emoji font into it and lists the copies as entries in the Settings
+    Emoji font dropdown (add/remove, pick once, reuse forever); today's stored path moves into
+    the library once. This reverses SPM-17's store-the-path-not-a-copy decision, which is the
+    point (owner, 2026-11-24) (SPM-71).
+- **Editor icon pass** (EPIC-10, SPM-72; last). SPM-15's deferred visual polish (the owner's
+  framing from the design rounds: icons are the last touch). Settled
   scope: the four session actions **Undo**, **Redo**, **Save…**, **Close** become icons in
   the top row (owner decision 2026-11-25, CMT-404); the seven renamed sizing and crop
   controls — Fit in 512, Cover 512, Long side 512, the free-resize cluster, Guide, Crop to
@@ -1185,9 +1209,9 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
   until then, CMT-407). The sizing trio's diagram icons — a square holding the image, a
   square overflowed by it, a plain image — are proposed but **UNDECIDED** until the owner
   sees them rendered at the icon pass (owner, 2026-11-25, CMT-414/415); the four session
-  icons should free roughly 50px of top-row headroom at the 1100px floor. New icons join
-  the existing inline set (`src/icons.ts`: 24×24 outline style, currentColor, rendered at
-  1.05em; the eyedropper is the one filled exception), and icon-only controls keep the §2
+  icons should free roughly 50px of top-row headroom at the 1100px floor. New icons come
+  from `lucide-react` (24×24 outline, currentColor, matching the existing inline set in
+  `src/icons.ts`, rendered at 1.05em; the eyedropper is the one filled exception), and icon-only controls keep the §2
   tooltip contract and a descriptive accessible name — the N1 blessing: the icon-only
   eyedropper's aria stays the description, never the bare tool name.
 
@@ -1207,7 +1231,18 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
   `file://wsl.localhost` pages stopped loading after the 2026-11-25 desktop update
   (CMT-419). Stop the server when the visual work ends.
 
+  Additions from the v2 triage (ticket `.scratch/v2-path/issues/08-look-and-feel.md`): the new
+  controls of Editor tools and layers (mirror, crop to content, text-to-image, lock, canvas
+  resize) join the pass; `lucide-react` replaces new inline icons, and the existing 11 icons
+  of `src/icons.ts` are ported as-is unless one clashes on the rendered sheet.
+
+### v2 parking lot (UX)
+Empty: every entry was triaged on 2026-11-27/28 into the v2 plan above, the v3 or v4 lot, or
+Rejected ideas (owner rule, CMT-667).
+
 ### v3 parking lot
+Entries dated 2026-11-27/28 came from the v2 triage; their reasoning lives in the map's tickets
+(`.scratch/v2-path/map.md`).
 - The mouse back button navigates back, at least from the Pack view to the Pack list (owner,
   2026-11-26; built once in SPM-26 and removed before it shipped - commit 28f8118 has the
   working version). Open questions: which screens it acts on (also back to the Pack view from
@@ -1222,10 +1257,67 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
 - Editor: arrows and shapes (owner, 2026-11-22).
 - Editor: text along a curve, e.g. with Konva's TextPath (owner, 2026-11-22).
 - Editor: colour filters (owner, 2026-11-22).
+- Pack Manager: a trash/recovery area for deleted stickers, through a "staging area" (or
+  "unassigned stickers") place where recovered stickers that don't go back to their original
+  pack could land (~2–3 sessions plus design; owner, 2026-11-27).
+- Editor: a grid with snapping: a grid overlay, its settings, and a modifier that does not
+  clash with Shift (Shift+click toggles a layer in or out of the selection) (~1–1.5; the grid
+  half of the 2026-11-21 Shift-drag snap entry; owner, 2026-11-27).
+- Editor: a Settings UI for rebinding the single-key tool shortcuts (§6; the bindings already
+  sit in a data-driven table) (SPM-15, CMT-400; owner, 2026-11-28).
+- Emoji fonts: woff2 custom fonts on the canvas (~0.5; does not serve the owner's font; owner,
+  2026-11-27).
+- Emoji fonts: auto-slim at import: for a CBDT font over 128 MiB, keep the largest strike that
+  fits and store that copy (~1). The owner's one such font is already slimmed by hand with
+  `.scratch/v2-path/assets/keep_strike.py`, so v2's clear over-limit message suffices (owner, 2026-11-27).
+- Bot API sync (~4–6; may slip to v4). The model is shaped for it (Draft/Live and the Short
+  Name lock anticipate it). Telegram rules found while costing it: a bot can manage only packs
+  it created, so packs made through @Stickers (every Live pack today) can never sync, and a
+  bot-created pack's Short Name must end in `_by_<botname>`, which changes the Short Name rules
+  and the Draft-to-Live step. It also needs bot-token storage, Rust HTTP calls, a schema change
+  recording each sticker's Telegram file id and sync state, a local-versus-remote diff, and
+  error/rate-limit handling (owner, 2026-11-27).
+- A manual sync to-do list for Live packs: changes made to a Live pack (e.g. moving stickers)
+  add the operations to perform in @Stickers to a to-do list, shown when the owner presses a
+  button to sync the pack by hand. A more viable goal than Bot API sync; its scope (which
+  changes are tracked, how items are ticked off) is decided when it is planned (owner's idea,
+  2026-11-27).
+- Custom emoji packs (100×100) (~2–3): a pack type on Pack, a schema migration, per-type size
+  rules and validation, an Editor target size (Thumbnail mode already produces 100×100),
+  per-type Upload list wording (owner, 2026-11-27).
+- Video .WEBM stickers (~3–4): import a video or GIF, trim, scale and encode (VP9, at most 3 s,
+  512 px, 256 KB, no audio) with a bundled ffmpeg (+~80 MB installer); no frame editing (owner,
+  2026-11-27).
+- Editor project files / scratch saves (~2): save an unfinished Editor session (layers, text,
+  effects) and resume it later; reverses §6's deliberate "no scratch/draft save location"
+  (owner, 2026-11-27).
+- A macOS port of the app (until now only §1's "Windows v1; macOS later" and ADR-0001; Linux
+  stays ADR-0001's "maybe") (owner, 2026-11-28).
 
 ### v4 parking lot
 - Editor: a "deep fry" tool: colour filters, grain, noise and the like in one go (owner,
   2026-11-22).
+- Sticker version history: keep earlier versions of a sticker's image to restore (~2–3 plus
+  storage growth). The owner is considering rejecting it, and parks it further down the line
+  for now (owner, 2026-11-27).
+
+### Rejected ideas
+Ideas the owner has ruled out, each with the reason and date (the 2026-11-27 rulings' reasoning
+lives in the map's tickets, `.scratch/v2-path/map.md`).
+- Pack Manager: bulk emoji-set: unnecessary (owner, by 2026-11-20).
+- Emoji fonts: `.ttc` emoji font support. The .ttc emoji font worth having is Apple's, whose
+  ligatures (skin tones, flags, keycaps, ZWJ sequences) live only in AAT `morx`, which
+  WebView2's sanitiser (OTS) drops and the canvas does not apply; converted .ttf builds with
+  GSUB cover it (owner, 2026-11-27).
+- Emoji fonts: SVG-in-OpenType emoji fonts on the canvas. COLR builds of the same artwork cover
+  it; not worth an SVG renderer in the text path (owner, 2026-11-27).
+- Animated .TGS stickers. Lottie vector animation needs a vector animation editor, a different
+  app from this raster editor (owner, 2026-11-27).
+- DB reconstruction from orphaned files. Back up the Library folder, which holds the database;
+  a rebuild would recover only packs (folder = Short Name) and order (ADR-0003 filenames), not
+  titles, emoji, status or the thumbnail: too little to be worth it (owner, 2026-11-27).
+- Export/prep folders. ADR-0003's order-encoded filenames already put Library files in pack
+  order for dragging into @Stickers, so no export step is needed (owner, 2026-11-27).
 
 ## 10. Draft work packages (filed as SPM-1 to SPM-12)
 
