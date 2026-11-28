@@ -27,10 +27,11 @@ A v2 plan: every entry of SPEC §9's v2 parking lot (UX), and every §8 future s
 - [Research: image clipboard in Tauri 2 on Windows](issues/06-image-clipboard.md): feasible with transparency; do it in Rust with arboard (PNG + CF_DIBV5), keep the webview paste event for Ctrl+V; needs a Windows paste-target hand test.
 - [React-adoption addendum](research/react-adoption-analysis.md) (sharpens ticket 05, feeds ticket 08): React alone ~8-10 sessions, shadcn/Tailwind on top ~5-6; models and CSS survive untouched; Konva stays vanilla; the sequencing call vs tickets 01/02 is part of ticket 08's verdict.
 - [Triage: Look and feel](issues/08-look-and-feel.md): v2, in order: React adoption (the reactJS-implementation plan), then a real shadcn/ui pass with tone styles folded in (replaces Dialog/Combobox/tooltips; app colours kept), then the UX items on shadcn components, then the icon pass last (lucide-react); ADR-0010 written in ticket 10.
+- [Group the v2 survivors into tasks and epics](issues/09-group-v2-survivors.md): seven v2 epics (~35 sessions): React adoption (S01-S12), shadcn/ui pass, Pack Manager interactions, Editor tools and layers, real clipboard, emoji fonts, icon pass last; four Rust/model-only tasks run alongside the React port and ship as v1.1; v2.0 after the icon pass; nothing moves to v3; new v3-lot entry: macOS port; open design calls stay with their tasks.
 
 ## Not yet specified
 
-- Triage may surface v2 items that need a design decision before they can be written as implementation tasks (e.g. how a right-click menu or trash area should look). Whether those become extra decision tickets here or are left to the implementation tasks gets settled once the survivors are known.
+- Nothing left: the open design calls stay with their implementation tasks (see Group the v2 survivors into tasks and epics).
 
 ## Out of scope
 
