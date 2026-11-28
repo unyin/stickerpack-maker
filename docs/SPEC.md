@@ -1174,6 +1174,11 @@ Known rough edges the owner has looked at and chosen not to fix for now (each wi
   (owner, 2026-11-23).
 - Editor: remove a layer's excess transparency — crop the layer to its visible content,
   the "crop to content" function of other graphics editors (owner, 2026-11-23).
+- UI rework on [shadcn/ui](https://ui.shadcn.com/) (owner, 2026-11-27). Note: shadcn/ui
+  is a React + Tailwind component collection (copied into the repo, not a dependency), and
+  the webview today is plain TypeScript with Konva and no UI framework, so adopting it means
+  bringing in React and Tailwind or using a community port (e.g. shadcn-svelte, shadcn-vue).
+  Overlaps with the unified tone styles and the Editor icon pass entries.
 - **Editor icon pass** (SPM-15's deferred visual polish — a later iteration, undecided by
   design; the owner's framing from the design rounds: icons are the last touch). Settled
   scope: the four session actions **Undo**, **Redo**, **Save…**, **Close** become icons in
