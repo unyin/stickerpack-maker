@@ -1,3 +1,5 @@
+/// The image clipboard's commands (SPM-67): arboard over the OS clipboard.
+mod clipboard_commands;
 mod commands;
 mod config;
 mod db;
@@ -11,6 +13,9 @@ mod emoji_property;
 mod pack_commands;
 /// The Editor's save command (SPM-10): editor pixel work + the Library core.
 mod save_commands;
+/// The image clipboard (SPM-67): frame parsing and `ImageData` conversion,
+/// Tauri-free so it is unit-tested like the editor code.
+pub mod clipboard;
 /// Editor pixel work (ADR-0005): Tauri-free, unit-tested; commands wrap it.
 pub mod editor;
 /// Library core (SPEC §3-4): data model, file operations, crash-safe
@@ -71,6 +76,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            clipboard_commands::clipboard_set_image,
+            clipboard_commands::clipboard_get_image,
             commands::get_app_state,
             commands::default_library_path,
             commands::create_library,

@@ -63,6 +63,11 @@ sha2 = "0.10"
 # The save encoder (SPM-10): PNG/WEBP save encoding (editor/encode.rs), via
 # libwebp compiled from vendored C and linked statically (no DLL to ship).
 webp = { version = "0.3", default-features = false }
+# The image clipboard (SPM-67): writing an RGBA image as the registered "PNG"
+# format plus an alpha-carrying CF_DIBV5, and reading a clipboard image back
+# for the Paste button. Its default `image-data` feature is what carries the
+# pixels; on Windows arboard writes both formats itself.
+arboard = "3.7"
 
 # Native file drag-out of the Upload list (SPM-21): CrabNebula's `drag`,
 # OLE DoDragDrop with a CF_HDROP file list on Windows (the v1 target). Not

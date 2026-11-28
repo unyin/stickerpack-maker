@@ -22,6 +22,12 @@ dragged straight out of the app or from the explorer.
 - **Tauri**: Rust core (files, library, SQLite) + web-frontend canvas editor.
 - Background removal runs offline via ONNX with a one-time model download. ONNX runs in Rust
   (`ort`, ONNX Runtime linked statically) with the ISNet general-use model (ADR-0006).
+- **Image clipboard** in Rust on `arboard` (SPM-67): an RGBA image crosses the Tauri boundary
+  as raw bytes (ADR-0005); the write command puts it on the system clipboard as the registered
+  PNG format plus an alpha-carrying `CF_DIBV5`, which WebView2, Telegram Desktop, GIMP and
+  Office all read; the read command (`get_image`) reads a clipboard image back for the Paste
+  button. The webview's paste event stays for Ctrl+V, because it also takes image files copied
+  in Explorer.
 - Difficult implementation choices get ADRs and detailed task breakdowns.
 - **UI conventions** (owner decisions 2026-11-21, 2026-11-22, 2026-11-25):
   - Every two-option confirmation in the app (deletes, Draft/Live, invalid import, creating
@@ -1182,13 +1188,12 @@ task lands, its behaviour moves into the spec body (§2–§6) and its entry lea
     button; each Editor session starts from them, and changes made inside the Editor never
     write back (SPM-66).
 - **Real clipboard** (EPIC-8; tickets `.scratch/v2-path/issues/06-image-clipboard.md`,
-  `.scratch/v2-path/issues/07-real-clipboard.md`): **v1.1**: Rust clipboard commands on `arboard`, writing PNG
-  plus an alpha-carrying `CF_DIBV5` (SPM-67). Then (SPM-68): Ctrl+C copies the selected pixels
-  or layer(s) to the system clipboard; Ctrl+X becomes a standard cut that leaves a transparent
+  `.scratch/v2-path/issues/07-real-clipboard.md`): Ctrl+C copies the selected pixels or
+  layer(s) to the system clipboard; Ctrl+X becomes a standard cut that leaves a transparent
   hole; Ctrl+V pastes the app's own last copy in place at full fidelity; the Paste button reads
   through Rust; the in-app Cut button becomes **Lift to new layer** (Ctrl+Shift+J, the new
-  layer named "Lifted"); **Copy image** in the Pack Manager; an owner hand test of paste targets
-  on Windows before shipping.
+  layer named "Lifted"); **Copy image** in the Pack Manager; an owner hand test of paste
+  targets on Windows before shipping (SPM-68).
 - **Emoji fonts** (EPIC-9; ticket `.scratch/v2-path/issues/03-emoji-fonts.md`):
   - **v1.1**: the Rust text renderer paints bitmap (CBDT/CBLC and PNG sbix) emoji, so Editor
     text layers draw a custom bitmap emoji font instead of falling back to Noto (SPM-69).
